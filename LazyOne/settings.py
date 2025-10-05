@@ -10,22 +10,26 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
 import firebase_admin
 from firebase_admin import credentials, firestore
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Load environment variables from .env file
+load_dotenv(BASE_DIR / '.env')
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-9755rcl^sg+)6z4%8n(4h7oq%$o+36mu35iv)*bgw+5su#a3z1'
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-9755rcl^sg+)6z4%8n(4h7oq%$o+36mu35iv)*bgw+5su#a3z1')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = []
 
@@ -61,10 +65,12 @@ TEMPLATES = [
         ,
         'APP_DIRS': True,
         'OPTIONS': {
-            'context_processors': [
+            'context_processors': [  # Add this line to provide key to all templates
+                'django.template.context_processors.debug',
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'basic.context_processors.firebase_keys', # Custom context processor
             ],
         },
     },
@@ -102,6 +108,12 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+# Custom Authentication Backend
+AUTHENTICATION_BACKENDS = [
+    'basic.backends.FirebaseBackend',  # Our custom Firebase backend
+    'django.contrib.auth.backends.ModelBackend', # Default Django backend
+]
+
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
@@ -125,10 +137,29 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# # Firebase settings
-# cred = credentials.Certificate("LazyOne/serviceAccountKey.json")
-# firebase_admin.initialize_app(cred)
-# db = firestore.client()
+# Firebase Admin SDK (for backend)
+FIREBASE_SERVICE_ACCOUNT_KEY_PATH = os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY_PATH')
+if FIREBASE_SERVICE_ACCOUNT_KEY_PATH:
+    if not firebase_admin._apps:
+        cred = credentials.Certificate(FIREBASE_SERVICE_ACCOUNT_KEY_PATH)
+        firebase_admin.initialize_app(cred)
+    db = firestore.client()
+else:
+    print("WARNING: Firebase Admin SDK credentials not found. Backend Firebase features will be disabled.")
+    db = None
+
+# Firebase Client-Side Config (for frontend)
+FIREBASE_API_KEY = os.getenv('FIREBASE_API_KEY')
+FIREBASE_AUTH_DOMAIN = os.getenv('FIREBASE_AUTH_DOMAIN')
+FIREBASE_PROJECT_ID = os.getenv('FIREBASE_PROJECT_ID')
+FIREBASE_STORAGE_BUCKET = os.getenv('FIREBASE_STORAGE_BUCKET')
+FIREBASE_MESSAGING_SENDER_ID = os.getenv('FIREBASE_MESSAGING_SENDER_ID')
+FIREBASE_APP_ID = os.getenv('FIREBASE_APP_ID')
+
+# Instagram OAuth Credentials
+INSTAGRAM_APP_ID = os.getenv('INSTAGRAM_APP_ID')
+INSTAGRAM_APP_SECRET = os.getenv('INSTAGRAM_APP_SECRET')
+
 
 # Media files (for user uploads)
 MEDIA_URL = '/media/'

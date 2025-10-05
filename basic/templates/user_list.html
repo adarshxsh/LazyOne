@@ -4,10 +4,17 @@
 
 {% block content %}
     <h2>Find Friends</h2>
+    <p>You are: {{ request.user.first_name }} {{ request.user.last_name }} ({{ request.user.username|cut:"@gmail.com" }})</p>
+    <hr>
     {% for profile in users %}
         <div>
-            <p>{{ profile.user.username }}</p>
-            <a href="{% url 'send_friend_request' profile.user.id %}"><button>Add Friend</button></a>
+            <p>{{ profile.user.first_name }} {{ profile.user.last_name }} ({{ profile.user.username|cut:"@gmail.com" }})</p>
+            <form action="{% url 'send_friend_request' profile.user.id %}" method="post">
+                {% csrf_token %}
+                <label for="closeness-{{ profile.user.id }}">Closeness:</label>
+                <input type="range" id="closeness-{{ profile.user.id }}" name="closeness" min="0" max="100" value="50">
+                <button type="submit">Add Friend</button>
+            </form>
             <hr>
         </div>
     {% empty %}

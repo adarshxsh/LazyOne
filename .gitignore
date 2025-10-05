@@ -1,0 +1,24 @@
+# Local environment variables
+.env
+
+# Firebase service account key
+serviceAccountKey.json
+
+# Django project files
+*.log
+*.pot
+*.pyc
+__pycache__/
+local_settings.py
+db.sqlite3
+
+# Media files
+/media/
+
+# Static files
+/static/
+
+# Virtual environment
+.venv/
+venv/
+ENV/

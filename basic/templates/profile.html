@@ -3,35 +3,128 @@
 {% block title %}Profile{% endblock %}
 
 {% block content %}
-    <h2>Profile</h2>
-
-    {% if profile.profile_picture %}
-        <img src="{{ profile.profile_picture.url }}" alt="Profile Picture" width="150" height="150" style="border-radius: 50%;">
-    {% endif %}
-
-    <form method="post" enctype="multipart/form-data">
+    <h2>Edit Your Profile</h2>
+    <form method="post">
         {% csrf_token %}
         <label for="first_name">First Name:</label><br>
-        <input type="text" id="first_name" name="first_name" value="{{ request.user.first_name }}"><br>
+        <input type="text" id="first_name" name="first_name" value="{{ profile.first_name }}"><br>
+
         <label for="last_name">Last Name:</label><br>
-        <input type="text" id="last_name" name="last_name" value="{{ request.user.last_name }}"><br>
-        <label for="bio">Description (Bio):</label><br>
+        <input type="text" id="last_name" name="last_name" value="{{ profile.last_name }}"><br>
+
+        <label for="bio">Bio:</label><br>
         <textarea id="bio" name="bio">{{ profile.bio }}</textarea><br>
+
         <label for="college">College:</label><br>
         <input type="text" id="college" name="college" value="{{ profile.college }}"><br>
+
         <label for="major">Major:</label><br>
         <input type="text" id="major" name="major" value="{{ profile.major }}"><br>
-        <label for="hostel">Hostel:</label><br>
-        <input type="text" id="hostel" name="hostel" value="{{ profile.hostel }}"><br>
-        <label for="profile_picture">Profile Picture:</label><br>
-        <input type="file" id="profile_picture" name="profile_picture"><br><br>
+
+        <label for="roll_no">Roll Number:</label><br>
+        <input type="text" id="roll_no" name="roll_no" value="{{ profile.roll_no }}"><br>
+
+        <label for="batch">Batch:</label><br>
+        <input type="number" id="batch" name="batch" value="{{ profile.batch }}"><br>
+
+        <label for="phone_number">Phone Number (with country code):</label><br>
+        <input type="text" id="phone_number" name="phone_number" value="{{ profile.phone_number }}" placeholder="+919876543210">
+        {% if profile.is_phone_verified %}
+            <span style="color: green;">✓ Verified</span>
+        {% else %}
+            <button type="button" id="verify-phone-button">Verify</button>
+        {% endif %}
+        <br>
+
+        <div id="recaptcha-container"></div>
+        <div id="phone-verification-code-group" style="display: none;">
+            <label for="phone-verification-code">Verification Code:</label><br>
+            <input type="text" id="phone-verification-code" placeholder="123456">
+            <button type="button" id="submit-verification-code">Submit Code</button>
+        </div>
+
+        <label for="instagram_username">Instagram Username:</label><br>
+        <input type="text" id="instagram_username" name="instagram_username" value="{{ profile.instagram_username }}" placeholder="your_insta_handle">
+        <br><br>
+
         <button type="submit">Update Profile</button>
     </form>
-    {% if messages %}
-        <ul>
-            {% for message in messages %}
-                <li>{{ message }}</li>
-            {% endfor %}
-        </ul>
-    {% endif %}
+
+<script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
+<script>
+    // Securely initialize Firebase from backend context
+    var firebaseConfig = {
+        apiKey: "{{ FIREBASE_API_KEY }}",
+        authDomain: "{{ FIREBASE_AUTH_DOMAIN }}",
+        projectId: "{{ FIREBASE_PROJECT_ID }}",
+        storageBucket: "{{ FIREBASE_STORAGE_BUCKET }}",
+        messagingSenderId: "{{ FIREBASE_MESSAGING_SENDER_ID }}",
+        appId: "{{ FIREBASE_APP_ID }}"
+    };
+    if (!firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+    } else {
+        firebase.app(); // if already initialized, use that one
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const verifyPhoneButton = document.getElementById('verify-phone-button');
+        if (verifyPhoneButton) {
+            window.recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptcha-container', {
+                'size': 'invisible'
+            });
+
+            verifyPhoneButton.addEventListener('click', () => {
+                const phoneNumber = document.getElementById('phone_number').value;
+                if (!phoneNumber) {
+                    alert('Please enter a phone number first.');
+                    return;
+                }
+
+                const appVerifier = window.recaptchaVerifier;
+                firebase.auth().signInWithPhoneNumber(phoneNumber, appVerifier)
+                    .then((confirmationResult) => {
+                        alert('Verification code sent to your phone!');
+                        window.confirmationResult = confirmationResult;
+                        document.getElementById('phone-verification-code-group').style.display = 'block';
+                    }).catch((error) => {
+                        alert('Error sending verification code: ' + error.message);
+                        appVerifier.render().then(widgetId => recaptcha.reset(widgetId));
+                    });
+            });
+
+            const submitCodeButton = document.getElementById('submit-verification-code');
+            submitCodeButton.addEventListener('click', () => {
+                const code = document.getElementById('phone-verification-code').value;
+                window.confirmationResult.confirm(code).then((result) => {
+                    // User signed in successfully.
+                    const user = result.user;
+                    // Get the token to send to our backend
+                    user.getIdToken().then(idToken => {
+                        // Send token to your backend to verify and update the database
+                        fetch('{% url "verify_phone_token" %}', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': '{{ csrf_token }}'
+                            },
+                            body: JSON.stringify({ token: idToken })
+                        }).then(response => response.json())
+                          .then(data => {
+                              if (data.success) {
+                                  alert('Phone number verified successfully!');
+                                  window.location.reload();
+                              } else {
+                                  alert('Backend verification failed: ' + data.error);
+                              }
+                          });
+                    });
+                }).catch((error) => {
+                    alert('Invalid verification code.');
+                });
+            });
+        }
+    });
+</script>
 {% endblock %}

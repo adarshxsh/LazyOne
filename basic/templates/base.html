@@ -5,13 +5,28 @@
 </head>
 <body>
     <nav>
-        <a href="{% url 'friends' %}">Your friends</a>
-        <a href="{% url 'user_list' %}">Find Friends</a>
-        <a href="{% url 'add_task' %}">Add work</a>
-        <a href="#">Reward</a>
+        <a href="{% url 'home' %}">Home</a>
+        <a href="{% url 'my_tasks' %}">My Tasks</a>
+        <a href="{% url 'add_task' %}">Add Task</a>
+        <a href="{% url 'user_list' %}">Close Friend</a>
+        <a href="{% url 'friends' %}">Friend</a>
         <a href="{% url 'profile' %}">Profile</a>
+        {% if user.is_authenticated %}
+            <a href="{% url 'logout' %}">Logout</a>
+        {% endif %}
     </nav>
     <hr>
+    {% if user.is_authenticated %}
+        <p>Your Reward Points: <strong>{{ request.user.userprofile.rewards }}</strong></p>
+        <hr>
+    {% endif %}
+    {% if messages %}
+        <ul>
+            {% for message in messages %}
+                <li>{{ message }}</li>
+            {% endfor %}
+        </ul>
+    {% endif %}
     {% block content %}
     {% endblock %}
 </body>

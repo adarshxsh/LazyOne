@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+
+{% block title %}My Tasks{% endblock %}
+
+{% block content %}
+    <h2>My Tasks</h2>
+
+    <h3>Tasks You've Posted</h3>
+    {% for task in posted_tasks %}
+        <div>
+            <h4>{{ task.title }}</h4>
+            <p>{{ task.description }}</p>
+            <p><b>Reward:</b> {{ task.reward }} points</p>
+            <p>
+                <b>Status:</b>
+                {% if task.is_completed %}
+                    Completed by {{ task.taken_by.username }}
+                {% elif task.is_taken %}
+                    In progress by {{ task.taken_by.username }}
+                    <a href="{% url 'complete_task' task.id %}"><button>Mark as Complete</button></a>
+                {% else %}
+                    Waiting for someone to take it
+                {% endif %}
+            </p>
+            <hr>
+        </div>
+    {% empty %}
+        <p>You haven't posted any tasks yet.</p>
+    {% endfor %}
+
+    <hr>
+
+    <h3>Tasks You've Taken</h3>
+    {% for task in taken_tasks %}
+        <div>
+            <h4>{{ task.title }}</h4>
+            <p>{{ task.description }}</p>
+            <p><b>Reward:</b> {{ task.reward }} points</p>
+            <p><i>Posted by: {{ task.posted_by.username }}</i></p>
+            <p>
+                <b>Status:</b>
+                {% if task.is_completed %}
+                    Completed
+                {% else %}
+                    In Progress
+                {% endif %}
+            </p>
+            <hr>
+        </div>
+    {% empty %}
+        <p>You haven't taken any tasks yet.</p>
+    {% endfor %}
+
+{% endblock %}

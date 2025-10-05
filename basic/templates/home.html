@@ -3,23 +3,238 @@
 {% block title %}Home{% endblock %}
 
 {% block content %}
-    <h1>Welcome to the Home Page</h1>
+<style>
+    #friend-circle-container {
+        position: relative;
+        width: 600px;
+        height: 600px;
+        margin: 50px auto;
+        border: 2px solid #ccc;
+        border-radius: 50%;
+    }
+    .circle-orbit {
+        position: absolute;
+        border: 1px dashed #aaa;
+        border-radius: 50%;
+        top: 50%;
+        left: 50%;
+    }
+    .user-node {
+        position: absolute;
+        width: 60px;
+        height: 60px;
+        background-color: #a2c4c9;
+        color: white;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        font-size: 10px;
+        cursor: pointer;
+        transition: transform 0.2s;
+        overflow: hidden;
+        padding: 5px;
+        text-decoration: none;
+    }
+    .user-node:hover {
+        transform: scale(1.1);
+        z-index: 1000;
+    }
+    .user-node.center-user {
+        width: 80px;
+        height: 80px;
+        background-color: #4a7c59;
+        font-size: 14px;
+        z-index: 100;
+    }
+    /* Modal Styles */
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 1001;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        overflow: auto;
+        background-color: rgba(0,0,0,0.4);
+    }
+    .modal-content {
+        background-color: #fefefe;
+        margin: 15% auto;
+        padding: 20px;
+        border: 1px solid #888;
+        width: 80%;
+        max-width: 400px;
+        text-align: center;
+        border-radius: 10px;
+    }
+    .close-button {
+        color: #aaa;
+        float: right;
+        font-size: 28px;
+        font-weight: bold;
+        cursor: pointer;
+    }
+    .chat-button {
+        display: block;
+        width: 80%;
+        padding: 10px;
+        margin: 10px auto;
+        border: none;
+        border-radius: 5px;
+        color: white;
+        text-decoration: none;
+    }
+    .whatsapp-button { background-color: #25D366; }
+    .instagram-button { background-color: #E4405F; }
+</style>
 
-    <h2>Available Tasks</h2>
-    {% for task in tasks %}
-        <div>
-            <h3>{{ task.title }}</h3>
-            <p>{{ task.description }}</p>
-            <p><b>Incentive:</b> {{ task.incentive }}</p>
-            <p><i>Posted by: {{ task.posted_by.username }}</i></p>
-            {% if not task.is_taken %}
-                <a href="{% url 'take_task' task.id %}"><button>Take Task</button></a>
-            {% else %}
-                <p><b>Task is taken.</b></p>
-            {% endif %}
-            <hr>
-        </div>
-    {% empty %}
-        <p>No tasks available at the moment.</p>
-    {% endfor %}
+<h1>Your Social Circle</h1>
+
+<div id="friend-circle-container">
+    <!-- Orbits and user nodes will be injected here by JavaScript -->
+</div>
+
+<!-- The Modal -->
+<div id="chat-modal" class="modal">
+  <div class="modal-content">
+    <span class="close-button">&times;</span>
+    <h3 id="modal-username"></h3>
+    <div id="modal-buttons"></div>
+  </div>
+</div>
+
+<hr>
+
+<h2>Available Tasks</h2>
+{% for task in tasks %}
+    <div>
+        <h3>{{ task.title }}</h3>
+        <p>{{ task.description }}</p>
+        <p><b>Reward:</b> {{ task.reward }} points</p>
+        <p><i>Posted by: {{ task.posted_by.username }}</i></p>
+        <a href="{% url 'take_task' task.id %}"><button>Take Task</button></a>
+        <hr>
+    </div>
+{% empty %}
+    <p>No tasks available at the moment.</p>
+{% endfor %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const container = document.getElementById('friend-circle-container');
+    const userNodesData = JSON.parse('{{ user_nodes_json|escapejs }}');
+    const currentUser = {
+        id: {{ request.user.id }},
+        username: '{{ request.user.username }}',
+        closeness: 101 // Center
+    };
+
+    const modal = document.getElementById('chat-modal');
+    const modalUsername = document.getElementById('modal-username');
+    const modalButtons = document.getElementById('modal-buttons');
+    const closeButton = document.querySelector('.close-button');
+
+    closeButton.onclick = () => { modal.style.display = "none"; };
+    window.onclick = (event) => {
+        if (event.target == modal) {
+            modal.style.display = "none";
+        }
+    };
+
+    const circles = {
+        c1: { radius: 100, nodes: [], orbitSize: 200 },
+        c2: { radius: 175, nodes: [], orbitSize: 350 },
+        c3: { radius: 250, nodes: [], orbitSize: 500 },
+        c4: { radius: 300, nodes: [], orbitSize: 600 }
+    };
+
+    for (const key in circles) {
+        const orbit = document.createElement('div');
+        orbit.className = 'circle-orbit';
+        orbit.style.width = `${circles[key].orbitSize}px`;
+        orbit.style.height = `${circles[key].orbitSize}px`;
+        orbit.style.transform = `translate(-50%, -50%)`;
+        container.appendChild(orbit);
+    }
+
+    userNodesData.forEach(node => {
+        if (node.closeness > 75) circles.c1.nodes.push(node);
+        else if (node.closeness > 50) circles.c2.nodes.push(node);
+        else if (node.closeness > 25) circles.c3.nodes.push(node);
+        else if (node.closeness >= 0) circles.c4.nodes.push(node);
+    });
+
+    const placeNodes = (nodes, radius) => {
+        const angleStep = nodes.length > 1 ? (2 * Math.PI) / nodes.length : 0;
+        nodes.forEach((node, index) => {
+            const angle = index * angleStep;
+            const x = container.offsetWidth / 2 + radius * Math.cos(angle) - 30;
+            const y = container.offsetHeight / 2 + radius * Math.sin(angle) - 30;
+
+            const nodeElement = document.createElement('a');
+            nodeElement.className = 'user-node';
+            nodeElement.href = '#';
+            nodeElement.style.left = `${x}px`;
+            nodeElement.style.top = `${y}px`;
+            nodeElement.textContent = node.username.split('@')[0];
+            nodeElement.title = `${node.username} (Closeness: ${node.closeness})`;
+
+            nodeElement.addEventListener('click', (e) => {
+                e.preventDefault();
+                modalUsername.textContent = node.username;
+                modalButtons.innerHTML = ''; // Clear previous buttons
+
+                let hasContact = false;
+                // --- UPDATED LOGIC HERE ---
+                if (node.phone && node.is_phone_verified) {
+                    hasContact = true;
+                    const waButton = document.createElement('a');
+                    waButton.href = `https://wa.me/${node.phone}`;
+                    waButton.target = '_blank';
+                    waButton.className = 'chat-button whatsapp-button';
+                    waButton.textContent = 'Chat on WhatsApp (Verified)';
+                    modalButtons.appendChild(waButton);
+                }
+                if (node.instagram) {
+                    hasContact = true;
+                    const igButton = document.createElement('a');
+                    igButton.href = `https://ig.me/m/${node.instagram}`;
+                    igButton.target = '_blank';
+                    igButton.className = 'chat-button instagram-button';
+                    igButton.textContent = 'Chat on Instagram';
+                    modalButtons.appendChild(igButton);
+                }
+
+                if (!hasContact) {
+                    modalButtons.innerHTML = '<p>This user has not provided any verified contact information.</p>';
+                }
+
+                modal.style.display = "block";
+            });
+
+            container.appendChild(nodeElement);
+        });
+    };
+
+    const centerNode = document.createElement('a');
+    centerNode.className = 'user-node center-user';
+    centerNode.href = `{% url 'profile' %}`;
+    centerNode.style.left = `50%`;
+    centerNode.style.top = `50%`;
+    centerNode.style.transform = `translate(-50%, -50%)`;
+    centerNode.textContent = currentUser.username.split('@')[0];
+    centerNode.title = 'Your Profile';
+    container.appendChild(centerNode);
+
+    for (const key in circles) {
+        if (circles[key].nodes.length > 0) {
+            placeNodes(circles[key].nodes, circles[key].radius);
+        }
+    }
+});
+</script>
+
 {% endblock %}

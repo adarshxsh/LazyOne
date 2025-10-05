@@ -4,9 +4,9 @@
 
 {% block content %}
     <h2>Your Friends</h2>
-    {% for friend in friends %}
+    {% for friendship in friendships %}
         <div>
-            <p>{{ friend.user.username }}</p>
+            <p>{{ friendship.to_user.user.username }} (Closeness: {{ friendship.closeness }})</p>
             <hr>
         </div>
     {% empty %}
@@ -26,4 +26,23 @@
     {% empty %}
         <p>You have no new friend requests.</p>
     {% endfor %}
+
+    <hr>
+
+    <h2>Find New Friends</h2>
+    {% for profile in other_users %}
+        <div>
+            <p>{{ profile.user.first_name }} {{ profile.user.last_name }} ({{ profile.user.username|cut:"@gmail.com" }})</p>
+            <form action="{% url 'send_friend_request' profile.user.id %}" method="post">
+                {% csrf_token %}
+                <label for="closeness-{{ profile.user.id }}">Closeness:</label>
+                <input type="range" id="closeness-{{ profile.user.id }}" name="closeness" min="0" max="100" value="50">
+                <button type="submit">Add Friend</button>
+            </form>
+            <hr>
+        </div>
+    {% empty %}
+        <p>No new users to add as friends right now.</p>
+    {% endfor %}
+
 {% endblock %}
