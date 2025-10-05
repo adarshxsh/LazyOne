@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+
+{% block title %}Profile{% endblock %}
+
+{% block content %}
+    <h2>Profile</h2>
+    <form method="post">
+        {% csrf_token %}
+        <label for="college">College:</label><br>
+        <input type="text" id="college" name="college" value="{{ profile.college }}"><br>
+        <label for="major">Major:</label><br>
+        <input type="text" id="major" name="major" value="{{ profile.major }}"><br><br>
+        <button type="submit">Update Profile</button>
+    </form>
+    {% if messages %}
+        <ul>
+            {% for message in messages %}
+                <li>{{ message }}</li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+{% endblock %}

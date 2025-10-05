@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+
+{% block title %}Find Friends{% endblock %}
+
+{% block content %}
+    <h2>Find Friends</h2>
+    {% for profile in users %}
+        <div>
+            <p>{{ profile.user.username }}</p>
+            <a href="{% url 'send_friend_request' profile.user.id %}"><button>Add Friend</button></a>
+            <hr>
+        </div>
+    {% empty %}
+        <p>No other users found.</p>
+    {% endfor %}
+{% endblock %}

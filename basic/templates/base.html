@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{% block title %}My App{% endblock %}</title>
+</head>
+<body>
+    <nav>
+        <a href="{% url 'friends' %}">Your friends</a>
+        <a href="{% url 'user_list' %}">Find Friends</a>
+        <a href="{% url 'add_task' %}">Add work</a>
+        <a href="#">Reward</a>
+        <a href="{% url 'profile' %}">Profile</a>
+    </nav>
+    <hr>
+    {% block content %}
+    {% endblock %}
+</body>
+</html>

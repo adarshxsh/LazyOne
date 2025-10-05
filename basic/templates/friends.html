@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+
+{% block title %}Your Friends{% endblock %}
+
+{% block content %}
+    <h2>Your Friends</h2>
+    {% for friend in friends %}
+        <div>
+            <p>{{ friend.user.username }}</p>
+            <hr>
+        </div>
+    {% empty %}
+        <p>You have no friends yet.</p>
+    {% endfor %}
+
+    <hr>
+
+    <h2>Friend Requests</h2>
+    {% for request in friend_requests %}
+        <div>
+            <p>{{ request.from_user.username }} wants to be your friend.</p>
+            <a href="{% url 'accept_friend_request' request.id %}"><button>Accept</button></a>
+            <a href="{% url 'decline_friend_request' request.id %}"><button>Decline</button></a>
+            <hr>
+        </div>
+    {% empty %}
+        <p>You have no new friend requests.</p>
+    {% endfor %}
+{% endblock %}

@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+
+{% block title %}Home{% endblock %}
+
+{% block content %}
+    <h1>Welcome to the Home Page</h1>
+
+    <h2>Available Tasks</h2>
+    {% for task in tasks %}
+        <div>
+            <h3>{{ task.title }}</h3>
+            <p>{{ task.description }}</p>
+            <p><b>Incentive:</b> {{ task.incentive }}</p>
+            <p><i>Posted by: {{ task.posted_by.username }}</i></p>
+            {% if not task.is_taken %}
+                <a href="{% url 'take_task' task.id %}"><button>Take Task</button></a>
+            {% else %}
+                <p><b>Task is taken.</b></p>
+            {% endif %}
+            <hr>
+        </div>
+    {% empty %}
+        <p>No tasks available at the moment.</p>
+    {% endfor %}
+{% endblock %}
