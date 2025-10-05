@@ -68,6 +68,14 @@
             <p class="text-gray-600">Manage your personal information</p>
         </div>
 
+        <!-- Success Message -->
+        <div id="successMessage" class="hidden bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded-lg mb-6 message-success">
+            <div class="flex items-center">
+                <span class="mr-2">✅</span>
+                Profile updated successfully!
+            </div>
+        </div>
+
         <!-- Profile Card -->
         <div class="bg-white rounded-2xl shadow-xl overflow-hidden">
             <!-- Profile Header -->
@@ -82,8 +90,16 @@
                         <span class="text-4xl text-gray-600">👤</span>
                     </div>
                 </div>
-                <h2 class="text-2xl font-bold text-white mt-4">John Doe</h2>
-                <p class="text-purple-100">Computer Science Student</p>
+                <h2 id="displayName" class="text-2xl font-bold text-white mt-4">John Doe</h2>
+                <p id="displayTitle" class="text-purple-100">Sunrise Hostel</p>
+                
+                <!-- Profile Picture Upload -->
+                <div class="mt-4">
+                    <label class="file-input-wrapper">
+                        <input type="file" id="profilePictureInput" accept="image/*">
+                        📷 Change Photo
+                    </label>
+                </div>
             </div>
 
             <!-- Form Section -->
@@ -99,7 +115,8 @@
                                    id="first_name" 
                                    name="first_name" 
                                    value="John"
-                                   class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200">
+                                   class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"
+                                   required>
                         </div>
 
                         <!-- Last Name -->
@@ -111,146 +128,251 @@
                                    id="last_name" 
                                    name="last_name" 
                                    value="Doe"
-                                   class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200">
+                                   class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"
+                                   required>
                         </div>
+                    </div>
+
+                    <!-- Email -->
+                    <div class="form-group">
+                        <label for="email" class="block text-sm font-semibold text-gray-700 mb-2">
+                            Email Address
+                        </label>
+                        <input type="email" 
+                               id="email" 
+                               name="email" 
+                               value="john.doe@example.com"
+                               class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"
+                               required>
+                    </div>
+
+                    <!-- Phone -->
+                    <div class="form-group">
+                        <label for="phone" class="block text-sm font-semibold text-gray-700 mb-2">
+                            Phone Number
+                        </label>
+                        <input type="tel" 
+                               id="phone" 
+                               name="phone" 
+                               value="+1 (555) 123-4567"
+                               class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors">
+                    </div>
+
+                    <!-- Roll Number and Room Number -->
+                    <div class="grid md:grid-cols-2 gap-6">
+                        <div class="form-group">
+                            <label for="roll_no" class="block text-sm font-semibold text-gray-700 mb-2">
+                                Roll Number
+                            </label>
+                            <input type="text" 
+                                   id="roll_no" 
+                                   name="roll_no" 
+                                   value="CS2024001"
+                                   class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="room_no" class="block text-sm font-semibold text-gray-700 mb-2">
+                                Room Number
+                            </label>
+                            <input type="text" 
+                                   id="room_no" 
+                                   name="room_no" 
+                                   value="A-204"
+                                   class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors">
+                        </div>
+                    </div>
+
+                    <!-- Hostel Name -->
+                    <div class="form-group">
+                        <label for="hostel_name" class="block text-sm font-semibold text-gray-700 mb-2">
+                            Hostel Name
+                        </label>
+                        <input type="text" 
+                               id="hostel_name" 
+                               name="hostel_name" 
+                               value="Sunrise Hostel"
+                               class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors">
                     </div>
 
                     <!-- Bio -->
                     <div class="form-group">
                         <label for="bio" class="block text-sm font-semibold text-gray-700 mb-2">
-                            Description (Bio)
+                            Bio
                         </label>
                         <textarea id="bio" 
                                   name="bio" 
                                   rows="4"
-                                  placeholder="Tell us about yourself..."
-                                  class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 resize-none">Passionate computer science student with interests in web development and artificial intelligence. Always eager to learn new technologies and work on innovative projects.</textarea>
+                                  class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors resize-none"
+                                  placeholder="Tell us about yourself...">Passionate computer science student with a love for web development and problem-solving. Always eager to learn new technologies and work on exciting projects.</textarea>
                     </div>
 
-                    <div class="grid md:grid-cols-2 gap-6">
-                        <!-- College -->
-                        <div class="form-group">
-                            <label for="college" class="block text-sm font-semibold text-gray-700 mb-2">
-                                College
-                            </label>
-                            <input type="text" 
-                                   id="college" 
-                                   name="college" 
-                                   value="Tech University"
-                                   class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200">
-                        </div>
 
-                        <!-- Major -->
-                        <div class="form-group">
-                            <label for="major" class="block text-sm font-semibold text-gray-700 mb-2">
-                                Major
-                            </label>
-                            <input type="text" 
-                                   id="major" 
-                                   name="major" 
-                                   value="Computer Science"
-                                   class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200">
-                        </div>
-                    </div>
 
-                    <!-- Hostel -->
-                    <div class="form-group">
-                        <label for="hostel" class="block text-sm font-semibold text-gray-700 mb-2">
-                            Hostel
-                        </label>
-                        <input type="text" 
-                               id="hostel" 
-                               name="hostel" 
-                               value="North Campus Hostel A"
-                               class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200">
-                    </div>
-
-                    <!-- Profile Picture Upload -->
-                    <div class="form-group">
-                        <label class="block text-sm font-semibold text-gray-700 mb-2">
-                            Profile Picture
-                        </label>
-                        <div class="flex items-center space-x-4">
-                            <label for="profile_picture" class="file-input-wrapper">
-                                <span>📷 Choose Photo</span>
-                                <input type="file" id="profile_picture" name="profile_picture" accept="image/*">
-                            </label>
-                            <span id="fileName" class="text-sm text-gray-500">No file chosen</span>
-                        </div>
-                    </div>
-
-                    <!-- Submit Button -->
-                    <div class="pt-6">
+                    <!-- Action Buttons -->
+                    <div class="flex flex-col sm:flex-row gap-4 pt-6">
                         <button type="submit" 
-                                class="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold py-4 px-6 rounded-lg hover:from-purple-700 hover:to-blue-700 transform hover:scale-105 transition-all duration-200 shadow-lg">
-                            ✨ Update Profile
+                                class="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 text-white py-3 px-6 rounded-lg font-semibold hover:from-purple-700 hover:to-blue-700 transform hover:scale-105 transition-all duration-200 shadow-lg">
+                            💾 Save Changes
+                        </button>
+                        
+                        <button type="button" 
+                                id="resetBtn"
+                                class="flex-1 bg-gray-500 text-white py-3 px-6 rounded-lg font-semibold hover:bg-gray-600 transform hover:scale-105 transition-all duration-200 shadow-lg">
+                            🔄 Reset
                         </button>
                     </div>
                 </form>
+            </div>
+        </div>
 
-                <!-- Messages -->
-                <div id="messages" class="mt-6"></div>
+        <!-- Additional Info Cards -->
+        <div class="grid md:grid-cols-2 gap-6 mt-8">
+            <!-- Account Stats -->
+            <div class="bg-white rounded-xl shadow-lg p-6">
+                <h3 class="text-lg font-semibold text-gray-800 mb-4">📊 Account Stats</h3>
+                <div class="space-y-3">
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">Member since:</span>
+                        <span class="font-medium">January 2024</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">Profile views:</span>
+                        <span class="font-medium">1,247</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">Last updated:</span>
+                        <span class="font-medium" id="lastUpdated">Never</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="bg-white rounded-xl shadow-lg p-6">
+                <h3 class="text-lg font-semibold text-gray-800 mb-4">⚡ Quick Actions</h3>
+                <div class="space-y-3">
+                    <button class="w-full text-left px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors">
+                        🔒 Change Password
+                    </button>
+                    <button class="w-full text-left px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors">
+                        🔔 Notification Settings
+                    </button>
+                    <button class="w-full text-left px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors">
+                        📱 Privacy Settings
+                    </button>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
-        // File input handling
-        document.getElementById('profile_picture').addEventListener('change', function(e) {
-            const fileName = e.target.files[0] ? e.target.files[0].name : 'No file chosen';
-            document.getElementById('fileName').textContent = fileName;
-            
-            // Preview image
-            if (e.target.files[0]) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    const profileImage = document.getElementById('profileImage');
-                    const defaultAvatar = document.getElementById('defaultAvatar');
-                    profileImage.src = e.target.result;
-                    profileImage.style.display = 'block';
-                    defaultAvatar.style.display = 'none';
-                };
-                reader.readAsDataURL(e.target.files[0]);
-            }
-        });
+        // Profile form functionality
+        const profileForm = document.getElementById('profileForm');
+        const successMessage = document.getElementById('successMessage');
+        const displayName = document.getElementById('displayName');
+        const displayTitle = document.getElementById('displayTitle');
+        const lastUpdated = document.getElementById('lastUpdated');
+        const resetBtn = document.getElementById('resetBtn');
+        const profilePictureInput = document.getElementById('profilePictureInput');
+        const profileImage = document.getElementById('profileImage');
+        const defaultAvatar = document.getElementById('defaultAvatar');
 
-        // Form submission
-        document.getElementById('profileForm').addEventListener('submit', function(e) {
+        // Store original values for reset functionality
+        const originalValues = {
+            first_name: 'John',
+            last_name: 'Doe',
+            email: 'john.doe@example.com',
+            phone: '+1 (555) 123-4567',
+            roll_no: 'CS2024001',
+            room_no: 'A-204',
+            hostel_name: 'Sunrise Hostel',
+            bio: 'Passionate computer science student with a love for web development and problem-solving. Always eager to learn new technologies and work on exciting projects.'
+        };
+
+        // Handle form submission
+        profileForm.addEventListener('submit', function(e) {
             e.preventDefault();
             
+            // Get form data
+            const formData = new FormData(profileForm);
+            const firstName = formData.get('first_name');
+            const lastName = formData.get('last_name');
+            const hostelName = formData.get('hostel_name');
+            
+            // Update display elements
+            displayName.textContent = `${firstName} ${lastName}`;
+            displayTitle.textContent = hostelName || 'No hostel specified';
+            
+            // Update last updated time
+            const now = new Date();
+            lastUpdated.textContent = now.toLocaleDateString() + ' at ' + now.toLocaleTimeString();
+            
             // Show success message
-            const messagesDiv = document.getElementById('messages');
-            messagesDiv.innerHTML = `
-                <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded-lg message-success">
-                    <div class="flex items-center">
-                        <span class="mr-2">✅</span>
-                        <span>Profile updated successfully!</span>
-                    </div>
-                </div>
-            `;
+            successMessage.classList.remove('hidden');
             
-            // Update header with form data
-            const firstName = document.getElementById('first_name').value;
-            const lastName = document.getElementById('last_name').value;
-            const major = document.getElementById('major').value;
-            
-            document.querySelector('.bg-gradient-to-r h2').textContent = `${firstName} ${lastName}`;
-            document.querySelector('.text-purple-100').textContent = `${major} Student`;
+            // Hide success message after 3 seconds
+            setTimeout(() => {
+                successMessage.classList.add('hidden');
+            }, 3000);
             
             // Scroll to top to show success message
             window.scrollTo({ top: 0, behavior: 'smooth' });
         });
 
-        // Input animations
-        document.querySelectorAll('input, textarea').forEach(input => {
-            input.addEventListener('focus', function() {
-                this.parentElement.classList.add('transform', 'scale-105');
+        // Handle reset button
+        resetBtn.addEventListener('click', function() {
+            if (confirm('Are you sure you want to reset all changes? This will restore the original values.')) {
+                // Reset form fields to original values
+                Object.keys(originalValues).forEach(key => {
+                    const field = document.getElementById(key);
+                    if (field) {
+                        field.value = originalValues[key];
+                    }
+                });
+                
+                // Reset display elements
+                displayName.textContent = `${originalValues.first_name} ${originalValues.last_name}`;
+                displayTitle.textContent = originalValues.hostel_name;
+                
+                // Reset profile image
+                profileImage.src = 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&h=150&fit=crop&crop=face';
+                profileImage.style.display = 'block';
+                defaultAvatar.style.display = 'none';
+            }
+        });
+
+        // Handle profile picture upload
+        profilePictureInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    profileImage.src = e.target.result;
+                    profileImage.style.display = 'block';
+                    defaultAvatar.style.display = 'none';
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // Handle quick action buttons
+        document.querySelectorAll('[class*="Quick Actions"] button').forEach(button => {
+            button.addEventListener('click', function() {
+                const action = this.textContent.trim();
+                alert(`${action} feature would be implemented here in a real application.`);
+            });
+        });
+
+        // Add smooth focus transitions
+        document.querySelectorAll('input, textarea, select').forEach(field => {
+            field.addEventListener('focus', function() {
+                this.parentElement.classList.add('focused');
             });
             
-            input.addEventListener('blur', function() {
-                this.parentElement.classList.remove('transform', 'scale-105');
+            field.addEventListener('blur', function() {
+                this.parentElement.classList.remove('focused');
             });
         });
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'989d7eb30490a7ce',t:'MTc1OTY3MzM0Ny4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'989da6c76014a7ce',t:'MTc1OTY3NDk4OS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
