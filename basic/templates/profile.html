@@ -4,12 +4,27 @@
 
 {% block content %}
     <h2>Profile</h2>
-    <form method="post">
+
+    {% if profile.profile_picture %}
+        <img src="{{ profile.profile_picture.url }}" alt="Profile Picture" width="150" height="150" style="border-radius: 50%;">
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data">
         {% csrf_token %}
+        <label for="first_name">First Name:</label><br>
+        <input type="text" id="first_name" name="first_name" value="{{ request.user.first_name }}"><br>
+        <label for="last_name">Last Name:</label><br>
+        <input type="text" id="last_name" name="last_name" value="{{ request.user.last_name }}"><br>
+        <label for="bio">Description (Bio):</label><br>
+        <textarea id="bio" name="bio">{{ profile.bio }}</textarea><br>
         <label for="college">College:</label><br>
         <input type="text" id="college" name="college" value="{{ profile.college }}"><br>
         <label for="major">Major:</label><br>
-        <input type="text" id="major" name="major" value="{{ profile.major }}"><br><br>
+        <input type="text" id="major" name="major" value="{{ profile.major }}"><br>
+        <label for="hostel">Hostel:</label><br>
+        <input type="text" id="hostel" name="hostel" value="{{ profile.hostel }}"><br>
+        <label for="profile_picture">Profile Picture:</label><br>
+        <input type="file" id="profile_picture" name="profile_picture"><br><br>
         <button type="submit">Update Profile</button>
     </form>
     {% if messages %}

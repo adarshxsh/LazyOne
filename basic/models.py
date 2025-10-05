@@ -4,8 +4,14 @@ from django.contrib.auth.models import User
 # Create your models here.
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
+    bio = models.CharField(max_length=300,blank=True)
+    first_name = models.CharField(max_length=50, blank=True)
+    last_name = models.CharField(max_length=50, blank=True)
+    # profile_picture = models.ImageField(upload_to='profile_pictures/', blank=True, null=True)
     college = models.CharField(max_length=100, blank=True)
-    rollNo = models.CharField(max_length=100, blank=True)
+    major = models.CharField(max_length=100, blank=True)
+    hostel = models.CharField(max_length=100, blank=True)
+    roll_no = models.CharField(max_length=100, blank=True)
     batch = models.IntegerField(default=2029)
     friends = models.ManyToManyField('self', blank=True)
 

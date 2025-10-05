@@ -61,8 +61,19 @@ def register_view(request):
 def profile_view(request):
     profile, created = UserProfile.objects.get_or_create(user=request.user)
     if request.method == 'POST':
-        profile.college = request.POST.get('college')
-        profile.major = request.POST.get('major')
+        # Update User model fields
+        request.user.first_name = request.POST.get('first_name', '')
+        request.user.last_name = request.POST.get('last_name', '')
+        request.user.save()
+
+        # Update UserProfile model fields
+        profile.bio = request.POST.get('bio', '')
+        profile.college = request.POST.get('college', '')
+        profile.rollNo = request.POST.get('rollNo', '')
+        profile.batch = request.POST.get('batch', 2029)
+        profile.hostel = request.POST.get('hostel', '')
+        if 'profile_picture' in request.FILES:
+            profile.profile_picture = request.FILES['profile_picture']
         profile.save()
         messages.success(request, 'Profile updated successfully.')
         return redirect('profile')

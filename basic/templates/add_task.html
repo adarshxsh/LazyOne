@@ -1,24 +1,17 @@
-{% extends 'base.html' %}
+{% extends "base.html" %}
 
-{% block title %}Add Task{% endblock %}
+{% block title %}Add New Task{% endblock %}
 
 {% block content %}
-    <h2>Add a New Task</h2>
+<div class="max-w-md mx-auto bg-white p-8 rounded-lg shadow-md mt-10">
+    <h2 class="text-2xl font-bold mb-6 text-gray-800">Create a New Task</h2>
     <form method="post">
         {% csrf_token %}
-        <label for="title">Title:</label><br>
-        <input type="text" id="title" name="title" required><br>
-        <label for="description">Description:</label><br>
-        <textarea id="description" name="description" required></textarea><br>
-        <label for="incentive">Incentive:</label><br>
-        <input type="text" id="incentive" name="incentive" required><br><br>
-        <button type="submit">Add Task</button>
+
+        <input type="text" name="title" placeholder="Task Title" class="w-full p-2 border border-gray-300 rounded mb-4" required>
+        <textarea name="description" placeholder="Task Description" class="w-full p-2 border border-gray-300 rounded mb-4" rows="4" required></textarea>
+        <input type="text" name="incentive" placeholder="Incentive">
+        <button type="submit" class="w-full bg-indigo-600 text-white p-2 rounded hover:bg-indigo-700">Add Task</button>
     </form>
-    {% if messages %}
-        <ul>
-            {% for message in messages %}
-                <li>{{ message }}</li>
-            {% endfor %}
-        </ul>
-    {% endif %}
+</div>
 {% endblock %}

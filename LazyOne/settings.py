@@ -125,7 +125,11 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Firebase settings
-cred = credentials.Certificate("LazyOne/serviceAccountKey.json")
-firebase_admin.initialize_app(cred)
-db = firestore.client()
+# # Firebase settings
+# cred = credentials.Certificate("LazyOne/serviceAccountKey.json")
+# firebase_admin.initialize_app(cred)
+# db = firestore.client()
+
+# Media files (for user uploads)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
