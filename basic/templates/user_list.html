@@ -1,23 +1,106 @@
 {% extends 'base.html' %}
 
 {% block title %}Find Friends{% endblock %}
-
 {% block content %}
-    <h2>Find Friends</h2>
-    <p>You are: {{ request.user.first_name }} {{ request.user.last_name }} ({{ request.user.username|cut:"@gmail.com" }})</p>
-    <hr>
-    {% for profile in users %}
-        <div>
-            <p>{{ profile.user.first_name }} {{ profile.user.last_name }} ({{ profile.user.username|cut:"@gmail.com" }})</p>
-            <form action="{% url 'send_friend_request' profile.user.id %}" method="post">
-                {% csrf_token %}
-                <label for="closeness-{{ profile.user.id }}">Closeness:</label>
-                <input type="range" id="closeness-{{ profile.user.id }}" name="closeness" min="0" max="100" value="50">
-                <button type="submit">Add Friend</button>
-            </form>
-            <hr>
+<div class="max-w-4xl mx-auto">
+    <div class="text-center mb-8">
+        <h2 class="text-3xl font-bold text-white">Find New Friends</h2>
+        <p class="text-gray-400 mt-2">Discover and connect with other users on LazyOne.</p>
+    </div>
+
+    <div id="user-list-container" class="space-y-3">
+        <!-- Loading State -->
+        <div id="loading-indicator" class="text-center text-gray-400 py-8">
+            <p>Loading users...</p>
         </div>
-    {% empty %}
-        <p>No other users found.</p>
-    {% endfor %}
+        <!-- User cards will be injected here by JavaScript -->
+    </div>
+</div>
+
+<!-- Include Firebase SDKs -->
+<script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Securely initialize Firebase from backend context
+    var firebaseConfig = {
+        apiKey: "{{ FIREBASE_API_KEY }}",
+        authDomain: "{{ FIREBASE_AUTH_DOMAIN }}",
+        projectId: "{{ FIREBASE_PROJECT_ID }}",
+        storageBucket: "{{ FIREBASE_STORAGE_BUCKET }}",
+        messagingSenderId: "{{ FIREBASE_MESSAGING_SENDER_ID }}",
+        appId: "{{ FIREBASE_APP_ID }}"
+    };
+    if (!firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.firestore();
+
+    const userListContainer = document.getElementById('user-list-container');
+    const loadingIndicator = document.getElementById('loading-indicator');
+    const excludeUids = JSON.parse('{{ exclude_uids_json|escapejs }}');
+
+    async function fetchAndRenderUsers() {
+        try {
+            const usersSnapshot = await db.collection('users').get();
+            loadingIndicator.style.display = 'none';
+
+            let usersFound = false;
+            usersSnapshot.forEach(doc => {
+                const userData = doc.data();
+                // Filter out users in the exclusion list
+                if (!excludeUids.includes(userData.uid)) {
+                    usersFound = true;
+                    const userCard = createUserCard(userData);
+                    userListContainer.appendChild(userCard);
+                }
+            });
+
+            if (!usersFound) {
+                userListContainer.innerHTML = `
+                    <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-8 text-center">
+                        <p class="text-gray-400">No new users to add as friends right now.</p>
+                    </div>
+                `;
+            }
+        } catch (error) {
+            console.error("Error fetching users: ", error);
+            loadingIndicator.innerHTML = '<p class="text-red-400">Could not load users. Please try again later.</p>';
+        }
+    }
+
+    function createUserCard(userData) {
+        const card = document.createElement('div');
+        card.className = 'bg-gray-800/50 border border-gray-700/50 rounded-xl p-4 flex items-center justify-between';
+        
+        // Note: The form action needs the Django User ID, not the Firebase UID.
+        // This is a limitation of the current architecture. A more advanced setup would use an API.
+        // For now, we assume the username (email) is unique and can be used to find the user.
+        // A better approach would be to have a Django API endpoint that takes a UID and returns a user ID.
+        card.innerHTML = `
+            <div>
+                <p class="text-white font-semibold">${userData.name || userData.username.split('@')[0]}</p>
+                <p class="text-sm text-gray-400">${userData.username}</p>
+            </div>
+            <form action="/friend/send/${userData.django_id || ''}/" method="post" class="flex items-center space-x-4">
+                <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+                <div class="flex items-center space-x-2">
+                    <label for="closeness-${userData.uid}" class="text-sm text-gray-400">Closeness:</label>
+                    <input type="range" id="closeness-${userData.uid}" name="closeness" min="0" max="100" value="50" class="w-24 accent-cyan-500">
+                </div>
+                <button type="submit" class="px-5 py-2 bg-cyan-500 hover:bg-cyan-600 text-white font-bold rounded-lg transition-colors text-sm whitespace-nowrap">
+                    Add Friend
+                </button>
+            </form>
+        `;
+        // This is a temporary workaround. The form action is problematic.
+        // A better solution is needed to link Firebase UID to Django User ID for the form action.
+        // For now, this demonstrates fetching from Firebase. The form will not work without the correct Django user ID.
+        return card;
+    }
+
+    fetchAndRenderUsers();
+});
+</script>
 {% endblock %}

@@ -299,13 +299,21 @@ def my_tasks(request):
 @login_required(login_url='/login/')
 def user_list(request):
     user_profile = get_object_or_404(UserProfile, user=request.user)
-    current_friends = user_profile.friends.all().values_list('user__id', flat=True)
-    sent_requests = FriendRequest.objects.filter(from_user=request.user).values_list('to_user_id', flat=True)
-    received_requests = FriendRequest.objects.filter(to_user=request.user).values_list('from_user_id', flat=True)
-    exclude_ids = set(current_friends) | set(sent_requests) | set(received_requests)
-    exclude_ids.add(request.user.id)
-    users = UserProfile.objects.exclude(user__id__in=exclude_ids)
-    return render(request, 'user_list.html', {'users': users})
+
+    # Get Firebase UIDs of users to exclude (friends, pending requests, self)
+    friend_uids = list(user_profile.friends.all().values_list('firebase_uid', flat=True))
+    sent_request_uids = list(FriendRequest.objects.filter(from_user=request.user).values_list('to_user__userprofile__firebase_uid', flat=True))
+    received_request_uids = list(FriendRequest.objects.filter(to_user=request.user).values_list('from_user__userprofile__firebase_uid', flat=True))
+
+    # Combine all UIDs to exclude, including the current user's
+    exclude_uids = set(friend_uids) | set(sent_request_uids) | set(received_request_uids)
+    if user_profile.firebase_uid:
+        exclude_uids.add(user_profile.firebase_uid)
+
+    context = {
+        'exclude_uids_json': json.dumps(list(exclude_uids))
+    }
+    return render(request, 'user_list.html', context)
 
 @login_required(login_url='/login/')
 def friends_view(request):
