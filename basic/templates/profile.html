@@ -3,93 +3,93 @@
 {% block title %}Profile{% endblock %}
 
 {% block content %}
-<div class="max-w-4xl mx-auto bg-gray-800/50 backdrop-blur-lg p-8 rounded-2xl shadow-2xl">
-    <h2 class="text-3xl font-bold text-white mb-8 text-center">Edit Your Profile</h2>
+<h2 class="text-3xl font-bold text-white mb-8 text-center">Edit Your Profile</h2>
 
-    <form method="post" class="space-y-6">
-        {% csrf_token %}
+<form method="post" class="space-y-6 max-w-2xl mx-auto">
+    {% csrf_token %}
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-                <label for="first_name" class="block text-sm font-medium text-gray-300 mb-1">First Name</label>
-                <input type="text" id="first_name" name="first_name" value="{{ profile.first_name }}" class="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-teal-400 focus:border-teal-400 outline-none transition">
-            </div>
-            <div>
-                <label for="last_name" class="block text-sm font-medium text-gray-300 mb-1">Last Name</label>
-                <input type="text" id="last_name" name="last_name" value="{{ profile.last_name }}" class="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-teal-400 focus:border-teal-400 outline-none transition">
-            </div>
-        </div>
-
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
-            <label for="bio" class="block text-sm font-medium text-gray-300 mb-1">Bio</label>
-            <textarea id="bio" name="bio" rows="3" class="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-teal-400 focus:border-teal-400 outline-none transition">{{ profile.bio }}</textarea>
+            <label for="first_name" class="block text-sm font-medium text-gray-300 mb-2">First Name</label>
+            <input type="text" id="first_name" name="first_name" value="{{ profile.first_name }}" class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
         </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-                <label for="college" class="block text-sm font-medium text-gray-300 mb-1">College</label>
-                <input type="text" id="college" name="college" value="{{ profile.college }}" class="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-teal-400 focus:border-teal-400 outline-none transition">
-            </div>
-            <div>
-                <label for="major" class="block text-sm font-medium text-gray-300 mb-1">Major</label>
-                <input type="text" id="major" name="major" value="{{ profile.major }}" class="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-teal-400 focus:border-teal-400 outline-none transition">
-            </div>
-            <div>
-                <label for="roll_no" class="block text-sm font-medium text-gray-300 mb-1">Roll Number</label>
-                <input type="text" id="roll_no" name="roll_no" value="{{ profile.roll_no }}" class="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-teal-400 focus:border-teal-400 outline-none transition">
-            </div>
-            <div>
-                <label for="batch" class="block text-sm font-medium text-gray-300 mb-1">Batch</label>
-                <input type="number" id="batch" name="batch" value="{{ profile.batch }}" class="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-teal-400 focus:border-teal-400 outline-none transition">
-            </div>
-        </div>
-
         <div>
-            <label for="phone_number" class="block text-sm font-medium text-gray-300 mb-1">Phone Number (with country code)</label>
-            <div class="flex items-center space-x-4">
-                <input type="text" id="phone_number" name="phone_number" value="{{ profile.phone_number }}" placeholder="+919876543210" class="flex-grow bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-teal-400 focus:border-teal-400 outline-none transition">
-                {% if profile.is_phone_verified %}
-                    <span class="text-green-400 font-semibold flex items-center">✓ Verified</span>
-                {% else %}
-                    <button type="button" id="verify-phone-button" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition">Verify</button>
-                {% endif %}
-            </div>
-            <div id="recaptcha-container" class="mt-2"></div>
-            <div id="phone-verification-code-group" style="display: none;" class="mt-4 flex items-center space-x-4">
-                <input type="text" id="phone-verification-code" placeholder="123456" class="flex-grow bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-teal-400 focus:border-teal-400 outline-none transition">
-                <button type="button" id="submit-verification-code" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition">Submit Code</button>
-            </div>
+            <label for="last_name" class="block text-sm font-medium text-gray-300 mb-2">Last Name</label>
+            <input type="text" id="last_name" name="last_name" value="{{ profile.last_name }}" class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
         </div>
+    </div>
 
+    <div>
+        <label for="bio" class="block text-sm font-medium text-gray-300 mb-2">Bio</label>
+        <textarea id="bio" name="bio" rows="3" class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">{{ profile.bio }}</textarea>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
-            <label for="instagram_username" class="block text-sm font-medium text-gray-300 mb-1">Instagram Username</label>
-            <input type="text" id="instagram_username" name="instagram_username" value="{{ profile.instagram_username }}" placeholder="your_insta_handle" class="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-teal-400 focus:border-teal-400 outline-none transition">
+            <label for="college" class="block text-sm font-medium text-gray-300 mb-2">College</label>
+            <input type="text" id="college" name="college" value="{{ profile.college }}" class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
         </div>
+        <div>
+            <label for="major" class="block text-sm font-medium text-gray-300 mb-2">Major</label>
+            <input type="text" id="major" name="major" value="{{ profile.major }}" class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
+        </div>
+        <div>
+            <label for="roll_no" class="block text-sm font-medium text-gray-300 mb-2">Roll Number</label>
+            <input type="text" id="roll_no" name="roll_no" value="{{ profile.roll_no }}" class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
+        </div>
+        <div>
+            <label for="batch" class="block text-sm font-medium text-gray-300 mb-2">Batch</label>
+            <input type="number" id="batch" name="batch" value="{{ profile.batch }}" class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
+        </div>
+    </div>
 
-        <div class="pt-6">
-            <button type="submit" class="w-full text-white font-bold py-3 px-4 rounded-lg bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-cyan-500 transition-all duration-300 transform hover:scale-105">
-                Update Profile
-            </button>
+    <div>
+        <label for="phone_number" class="block text-sm font-medium text-gray-300 mb-2">Phone Number</label>
+        <div class="flex items-center space-x-4">
+            <input type="text" id="phone_number" name="phone_number" value="{{ profile.phone_number }}" placeholder="+91..." class="flex-grow w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
+            {% if profile.is_phone_verified %}
+                <span class="text-green-400 font-semibold flex items-center whitespace-nowrap">
+                    <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    Verified
+                </span>
+            {% else %}
+                <button type="button" id="verify-phone-button" class="px-5 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors whitespace-nowrap">Verify</button>
+            {% endif %}
         </div>
-    </form>
-</div>
+        <div id="recaptcha-container" class="mt-2"></div>
+        <div id="phone-verification-code-group" style="display: none;" class="mt-4 flex items-center space-x-4">
+            <input type="text" id="phone-verification-code" placeholder="Enter verification code" class="flex-grow w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
+            <button type="button" id="submit-verification-code" class="px-5 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors whitespace-nowrap">Submit</button>
+        </div>
+    </div>
+
+    <div>
+        <label for="instagram_username" class="block text-sm font-medium text-gray-300 mb-2">Instagram Username</label>
+        <input type="text" id="instagram_username" name="instagram_username" value="{{ profile.instagram_username }}" placeholder="your_insta_handle" class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
+    </div>
+
+    <div class="pt-6">
+        <button type="submit" class="w-full text-white font-bold py-3 px-4 rounded-lg bg-cyan-500 hover:bg-cyan-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-cyan-500 transition-all duration-300 transform hover:scale-105">
+            Update Profile
+        </button>
+    </div>
+</form>
 
 <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
 <script>
-    // Securely initialize Firebase from backend context
     var firebaseConfig = {
-        apiKey: "{{ FIREBASE_API_KEY }}",
-        authDomain: "{{ FIREBASE_AUTH_DOMAIN }}",
-        projectId: "{{ FIREBASE_PROJECT_ID }}",
-        storageBucket: "{{ FIREBASE_STORAGE_BUCKET }}",
-        messagingSenderId: "{{ FIREBASE_MESSAGING_SENDER_ID }}",
-        appId: "{{ FIREBASE_APP_ID }}"
+        apiKey: "{{ FIREBASE_API_KEY|default:'' }}",
+        authDomain: "{{ FIREBASE_AUTH_DOMAIN|default:'' }}",
+        projectId: "{{ FIREBASE_PROJECT_ID|default:'' }}",
+        storageBucket: "{{ FIREBASE_STORAGE_BUCKET|default:'' }}",
+        messagingSenderId: "{{ FIREBASE_MESSAGING_SENDER_ID|default:'' }}",
+        appId: "{{ FIREBASE_APP_ID|default:'' }}"
     };
     if (!firebase.apps.length) {
         firebase.initializeApp(firebaseConfig);
     } else {
-        firebase.app(); // if already initialized, use that one
+        firebase.app();
     }
 
     document.addEventListener('DOMContentLoaded', function() {
@@ -111,7 +111,7 @@
                     .then((confirmationResult) => {
                         alert('Verification code sent to your phone!');
                         window.confirmationResult = confirmationResult;
-                        document.getElementById('phone-verification-code-group').style.display = 'block';
+                        document.getElementById('phone-verification-code-group').style.display = 'flex';
                     }).catch((error) => {
                         alert('Error sending verification code: ' + error.message);
                         appVerifier.render().then(widgetId => recaptcha.reset(widgetId));
@@ -121,12 +121,13 @@
             const submitCodeButton = document.getElementById('submit-verification-code');
             submitCodeButton.addEventListener('click', () => {
                 const code = document.getElementById('phone-verification-code').value;
+                if (!code) {
+                    alert('Please enter the verification code.');
+                    return;
+                }
                 window.confirmationResult.confirm(code).then((result) => {
-                    // User signed in successfully.
                     const user = result.user;
-                    // Get the token to send to our backend
                     user.getIdToken().then(idToken => {
-                        // Send token to your backend to verify and update the database
                         fetch('{% url "verify_phone_token" %}', {
                             method: 'POST',
                             headers: {

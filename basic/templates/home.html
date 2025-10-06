@@ -3,167 +3,162 @@
 {% block title %}Home{% endblock %}
 
 {% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+    <!-- Left Column -->
+    <div class="lg:col-span-2 space-y-8">
+        <!-- Social Circle Section -->
+        <div>
+            {% if request.user.is_authenticated %}
+                <h1 class="text-3xl font-bold text-white mb-4">Your Social Circle</h1>
+                <div id="friend-circle-container" class="relative w-full max-w-xl mx-auto aspect-square rounded-full bg-gray-800/50 border border-gray-700/50 shadow-2xl flex items-center justify-center">
+                    <!-- JS will inject nodes here -->
+                </div>
+            {% else %}
+                <div class="text-center p-8">
+                    <h1 class="text-3xl font-bold text-white">Welcome to LazyOne</h1>
+                    <p class="text-gray-400 mt-2">Please <a href="{% url 'login_page' %}" class="text-cyan-400 font-bold hover:underline">login</a> to see your social circle and interact with tasks.</p>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Recent Tasks Section -->
+        <div class="mt-8">
+            <h2 class="text-2xl font-bold text-white mb-4">Recent Tasks</h2>
+            <form method="get" action="{% url 'home' %}" class="mb-6">
+                <input type="text" name="q" value="{{ search_query|default_if_none:'' }}" placeholder="Search for tasks..." class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
+            </form>
+
+            <div class="space-y-4">
+                {% for task in recent_tasks %}
+                    <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-5 transition-all duration-300 hover:shadow-cyan-500/20 hover:shadow-lg hover:border-cyan-500/50">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <h3 class="text-lg font-bold text-white">{{ task.title }}</h3>
+                                <p class="text-sm text-gray-400 mt-1">Posted by: {% if task.posted_by %}{{ task.posted_by.username }}{% else %}an anonymous user{% endif %}</p>
+                            </div>
+                            <div class="text-right flex-shrink-0 ml-4">
+                                <p class="text-xl font-semibold text-cyan-400">{{ task.reward }}</p>
+                                <p class="text-xs text-gray-500">Points</p>
+                            </div>
+                        </div>
+                        <p class="text-gray-300 mt-3">{{ task.description }}</p>
+                        
+                        {% if task.is_taken %}
+                            <p class="text-sm text-amber-400 mt-3"><i>Taken by: {% if task.taken_by %}{{ task.taken_by.username }}{% else %}an anonymous user{% endif %}</i></p>
+                        {% endif %}
+
+                        <div class="mt-4">
+                            {% if task.is_taken %}
+                                {% if request.user.is_authenticated and ((task.posted_by and request.user == task.posted_by) or (task.taken_by and request.user == task.taken_by)) %}
+                                    {% if task.conversation_id %}
+                                        <a href="{% url 'chat_view' task.conversation_id %}" class="inline-block bg-cyan-500/80 text-white font-semibold px-5 py-2 rounded-lg hover:bg-cyan-500 transition-colors">Chat</a>
+                                    {% endif %}
+                                {% endif %}
+                            {% else %}
+                                {% if request.user.is_authenticated %}
+                                    <a href="{% url 'take_task' task.id %}" class="inline-block bg-teal-500 text-white font-semibold px-5 py-2 rounded-lg hover:bg-teal-600 transition-colors">Take Task</a>
+                                {% else %}
+                                    <a href="{% url 'login_page' %}" class="inline-block bg-gray-600 text-white font-semibold px-5 py-2 rounded-lg hover:bg-gray-500 transition-colors">Login to Take Task</a>
+                                {% endif %}
+                            {% endif %}
+                        </div>
+                    </div>
+                {% empty %}
+                    <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-8 text-center">
+                        <p class="text-gray-400">No tasks available at the moment.</p>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Column -->
+    <div class="lg:col-span-1 space-y-8">
+        {% if request.user.is_authenticated %}
+            <div>
+                <h2 class="text-2xl font-bold text-white mb-4">Recent Chats</h2>
+                <div class="space-y-3">
+                    {% for conv in recent_conversations %}
+                        <a href="{% url 'chat_view' conv.id %}" class="block bg-gray-800/50 border border-gray-700/50 rounded-xl p-4 hover:bg-gray-700/50 transition-colors">
+                            {% if conv.task %}
+                                <p class="text-sm text-gray-400">Task Chat</p>
+                                <strong class="text-white">{{ conv.task.title }}</strong>
+                            {% else %}
+                                {% for participant in conv.participants.all %}
+                                    {% if participant.id != request.user.id %}
+                                        <p class="text-sm text-gray-400">Direct Chat</p>
+                                        <strong class="text-white">{{ participant.username }}</strong>
+                                    {% endif %}
+                                {% endfor %}
+                            {% endif %}
+                        </a>
+                    {% empty %}
+                        <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-8 text-center">
+                            <p class="text-gray-400">No recent conversations.</p>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+    </div>
+
+</div>
+
+<!-- Context Menu (hidden by default) -->
+<div id="context-menu" class="context-menu fixed hidden bg-gray-800/90 backdrop-blur-md border border-gray-700 rounded-lg shadow-2xl py-2 z-50">
+    <!-- JS will inject links here -->
+</div>
+
 <style>
-    /* --- Friend Circle Styles --- */
-    #friend-circle-container {
-        position: relative;
-        width: 100%;
-        max-width: 600px;
-        aspect-ratio: 1 / 1; /* Maintain a square shape */
-        margin: 50px auto;
-        border-radius: 50%;
-        background-color: #ffffff;
-        /* Subtle graph paper background */
-        background-image:
-            linear-gradient(rgba(189, 195, 199, 0.3) 1px, transparent 1px),
-            linear-gradient(to right, rgba(189, 195, 199, 0.3) 1px, transparent 1px);
-        background-size: 20px 20px;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-    }
     .circle-orbit {
         position: absolute;
-        /* Softer, solid, and visible orbit lines */
-        border: 1px solid #e5e7eb;
+        border: 1px dashed #4a5568; /* gray-600 */
         border-radius: 50%;
         top: 50%;
         left: 50%;
     }
     .user-node {
         position: absolute;
-        width: 64px;
-        height: 64px;
-        /* Vibrant, high-contrast node color */
-        background-color: #14b8a6; /* teal-500 */
+        width: 60px;
+        height: 60px;
+        background-color: #0d9488; /* teal-600 */
         color: white;
         border-radius: 50%;
-        border: 3px solid white;
+        border: 3px solid #1a202c; /* page background */
         display: flex;
         align-items: center;
         justify-content: center;
         text-align: center;
-        font-size: 11px;
+        font-size: 10px;
         font-weight: 600;
         cursor: pointer;
         transition: all 0.2s ease-in-out;
         overflow: hidden;
         padding: 5px;
         text-decoration: none;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
     }
     .user-node:hover {
         transform: scale(1.15);
         z-index: 1000;
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        border-color: #2dd4bf; /* cyan-400 */
     }
     .user-node.center-user {
         width: 80px;
         height: 80px;
-        /* A darker, more prominent center node */
         background-color: #0f766e; /* teal-700 */
         font-size: 14px;
         z-index: 100;
         border-width: 4px;
     }
-
-    /* --- Context Menu Styles --- */
-    .context-menu {
-        position: absolute;
-        display: none;
-        background-color: white;
-        border-radius: 8px;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-        z-index: 10000;
-        padding: 8px 0;
-        min-width: 180px;
-    }
-    .context-menu a {
-        display: block;
-        padding: 10px 16px;
-        text-decoration: none;
-        color: #374151; /* gray-700 */
-        font-size: 14px;
-        transition: background-color 0.15s ease-in-out;
-    }
-    .context-menu a:hover {
-        background-color: #f3f4f6; /* gray-100 */
-    }
 </style>
-
-<h1 class="text-3xl font-bold text-center text-gray-800 mb-4">Your Social Circle</h1>
-
-<div id="friend-circle-container">
-    <!-- Orbits and user nodes will be injected here by JavaScript -->
-</div>
-
-<hr class="my-12 border-gray-200">
-
-<div class="max-w-4xl mx-auto">
-    <h2 class="text-2xl font-bold text-gray-800 mb-4">Recent Chats</h2>
-    {% for conv in recent_conversations %}
-        <a href="{% url 'chat_view' conv.id %}" class="block bg-white p-4 rounded-lg shadow-sm hover:shadow-md hover:bg-gray-50 transition mb-3">
-            {% if conv.task %}
-                <p class="text-gray-500">Task Chat</p>
-                <strong class="text-gray-800">{{ conv.task.title }}</strong>
-            {% else %}
-                {% for participant in conv.participants.all %}
-                    {% if participant.id != request.user.id %}
-                        <p class="text-gray-500">Direct Chat</p>
-                        <strong class="text-gray-800">{{ participant.username }}</strong>
-                    {% endif %}
-                {% endfor %}
-            {% endif %}
-        </a>
-    {% empty %}
-        <div class="bg-gray-50 text-center p-6 rounded-lg">
-            <p class="text-gray-500">No recent conversations. Start a chat or take a task!</p>
-        </div>
-    {% endfor %}
-</div>
-
-<hr class="my-12 border-gray-200">
-
-<div class="max-w-4xl mx-auto">
-    <h2 class="text-2xl font-bold text-gray-800 mb-4">Available Tasks</h2>
-
-    <form method="get" action="{% url 'home' %}" class="mb-6">
-        <div class="relative">
-            <input type="text" name="q" value="{{ search_query|default_if_none:'' }}" placeholder="Search for tasks..." class="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-full focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition">
-            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                    <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" />
-                </svg>
-            </div>
-        </div>
-    </form>
-
-    <div class="space-y-4">
-        {% for task in tasks %}
-            <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-                <div class="flex justify-between items-start">
-                    <div>
-                        <h3 class="text-lg font-bold text-gray-900">{{ task.title }}</h3>
-                        <p class="text-sm text-gray-500 mt-1">Posted by: {{ task.posted_by.username }}</p>
-                    </div>
-                    <div class="text-right">
-                        <p class="text-lg font-semibold text-teal-600">{{ task.reward }}</p>
-                        <p class="text-xs text-gray-500">Points</p>
-                    </div>
-                </div>
-                <p class="text-gray-700 mt-3">{{ task.description }}</p>
-                <div class="mt-4">
-                    <a href="{% url 'take_task' task.id %}" class="inline-block bg-teal-500 text-white font-semibold px-5 py-2 rounded-full hover:bg-teal-600 transition-colors">Take Task</a>
-                </div>
-            </div>
-        {% empty %}
-            <div class="bg-gray-50 text-center p-8 rounded-lg">
-                <p class="text-gray-500">No tasks available matching your search.</p>
-            </div>
-        {% endfor %}
-    </div>
-</div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    const isAuthenticated = {{ request.user.is_authenticated|yesno:"true,false" }};
+    if (!isAuthenticated) return;
+
     const container = document.getElementById('friend-circle-container');
     const userNodesData = JSON.parse('{{ user_nodes_json|escapejs }}');
     const currentUser = {
@@ -172,9 +167,7 @@ document.addEventListener('DOMContentLoaded', function() {
         closeness: 101 // Center
     };
 
-    const contextMenu = document.createElement('div');
-    contextMenu.className = 'context-menu';
-    document.body.appendChild(contextMenu);
+    const contextMenu = document.getElementById('context-menu');
 
     window.addEventListener('click', () => {
         if (contextMenu.style.display === 'block') {
@@ -183,10 +176,10 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     const circles = {
-        c1: { radius: 100, nodes: [], orbitSize: 200 }, // Closest friends
+        c1: { radius: 100, nodes: [], orbitSize: 200 },
         c2: { radius: 175, nodes: [], orbitSize: 350 },
         c3: { radius: 250, nodes: [], orbitSize: 500 },
-        c4: { radius: 290, nodes: [], orbitSize: 580 }  // Farthest orbit, inside the container
+        c4: { radius: 300, nodes: [], orbitSize: 600 }
     };
 
     for (const key in circles) {
@@ -209,8 +202,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const angleStep = nodes.length > 1 ? (2 * Math.PI) / nodes.length : 0;
         nodes.forEach((node, index) => {
             const angle = index * angleStep;
-            const x = container.offsetWidth / 2 + radius * Math.cos(angle) - 32; // half of node width
-            const y = container.offsetHeight / 2 + radius * Math.sin(angle) - 32; // half of node height
+            const x = container.offsetWidth / 2 + radius * Math.cos(angle) - 30;
+            const y = container.offsetHeight / 2 + radius * Math.sin(angle) - 30;
 
             const nodeElement = document.createElement('div');
             nodeElement.className = 'user-node';
@@ -223,11 +216,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 e.preventDefault();
                 e.stopPropagation();
                 
-                let menuContent = `<a href="/user/${node.id}/">See Profile</a>`;
-                menuContent += `<a href="/chat/start/${node.id}/">Chat</a>`;
+                let menuContent = `<a href="/user/${node.id}/" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">See Profile</a>`;
+                menuContent += `<a href="/chat/start/${node.id}/" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">Chat</a>`;
 
                 if (node.is_phone_verified && node.phone) {
-                    menuContent += `<a href="https://wa.me/${node.phone}" target="_blank">Chat with WhatsApp</a>`;
+                    menuContent += `<a href="https://wa.me/${node.phone}" target="_blank" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">Chat with WhatsApp</a>`;
                 }
 
                 contextMenu.innerHTML = menuContent;
