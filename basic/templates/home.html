@@ -31,7 +31,7 @@
 
             <div class="space-y-4">
                 {% for task in recent_tasks %}
-                    <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-5 transition-all duration-300 hover:shadow-cyan-500/20 hover:shadow-lg hover:border-cyan-500/50">
+                    <div class="scroll-animate bg-gray-800/50 border border-gray-700/50 rounded-xl p-5 transition-all duration-300 hover:shadow-cyan-500/20 hover:shadow-lg hover:border-cyan-500/50">
                         <div class="flex justify-between items-start">
                             <div>
                                 <h3 class="text-lg font-bold text-white">{{ task.title }}</h3>
@@ -43,16 +43,18 @@
                             </div>
                         </div>
                         <p class="text-gray-300 mt-3">{{ task.description }}</p>
-                        
+
                         {% if task.is_taken %}
                             <p class="text-sm text-amber-400 mt-3"><i>Taken by: {% if task.taken_by %}{{ task.taken_by.username }}{% else %}an anonymous user{% endif %}</i></p>
                         {% endif %}
 
                         <div class="mt-4">
                             {% if task.is_taken %}
-                                {% if request.user.is_authenticated and ((task.posted_by and request.user == task.posted_by) or (task.taken_by and request.user == task.taken_by)) %}
-                                    {% if task.conversation_id %}
-                                        <a href="{% url 'chat_view' task.conversation_id %}" class="inline-block bg-cyan-500/80 text-white font-semibold px-5 py-2 rounded-lg hover:bg-cyan-500 transition-colors">Chat</a>
+                                {% if request.user.is_authenticated %}
+                                    {% if request.user == task.posted_by or request.user == task.taken_by %}
+                                        {% if task.conversation_id %}
+                                            <a href="{% url 'chat_view' task.conversation_id %}" class="inline-block bg-cyan-500/80 text-white font-semibold px-5 py-2 rounded-lg hover:bg-cyan-500 transition-colors">Chat</a>
+                                        {% endif %}
                                     {% endif %}
                                 {% endif %}
                             {% else %}
@@ -65,7 +67,7 @@
                         </div>
                     </div>
                 {% empty %}
-                    <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-8 text-center">
+                    <div class="scroll-animate bg-gray-800/50 border border-gray-700/50 rounded-xl p-8 text-center">
                         <p class="text-gray-400">No tasks available at the moment.</p>
                     </div>
                 {% endfor %}
@@ -80,7 +82,7 @@
                 <h2 class="text-2xl font-bold text-white mb-4">Recent Chats</h2>
                 <div class="space-y-3">
                     {% for conv in recent_conversations %}
-                        <a href="{% url 'chat_view' conv.id %}" class="block bg-gray-800/50 border border-gray-700/50 rounded-xl p-4 hover:bg-gray-700/50 transition-colors">
+                        <a href="{% url 'chat_view' conv.id %}" class="scroll-animate block bg-gray-800/50 border border-gray-700/50 rounded-xl p-4 hover:bg-gray-700/50 transition-colors">
                             {% if conv.task %}
                                 <p class="text-sm text-gray-400">Task Chat</p>
                                 <strong class="text-white">{{ conv.task.title }}</strong>
@@ -94,7 +96,7 @@
                             {% endif %}
                         </a>
                     {% empty %}
-                        <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-8 text-center">
+                        <div class="scroll-animate bg-gray-800/50 border border-gray-700/50 rounded-xl p-8 text-center">
                             <p class="text-gray-400">No recent conversations.</p>
                         </div>
                     {% endfor %}
@@ -152,10 +154,33 @@
         z-index: 100;
         border-width: 4px;
     }
+    .scroll-animate {
+        opacity: 0;
+        transform: translateY(20px);
+        transition: opacity 0.5s ease-out, transform 0.5s ease-out;
+    }
+    .scroll-animate.is-visible {
+        opacity: 1;
+        transform: translateY(0);
+    }
 </style>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // Scroll Animation
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.classList.add('is-visible');
+                observer.unobserve(entry.target);
+            }
+        });
+    }, { threshold: 0.1 });
+
+    const elementsToAnimate = document.querySelectorAll('.scroll-animate');
+    elementsToAnimate.forEach(el => observer.observe(el));
+
+    // Friend Circle Logic
     const isAuthenticated = {{ request.user.is_authenticated|yesno:"true,false" }};
     if (!isAuthenticated) return;
 
