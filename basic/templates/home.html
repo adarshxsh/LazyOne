@@ -4,132 +4,163 @@
 
 {% block content %}
 <style>
+    /* --- Friend Circle Styles --- */
     #friend-circle-container {
         position: relative;
-        width: 600px;
-        height: 600px;
+        width: 100%;
+        max-width: 600px;
+        aspect-ratio: 1 / 1; /* Maintain a square shape */
         margin: 50px auto;
-        border: 2px solid #ccc;
         border-radius: 50%;
+        background-color: #ffffff;
+        /* Subtle graph paper background */
+        background-image:
+            linear-gradient(rgba(189, 195, 199, 0.3) 1px, transparent 1px),
+            linear-gradient(to right, rgba(189, 195, 199, 0.3) 1px, transparent 1px);
+        background-size: 20px 20px;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
     }
     .circle-orbit {
         position: absolute;
-        border: 1px dashed #aaa;
+        /* Softer, solid, and visible orbit lines */
+        border: 1px solid #e5e7eb;
         border-radius: 50%;
         top: 50%;
         left: 50%;
     }
     .user-node {
         position: absolute;
-        width: 60px;
-        height: 60px;
-        background-color: #a2c4c9;
+        width: 64px;
+        height: 64px;
+        /* Vibrant, high-contrast node color */
+        background-color: #14b8a6; /* teal-500 */
         color: white;
         border-radius: 50%;
+        border: 3px solid white;
         display: flex;
         align-items: center;
         justify-content: center;
         text-align: center;
-        font-size: 10px;
+        font-size: 11px;
+        font-weight: 600;
         cursor: pointer;
-        transition: transform 0.2s;
+        transition: all 0.2s ease-in-out;
         overflow: hidden;
         padding: 5px;
         text-decoration: none;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
     }
     .user-node:hover {
-        transform: scale(1.1);
+        transform: scale(1.15);
         z-index: 1000;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
     }
     .user-node.center-user {
         width: 80px;
         height: 80px;
-        background-color: #4a7c59;
+        /* A darker, more prominent center node */
+        background-color: #0f766e; /* teal-700 */
         font-size: 14px;
         z-index: 100;
+        border-width: 4px;
     }
-    .recent-chats { margin: 20px auto; max-width: 800px; }
-    .chat-link {
-        display: block;
-        padding: 10px;
-        border: 1px solid #eee;
-        margin-bottom: 5px;
-        text-decoration: none;
-        color: #333;
-        border-radius: 5px;
-    }
-    .chat-link:hover { background-color: #f9f9f9; }
-    .search-form { margin: 20px auto; max-width: 800px; display: flex; }
-    .search-form input { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
-    .search-form button { padding: 10px 20px; margin-left: 10px; border: none; background-color: #007bff; color: white; border-radius: 5px; cursor: pointer; }
+
+    /* --- Context Menu Styles --- */
     .context-menu {
         position: absolute;
         display: none;
-        background-color: #fff;
-        border: 1px solid #ccc;
-        border-radius: 5px;
-        box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+        background-color: white;
+        border-radius: 8px;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
         z-index: 10000;
+        padding: 8px 0;
+        min-width: 180px;
     }
     .context-menu a {
         display: block;
-        padding: 8px 12px;
+        padding: 10px 16px;
         text-decoration: none;
-        color: #333;
+        color: #374151; /* gray-700 */
+        font-size: 14px;
+        transition: background-color 0.15s ease-in-out;
     }
     .context-menu a:hover {
-        background-color: #f0f0f0;
+        background-color: #f3f4f6; /* gray-100 */
     }
 </style>
 
-<h1>Your Social Circle</h1>
+<h1 class="text-3xl font-bold text-center text-gray-800 mb-4">Your Social Circle</h1>
 
 <div id="friend-circle-container">
     <!-- Orbits and user nodes will be injected here by JavaScript -->
 </div>
 
-<hr>
+<hr class="my-12 border-gray-200">
 
-<div class="recent-chats">
-    <h2>Recent Chats</h2>
+<div class="max-w-4xl mx-auto">
+    <h2 class="text-2xl font-bold text-gray-800 mb-4">Recent Chats</h2>
     {% for conv in recent_conversations %}
-        <a href="{% url 'chat_view' conv.id %}" class="chat-link">
+        <a href="{% url 'chat_view' conv.id %}" class="block bg-white p-4 rounded-lg shadow-sm hover:shadow-md hover:bg-gray-50 transition mb-3">
             {% if conv.task %}
-                Chat for task: <strong>{{ conv.task.title }}</strong>
+                <p class="text-gray-500">Task Chat</p>
+                <strong class="text-gray-800">{{ conv.task.title }}</strong>
             {% else %}
                 {% for participant in conv.participants.all %}
                     {% if participant.id != request.user.id %}
-                        Chat with <strong>{{ participant.username }}</strong>
+                        <p class="text-gray-500">Direct Chat</p>
+                        <strong class="text-gray-800">{{ participant.username }}</strong>
                     {% endif %}
                 {% endfor %}
             {% endif %}
         </a>
     {% empty %}
-        <p>No recent conversations. Start a chat or take a task!</p>
+        <div class="bg-gray-50 text-center p-6 rounded-lg">
+            <p class="text-gray-500">No recent conversations. Start a chat or take a task!</p>
+        </div>
     {% endfor %}
 </div>
 
-<hr>
+<hr class="my-12 border-gray-200">
 
-<h2>Available Tasks</h2>
+<div class="max-w-4xl mx-auto">
+    <h2 class="text-2xl font-bold text-gray-800 mb-4">Available Tasks</h2>
 
-<form method="get" action="{% url 'home' %}" class="search-form">
-    <input type="text" name="q" value="{{ search_query|default_if_none:'' }}" placeholder="Search for tasks...">
-    <button type="submit">Search</button>
-</form>
+    <form method="get" action="{% url 'home' %}" class="mb-6">
+        <div class="relative">
+            <input type="text" name="q" value="{{ search_query|default_if_none:'' }}" placeholder="Search for tasks..." class="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-full focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition">
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" />
+                </svg>
+            </div>
+        </div>
+    </form>
 
-{% for task in tasks %}
-    <div>
-        <h3>{{ task.title }}</h3>
-        <p>{{ task.description }}</p>
-        <p><b>Reward:</b> {{ task.reward }} points</p>
-        <p><i>Posted by: {{ task.posted_by.username }}</i></p>
-        <a href="{% url 'take_task' task.id %}"><button>Take Task</button></a>
-        <hr>
+    <div class="space-y-4">
+        {% for task in tasks %}
+            <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <h3 class="text-lg font-bold text-gray-900">{{ task.title }}</h3>
+                        <p class="text-sm text-gray-500 mt-1">Posted by: {{ task.posted_by.username }}</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-lg font-semibold text-teal-600">{{ task.reward }}</p>
+                        <p class="text-xs text-gray-500">Points</p>
+                    </div>
+                </div>
+                <p class="text-gray-700 mt-3">{{ task.description }}</p>
+                <div class="mt-4">
+                    <a href="{% url 'take_task' task.id %}" class="inline-block bg-teal-500 text-white font-semibold px-5 py-2 rounded-full hover:bg-teal-600 transition-colors">Take Task</a>
+                </div>
+            </div>
+        {% empty %}
+            <div class="bg-gray-50 text-center p-8 rounded-lg">
+                <p class="text-gray-500">No tasks available matching your search.</p>
+            </div>
+        {% endfor %}
     </div>
-{% empty %}
-    <p>No tasks available matching your search.</p>
-{% endfor %}
+</div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -152,10 +183,10 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     const circles = {
-        c1: { radius: 100, nodes: [], orbitSize: 200 },
+        c1: { radius: 100, nodes: [], orbitSize: 200 }, // Closest friends
         c2: { radius: 175, nodes: [], orbitSize: 350 },
         c3: { radius: 250, nodes: [], orbitSize: 500 },
-        c4: { radius: 300, nodes: [], orbitSize: 600 }
+        c4: { radius: 290, nodes: [], orbitSize: 580 }  // Farthest orbit, inside the container
     };
 
     for (const key in circles) {
@@ -178,8 +209,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const angleStep = nodes.length > 1 ? (2 * Math.PI) / nodes.length : 0;
         nodes.forEach((node, index) => {
             const angle = index * angleStep;
-            const x = container.offsetWidth / 2 + radius * Math.cos(angle) - 30;
-            const y = container.offsetHeight / 2 + radius * Math.sin(angle) - 30;
+            const x = container.offsetWidth / 2 + radius * Math.cos(angle) - 32; // half of node width
+            const y = container.offsetHeight / 2 + radius * Math.sin(angle) - 32; // half of node height
 
             const nodeElement = document.createElement('div');
             nodeElement.className = 'user-node';

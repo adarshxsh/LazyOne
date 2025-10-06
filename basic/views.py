@@ -91,7 +91,7 @@ def firebase_login(request):
                 return JsonResponse({'status': 'error', 'message': 'Invalid token or user not found.'}, status=401)
 
         except Exception as e:
-            return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+            return JsonResponse({'status': 'error', 'message': 'Register first'}, status=500)
 
     return JsonResponse({'status': 'error', 'message': 'Invalid request method'}, status=405)
 
