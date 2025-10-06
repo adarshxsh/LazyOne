@@ -62,6 +62,24 @@
     .search-form { margin: 20px auto; max-width: 800px; display: flex; }
     .search-form input { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
     .search-form button { padding: 10px 20px; margin-left: 10px; border: none; background-color: #007bff; color: white; border-radius: 5px; cursor: pointer; }
+    .context-menu {
+        position: absolute;
+        display: none;
+        background-color: #fff;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+        z-index: 10000;
+    }
+    .context-menu a {
+        display: block;
+        padding: 8px 12px;
+        text-decoration: none;
+        color: #333;
+    }
+    .context-menu a:hover {
+        background-color: #f0f0f0;
+    }
 </style>
 
 <h1>Your Social Circle</h1>
@@ -76,10 +94,18 @@
     <h2>Recent Chats</h2>
     {% for conv in recent_conversations %}
         <a href="{% url 'chat_view' conv.id %}" class="chat-link">
-            Chat for task: <strong>{{ conv.task.title }}</strong>
+            {% if conv.task %}
+                Chat for task: <strong>{{ conv.task.title }}</strong>
+            {% else %}
+                {% for participant in conv.participants.all %}
+                    {% if participant.id != request.user.id %}
+                        Chat with <strong>{{ participant.username }}</strong>
+                    {% endif %}
+                {% endfor %}
+            {% endif %}
         </a>
     {% empty %}
-        <p>No recent conversations. Take a task to start chatting!</p>
+        <p>No recent conversations. Start a chat or take a task!</p>
     {% endfor %}
 </div>
 
@@ -115,6 +141,16 @@ document.addEventListener('DOMContentLoaded', function() {
         closeness: 101 // Center
     };
 
+    const contextMenu = document.createElement('div');
+    contextMenu.className = 'context-menu';
+    document.body.appendChild(contextMenu);
+
+    window.addEventListener('click', () => {
+        if (contextMenu.style.display === 'block') {
+            contextMenu.style.display = 'none';
+        }
+    });
+
     const circles = {
         c1: { radius: 100, nodes: [], orbitSize: 200 },
         c2: { radius: 175, nodes: [], orbitSize: 350 },
@@ -145,13 +181,29 @@ document.addEventListener('DOMContentLoaded', function() {
             const x = container.offsetWidth / 2 + radius * Math.cos(angle) - 30;
             const y = container.offsetHeight / 2 + radius * Math.sin(angle) - 30;
 
-            const nodeElement = document.createElement('a');
+            const nodeElement = document.createElement('div');
             nodeElement.className = 'user-node';
-            nodeElement.href = `/user/${node.id}/`;
             nodeElement.style.left = `${x}px`;
             nodeElement.style.top = `${y}px`;
             nodeElement.textContent = node.username.split('@')[0];
             nodeElement.title = `${node.username} (Closeness: ${node.closeness})`;
+
+            nodeElement.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                let menuContent = `<a href="/user/${node.id}/">See Profile</a>`;
+                menuContent += `<a href="/chat/start/${node.id}/">Chat</a>`;
+
+                if (node.is_phone_verified && node.phone) {
+                    menuContent += `<a href="https://wa.me/${node.phone}" target="_blank">Chat with WhatsApp</a>`;
+                }
+
+                contextMenu.innerHTML = menuContent;
+                contextMenu.style.top = `${e.pageY}px`;
+                contextMenu.style.left = `${e.pageX}px`;
+                contextMenu.style.display = 'block';
+            });
 
             container.appendChild(nodeElement);
         });

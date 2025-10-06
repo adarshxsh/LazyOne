@@ -6,6 +6,7 @@ from django.contrib.auth.models import User
 from django.contrib.auth import login, logout, authenticate
 from django.db import transaction
 from django.db.models import Q
+from django.urls import reverse
 import json
 from django.http import JsonResponse, HttpResponseForbidden
 from firebase_admin import auth
@@ -17,9 +18,10 @@ import logging
 # Get an instance of a logger
 logger = logging.getLogger(__name__)
 
+
 # Create your views here.
 
-@login_required
+@login_required(login_url='/login')
 def home(request):
     # --- Search Logic ---
     query = request.GET.get('q', '')
@@ -28,7 +30,7 @@ def home(request):
         tasks = tasks.filter(
             Q(title__icontains=query) | Q(description__icontains=query)
         )
-    tasks = tasks.order_by('-created_at')[:20] # Show up to 20 results
+    tasks = tasks.order_by('-created_at')[:20]  # Show up to 20 results
 
     # --- Data for Recent Conversations ---
     recent_conversations = Conversation.objects.filter(participants=request.user).order_by('-task__created_at')[:10]
@@ -61,7 +63,7 @@ def home(request):
                 'is_phone_verified': other_user.is_phone_verified,
                 'instagram': other_user.instagram_username
             })
-    
+
     context = {
         'recent_conversations': recent_conversations,
         'tasks': tasks,
@@ -69,6 +71,7 @@ def home(request):
         'search_query': query
     }
     return render(request, 'home.html', context)
+
 
 @csrf_exempt
 def firebase_login(request):
@@ -92,14 +95,17 @@ def firebase_login(request):
 
     return JsonResponse({'status': 'error', 'message': 'Invalid request method'}, status=405)
 
+
 def login_page(request):
     return render(request, 'login.html')
+
 
 def logout_view(request):
     logout(request)
     return redirect('login_page')
 
-@login_required
+
+@login_required(login_url='/login')
 def profile_view(request):
     profile, created = UserProfile.objects.get_or_create(user=request.user)
     if request.method == 'POST':
@@ -117,11 +123,12 @@ def profile_view(request):
         return redirect('profile')
     return render(request, 'profile.html', {'profile': profile})
 
-@login_required
+
+@login_required(login_url='/login')
 def user_profile_view(request, user_id):
     viewed_user = get_object_or_404(User, id=user_id)
     viewed_profile = get_object_or_404(UserProfile, user=viewed_user)
-    
+
     posted_tasks = Task.objects.filter(posted_by=viewed_user).order_by('-created_at')
     user_friends = viewed_profile.friends.all()
 
@@ -132,7 +139,8 @@ def user_profile_view(request, user_id):
     }
     return render(request, 'user_profile.html', context)
 
-@login_required
+
+@login_required(login_url='/login')
 def verify_phone_token(request):
     if request.method == 'POST':
         try:
@@ -161,14 +169,36 @@ def verify_phone_token(request):
 
     return JsonResponse({'success': False, 'error': 'Invalid request method.'}, status=405)
 
-@login_required
+
+@login_required(login_url='/login')
 def chat_view(request, conversation_id):
     conversation = get_object_or_404(Conversation, id=conversation_id)
     if request.user not in conversation.participants.all():
         return HttpResponseForbidden("You are not authorized to view this chat.")
     return render(request, 'chat.html', {'conversation': conversation})
 
-@login_required
+
+@login_required(login_url='/login')
+def start_chat(request, user_id):
+    other_user = get_object_or_404(User, id=user_id)
+
+    # Check for an existing conversation between the two users that is not task-related
+    conversation = Conversation.objects.filter(
+        participants=request.user
+    ).filter(
+        participants=other_user
+    ).filter(
+        task__isnull=True
+    ).first()
+
+    if not conversation:
+        conversation = Conversation.objects.create()
+        conversation.participants.add(request.user, other_user)
+
+    return redirect('chat_view', conversation_id=conversation.id)
+
+
+@login_required(login_url='/login')
 def add_task(request):
     if request.method == 'POST':
         title = request.POST.get('title')
@@ -183,7 +213,8 @@ def add_task(request):
 
             user_profile = request.user.userprofile
             if user_profile.rewards < reward:
-                messages.error(request, f"You only have {user_profile.rewards} points, not enough to offer this reward.")
+                messages.error(request,
+                               f"You only have {user_profile.rewards} points, not enough to offer this reward.")
                 return render(request, 'add_task.html')
 
             with transaction.atomic():
@@ -204,7 +235,8 @@ def add_task(request):
 
     return render(request, 'add_task.html')
 
-@login_required
+
+@login_required(login_url='/login')
 def take_task(request, task_id):
     task = get_object_or_404(Task, id=task_id)
     if task.posted_by == request.user:
@@ -224,7 +256,7 @@ def take_task(request, task_id):
                 Notification.objects.create(
                     recipient=task.posted_by,
                     message=f"{request.user.username} has taken your task: {task.title}",
-                    link=f"{{% url 'my_tasks' %}}" # Link to my tasks page
+                    link=reverse('my_tasks')  # Link to my tasks page
                 )
                 messages.success(request, "Task has been assigned to you and a chat has been created.")
             else:
@@ -232,7 +264,8 @@ def take_task(request, task_id):
 
     return redirect('my_tasks')
 
-@login_required
+
+@login_required(login_url='/login')
 def complete_task(request, task_id):
     task = get_object_or_404(Task, id=task_id)
     if task.posted_by != request.user:
@@ -249,16 +282,19 @@ def complete_task(request, task_id):
 
             task.is_completed = True
             task.save()
-            messages.success(request, f"Task marked as complete! {task.reward} points transferred to {task.taken_by.username}.")
+            messages.success(request,
+                             f"Task marked as complete! {task.reward} points transferred to {task.taken_by.username}.")
     return redirect('my_tasks')
 
-@login_required
+
+@login_required(login_url='/login')
 def my_tasks(request):
     posted_tasks = Task.objects.filter(posted_by=request.user).order_by('-created_at')
     taken_tasks = Task.objects.filter(taken_by=request.user).order_by('-created_at')
     return render(request, 'my_tasks.html', {'posted_tasks': posted_tasks, 'taken_tasks': taken_tasks})
 
-@login_required
+
+@login_required(login_url='/login')
 def user_list(request):
     user_profile = get_object_or_404(UserProfile, user=request.user)
     current_friends = user_profile.friends.all().values_list('user__id', flat=True)
@@ -269,7 +305,8 @@ def user_list(request):
     users = UserProfile.objects.exclude(user__id__in=exclude_ids)
     return render(request, 'user_list.html', {'users': users})
 
-@login_required
+
+@login_required(login_url='/login')
 def friends_view(request):
     user_profile = get_object_or_404(UserProfile, user=request.user)
     friendships = Friendship.objects.filter(from_user=user_profile).order_by('-closeness')
@@ -287,7 +324,8 @@ def friends_view(request):
     }
     return render(request, 'friends.html', context)
 
-@login_required
+
+@login_required(login_url='/login')
 def send_friend_request(request, user_id):
     if request.method == 'POST':
         to_user = get_object_or_404(User, id=user_id)
@@ -303,13 +341,14 @@ def send_friend_request(request, user_id):
             Notification.objects.create(
                 recipient=to_user,
                 message=f"{request.user.username} sent you a friend request.",
-                link=f"{{% url 'friends' %}}" # Link to the friends page
+                link=reverse('friends')  # Link to the friends page
             )
         else:
             messages.info(request, 'Friend request already sent.')
     return redirect('friends')
 
-@login_required
+
+@login_required(login_url='/login')
 def accept_friend_request(request, request_id):
     friend_request = get_object_or_404(FriendRequest, id=request_id)
     if friend_request.to_user == request.user:
@@ -333,13 +372,14 @@ def accept_friend_request(request, request_id):
         Notification.objects.create(
             recipient=from_user_profile.user,
             message=f"{request.user.username} accepted your friend request.",
-            link=f"{{% url 'friends' %}}" # Link to the friends page
+            link=reverse('friends')  # Link to the friends page
         )
     else:
         messages.error(request, 'Invalid request.')
     return redirect('friends')
 
-@login_required
+
+@login_required(login_url='/login')
 def decline_friend_request(request, request_id):
     friend_request = get_object_or_404(FriendRequest, id=request_id)
     if friend_request.to_user == request.user:
@@ -349,13 +389,14 @@ def decline_friend_request(request, request_id):
         # Notification.objects.create(
         #     recipient=friend_request.from_user,
         #     message=f"{request.user.username} declined your friend request.",
-        #     link=f"{{% url 'friends' %}}"
+        #     link=f"{% url 'friends' %}"
         # )
     else:
         messages.error(request, 'Invalid request.')
     return redirect('friends')
 
-@login_required
+
+@login_required(login_url='/login')
 def notifications_view(request):
     notifications = Notification.objects.filter(recipient=request.user).order_by('-created_at')
     # Mark all unread notifications as read when the page is viewed

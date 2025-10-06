@@ -54,11 +54,14 @@ class Friendship(models.Model):
     closeness = models.IntegerField(default=50)
 
 class Conversation(models.Model):
-    task = models.OneToOneField(Task, on_delete=models.CASCADE)
+    task = models.OneToOneField(Task, on_delete=models.CASCADE, null=True, blank=True)
     participants = models.ManyToManyField(User, related_name='conversations')
 
     def __str__(self):
-        return f"Chat for task: {self.task.title}"
+        if self.task:
+            return f"Chat for task: {self.task.title}"
+        participant_names = [user.username for user in self.participants.all()]
+        return f"Chat between {' and '.join(participant_names)}"
 
 class Notification(models.Model):
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')

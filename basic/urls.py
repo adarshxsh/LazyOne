@@ -14,6 +14,7 @@ urlpatterns = [
     path('task/take/<int:task_id>/', views.take_task, name='take_task'),
     path('task/complete/<int:task_id>/', views.complete_task, name='complete_task'),
     path('my_tasks/', views.my_tasks, name='my_tasks'),
+    path('chat/start/<int:user_id>/', views.start_chat, name='start_chat'),
     path('chat/<int:conversation_id>/', views.chat_view, name='chat_view'),
     path('users/', views.user_list, name='user_list'),
     path('friends/', views.friends_view, name='friends'),
