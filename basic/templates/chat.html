@@ -1,0 +1,123 @@
+{% extends 'base.html' %}
+
+{% block title %}Chat for: {{ conversation.task.title }}{% endblock %}
+
+{% block content %}
+<style>
+    .chat-container { max-width: 800px; margin: auto; border: 1px solid #ccc; padding: 20px; height: 70vh; display: flex; flex-direction: column; }
+    .message-list { flex-grow: 1; overflow-y: auto; margin-bottom: 20px; padding-right: 15px; }
+    .message { margin-bottom: 15px; padding: 10px; border-radius: 10px; max-width: 70%; display: flex; flex-direction: column; }
+    .message.me { background-color: #dcf8c6; align-self: flex-end; margin-left: auto; }
+    .message.other { background-color: #f1f0f0; align-self: flex-start; }
+    .message-author { font-weight: bold; font-size: 0.9em; margin-bottom: 5px; }
+    .message-content { margin: 0; }
+    .message-timestamp { font-size: 0.7em; color: #888; text-align: right; margin-top: 5px; }
+    #message-form { display: flex; }
+    #message-input { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
+    #message-submit { padding: 10px 20px; margin-left: 10px; border: none; background-color: #007bff; color: white; border-radius: 5px; cursor: pointer; }
+</style>
+
+<div class="chat-container">
+    <h2>Chat for: {{ conversation.task.title }}</h2>
+    <div class="message-list" id="message-list">
+        <p id="loading-messages">Loading chat...</p>
+    </div>
+    <form class="message-form" id="message-form">
+        <input type="text" id="message-input" placeholder="Type your message..." autocomplete="off" required>
+        <button type="submit" id="message-submit">Send</button>
+    </form>
+</div>
+
+<!-- Include Firebase SDKs -->
+<script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
+
+<script>
+    // Securely initialize Firebase from backend context
+    var firebaseConfig = {
+        apiKey: "{{ FIREBASE_API_KEY }}",
+        authDomain: "{{ FIREBASE_AUTH_DOMAIN }}",
+        projectId: "{{ FIREBASE_PROJECT_ID }}",
+        storageBucket: "{{ FIREBASE_STORAGE_BUCKET }}",
+        messagingSenderId: "{{ FIREBASE_MESSAGING_SENDER_ID }}",
+        appId: "{{ FIREBASE_APP_ID }}"
+    };
+    if (!firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+    } else {
+        firebase.app();
+    }
+
+    const db = firebase.firestore();
+    const conversationId = "{{ conversation.id }}";
+    const currentUser = {
+        username: "{{ request.user.username }}",
+        id: "{{ request.user.id }}"
+    };
+
+    const messageList = document.getElementById('message-list');
+    const messageForm = document.getElementById('message-form');
+    const messageInput = document.getElementById('message-input');
+    const loadingIndicator = document.getElementById('loading-messages');
+
+    // --- Firestore Real-Time Listener ---
+    const messagesRef = db.collection('conversations').doc(conversationId).collection('messages').orderBy('timestamp');
+
+    messagesRef.onSnapshot(snapshot => {
+        loadingIndicator.style.display = 'none';
+        snapshot.docChanges().forEach(change => {
+            if (change.type === 'added') {
+                const data = change.doc.data();
+                renderMessage(data);
+            }
+        });
+        scrollToBottom();
+    }, error => {
+        console.error("Error listening for messages: ", error);
+        loadingIndicator.textContent = "Error loading chat. Please refresh.";
+    });
+
+    // --- Form Submission ---
+    messageForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const messageContent = messageInput.value;
+        if (messageContent.trim() === '') return;
+
+        // Add a new message to Firestore
+        db.collection('conversations').doc(conversationId).collection('messages').add({
+            content: messageContent,
+            authorId: currentUser.id,
+            authorUsername: currentUser.username,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        }).catch(error => {
+            console.error("Error sending message: ", error);
+            alert("Could not send message.");
+        });
+
+        messageInput.value = '';
+    });
+
+    // --- Utility Functions ---
+    function renderMessage(data) {
+        const messageElement = document.createElement('div');
+        messageElement.classList.add('message');
+        messageElement.classList.add(data.authorId == currentUser.id ? 'me' : 'other');
+
+        const timestamp = data.timestamp ? new Date(data.timestamp.seconds * 1000).toLocaleString() : 'Sending...';
+
+        messageElement.innerHTML = `
+            <p class="message-author">${data.authorUsername}</p>
+            <p class="message-content">${data.content}</p>
+            <p class="message-timestamp">${timestamp}</p>
+        `;
+        messageList.appendChild(messageElement);
+    }
+
+    function scrollToBottom() {
+        messageList.scrollTop = messageList.scrollHeight;
+    }
+
+</script>
+
+{% endblock %}

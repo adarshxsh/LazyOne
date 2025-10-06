@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+
+{% block title %}Your Notifications{% endblock %}
+
+{% block content %}
+    <h2>Your Notifications</h2>
+
+    {% for notification in notifications %}
+        <div style="border: 1px solid #eee; padding: 10px; margin-bottom: 10px; border-radius: 5px; {% if not notification.is_read %}background-color: #e6f7ff;{% endif %}">
+            <p>{{ notification.message }}</p>
+            {% if notification.link %}
+                <a href="{{ notification.link }}">View Details</a>
+            {% endif %}
+            <p style="font-size: 0.8em; color: #888;">{{ notification.created_at|date:"d M Y, H:i" }}</p>
+        </div>
+    {% empty %}
+        <p>You have no new notifications.</p>
+    {% endfor %}
+{% endblock %}

@@ -48,47 +48,20 @@
         font-size: 14px;
         z-index: 100;
     }
-    /* Modal Styles */
-    .modal {
-        display: none;
-        position: fixed;
-        z-index: 1001;
-        left: 0;
-        top: 0;
-        width: 100%;
-        height: 100%;
-        overflow: auto;
-        background-color: rgba(0,0,0,0.4);
-    }
-    .modal-content {
-        background-color: #fefefe;
-        margin: 15% auto;
-        padding: 20px;
-        border: 1px solid #888;
-        width: 80%;
-        max-width: 400px;
-        text-align: center;
-        border-radius: 10px;
-    }
-    .close-button {
-        color: #aaa;
-        float: right;
-        font-size: 28px;
-        font-weight: bold;
-        cursor: pointer;
-    }
-    .chat-button {
+    .recent-chats { margin: 20px auto; max-width: 800px; }
+    .chat-link {
         display: block;
-        width: 80%;
         padding: 10px;
-        margin: 10px auto;
-        border: none;
-        border-radius: 5px;
-        color: white;
+        border: 1px solid #eee;
+        margin-bottom: 5px;
         text-decoration: none;
+        color: #333;
+        border-radius: 5px;
     }
-    .whatsapp-button { background-color: #25D366; }
-    .instagram-button { background-color: #E4405F; }
+    .chat-link:hover { background-color: #f9f9f9; }
+    .search-form { margin: 20px auto; max-width: 800px; display: flex; }
+    .search-form input { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
+    .search-form button { padding: 10px 20px; margin-left: 10px; border: none; background-color: #007bff; color: white; border-radius: 5px; cursor: pointer; }
 </style>
 
 <h1>Your Social Circle</h1>
@@ -97,18 +70,28 @@
     <!-- Orbits and user nodes will be injected here by JavaScript -->
 </div>
 
-<!-- The Modal -->
-<div id="chat-modal" class="modal">
-  <div class="modal-content">
-    <span class="close-button">&times;</span>
-    <h3 id="modal-username"></h3>
-    <div id="modal-buttons"></div>
-  </div>
+<hr>
+
+<div class="recent-chats">
+    <h2>Recent Chats</h2>
+    {% for conv in recent_conversations %}
+        <a href="{% url 'chat_view' conv.id %}" class="chat-link">
+            Chat for task: <strong>{{ conv.task.title }}</strong>
+        </a>
+    {% empty %}
+        <p>No recent conversations. Take a task to start chatting!</p>
+    {% endfor %}
 </div>
 
 <hr>
 
 <h2>Available Tasks</h2>
+
+<form method="get" action="{% url 'home' %}" class="search-form">
+    <input type="text" name="q" value="{{ search_query|default_if_none:'' }}" placeholder="Search for tasks...">
+    <button type="submit">Search</button>
+</form>
+
 {% for task in tasks %}
     <div>
         <h3>{{ task.title }}</h3>
@@ -119,7 +102,7 @@
         <hr>
     </div>
 {% empty %}
-    <p>No tasks available at the moment.</p>
+    <p>No tasks available matching your search.</p>
 {% endfor %}
 
 <script>
@@ -130,18 +113,6 @@ document.addEventListener('DOMContentLoaded', function() {
         id: {{ request.user.id }},
         username: '{{ request.user.username }}',
         closeness: 101 // Center
-    };
-
-    const modal = document.getElementById('chat-modal');
-    const modalUsername = document.getElementById('modal-username');
-    const modalButtons = document.getElementById('modal-buttons');
-    const closeButton = document.querySelector('.close-button');
-
-    closeButton.onclick = () => { modal.style.display = "none"; };
-    window.onclick = (event) => {
-        if (event.target == modal) {
-            modal.style.display = "none";
-        }
     };
 
     const circles = {
@@ -176,44 +147,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const nodeElement = document.createElement('a');
             nodeElement.className = 'user-node';
-            nodeElement.href = '#';
+            nodeElement.href = `/user/${node.id}/`;
             nodeElement.style.left = `${x}px`;
             nodeElement.style.top = `${y}px`;
             nodeElement.textContent = node.username.split('@')[0];
             nodeElement.title = `${node.username} (Closeness: ${node.closeness})`;
-
-            nodeElement.addEventListener('click', (e) => {
-                e.preventDefault();
-                modalUsername.textContent = node.username;
-                modalButtons.innerHTML = ''; // Clear previous buttons
-
-                let hasContact = false;
-                // --- UPDATED LOGIC HERE ---
-                if (node.phone && node.is_phone_verified) {
-                    hasContact = true;
-                    const waButton = document.createElement('a');
-                    waButton.href = `https://wa.me/${node.phone}`;
-                    waButton.target = '_blank';
-                    waButton.className = 'chat-button whatsapp-button';
-                    waButton.textContent = 'Chat on WhatsApp (Verified)';
-                    modalButtons.appendChild(waButton);
-                }
-                if (node.instagram) {
-                    hasContact = true;
-                    const igButton = document.createElement('a');
-                    igButton.href = `https://ig.me/m/${node.instagram}`;
-                    igButton.target = '_blank';
-                    igButton.className = 'chat-button instagram-button';
-                    igButton.textContent = 'Chat on Instagram';
-                    modalButtons.appendChild(igButton);
-                }
-
-                if (!hasContact) {
-                    modalButtons.innerHTML = '<p>This user has not provided any verified contact information.</p>';
-                }
-
-                modal.style.display = "block";
-            });
 
             container.appendChild(nodeElement);
         });

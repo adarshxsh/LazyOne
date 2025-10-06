@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ viewed_profile.user.username }}'s Profile{% endblock %}
+
+{% block content %}
+<style>
+    .profile-container { max-width: 800px; margin: auto; padding: 20px; }
+    .profile-header { margin-bottom: 20px; }
+    .profile-section { margin-top: 30px; }
+    .task-card, .friend-card {
+        border: 1px solid #eee;
+        padding: 15px;
+        margin-bottom: 10px;
+        border-radius: 5px;
+    }
+</style>
+
+<div class="profile-container">
+    <div class="profile-header">
+        <h1>{{ viewed_profile.user.username }}</h1>
+        <p><strong>Name:</strong> {{ viewed_profile.first_name }} {{ viewed_profile.last_name }}</p>
+        <p><strong>College:</strong> {{ viewed_profile.college }}</p>
+        <p><strong>Major:</strong> {{ viewed_profile.major }}</p>
+        <p><strong>Bio:</strong> {{ viewed_profile.bio }}</p>
+    </div>
+
+    <div class="profile-section">
+        <h2>Friends</h2>
+        {% for friend_profile in user_friends %}
+            <div class="friend-card">
+                <a href="{% url 'user_profile' friend_profile.user.id %}">{{ friend_profile.user.username }}</a>
+            </div>
+        {% empty %}
+            <p>This user has not added any friends yet.</p>
+        {% endfor %}
+    </div>
+
+    <div class="profile-section">
+        <h2>Posted Tasks</h2>
+        {% for task in posted_tasks %}
+            <div class="task-card">
+                <h4>{{ task.title }}</h4>
+                <p>{{ task.description }}</p>
+                <p><b>Reward:</b> {{ task.reward }} points</p>
+                <p><b>Status:</b> 
+                    {% if task.is_completed %}Completed
+                    {% elif task.is_taken %}In Progress
+                    {% else %}Open
+                    {% endif %}
+                </p>
+            </div>
+        {% empty %}
+            <p>This user has not posted any tasks.</p>
+        {% endfor %}
+    </div>
+</div>
+
+{% endblock %}

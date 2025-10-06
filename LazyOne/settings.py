@@ -76,6 +76,7 @@ TEMPLATES = [
     },
 ]
 
+# The standard WSGI application is now used.
 WSGI_APPLICATION = 'LazyOne.wsgi.application'
 
 

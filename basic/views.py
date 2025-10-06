@@ -1,12 +1,13 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from .models import UserProfile, Task, FriendRequest, Friendship
+from .models import UserProfile, Task, FriendRequest, Friendship, Conversation, Notification
 from django.contrib.auth.models import User
 from django.contrib.auth import login, logout, authenticate
 from django.db import transaction
+from django.db.models import Q
 import json
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponseForbidden
 from firebase_admin import auth
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
@@ -20,7 +21,19 @@ logger = logging.getLogger(__name__)
 
 @login_required
 def home(request):
-    tasks = Task.objects.filter(is_taken=False, is_completed=False).order_by('-created_at')[:10]
+    # --- Search Logic ---
+    query = request.GET.get('q', '')
+    tasks = Task.objects.filter(is_taken=False, is_completed=False)
+    if query:
+        tasks = tasks.filter(
+            Q(title__icontains=query) | Q(description__icontains=query)
+        )
+    tasks = tasks.order_by('-created_at')[:20] # Show up to 20 results
+
+    # --- Data for Recent Conversations ---
+    recent_conversations = Conversation.objects.filter(participants=request.user).order_by('-task__created_at')[:10]
+
+    # --- Data for Friend Circle Visualization ---
     user_nodes = []
     user_profile = get_object_or_404(UserProfile, user=request.user)
     friendships = Friendship.objects.filter(from_user=user_profile)
@@ -48,9 +61,12 @@ def home(request):
                 'is_phone_verified': other_user.is_phone_verified,
                 'instagram': other_user.instagram_username
             })
+    
     context = {
+        'recent_conversations': recent_conversations,
         'tasks': tasks,
-        'user_nodes_json': json.dumps(user_nodes)
+        'user_nodes_json': json.dumps(user_nodes),
+        'search_query': query
     }
     return render(request, 'home.html', context)
 
@@ -63,29 +79,15 @@ def firebase_login(request):
             if not id_token:
                 return JsonResponse({'status': 'error', 'message': 'Token not provided'}, status=400)
 
-            logger.info("Attempting to authenticate with Firebase token.")
             user = authenticate(request, token=id_token)
 
             if user is not None:
-                logger.info(f"Authentication successful for user: {user.username}")
-                logger.info(f"Session before login: {request.session.items()}")
-                
                 login(request, user)
-                
-                # Verify session was created
-                logger.info(f"Session after login: {request.session.items()}")
-                if '_auth_user_id' in request.session:
-                    logger.info(f"SUCCESS: User {request.session['_auth_user_id']} is in the session.")
-                else:
-                    logger.error("CRITICAL FAILURE: User ID not found in session after login call.")
-
                 return JsonResponse({'status': 'success', 'message': 'User logged in successfully'})
             else:
-                logger.error("Authentication failed. authenticate() returned None.")
                 return JsonResponse({'status': 'error', 'message': 'Invalid token or user not found.'}, status=401)
 
         except Exception as e:
-            logger.error(f"An exception occurred during login: {e}", exc_info=True)
             return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
     return JsonResponse({'status': 'error', 'message': 'Invalid request method'}, status=405)
@@ -116,6 +118,21 @@ def profile_view(request):
     return render(request, 'profile.html', {'profile': profile})
 
 @login_required
+def user_profile_view(request, user_id):
+    viewed_user = get_object_or_404(User, id=user_id)
+    viewed_profile = get_object_or_404(UserProfile, user=viewed_user)
+    
+    posted_tasks = Task.objects.filter(posted_by=viewed_user).order_by('-created_at')
+    user_friends = viewed_profile.friends.all()
+
+    context = {
+        'viewed_profile': viewed_profile,
+        'posted_tasks': posted_tasks,
+        'user_friends': user_friends
+    }
+    return render(request, 'user_profile.html', context)
+
+@login_required
 def verify_phone_token(request):
     if request.method == 'POST':
         try:
@@ -143,6 +160,13 @@ def verify_phone_token(request):
             return JsonResponse({'success': False, 'error': str(e)}, status=500)
 
     return JsonResponse({'success': False, 'error': 'Invalid request method.'}, status=405)
+
+@login_required
+def chat_view(request, conversation_id):
+    conversation = get_object_or_404(Conversation, id=conversation_id)
+    if request.user not in conversation.participants.all():
+        return HttpResponseForbidden("You are not authorized to view this chat.")
+    return render(request, 'chat.html', {'conversation': conversation})
 
 @login_required
 def add_task(request):
@@ -188,11 +212,25 @@ def take_task(request, task_id):
     elif task.is_taken:
         messages.error(request, "This task has already been taken.")
     else:
-        task.is_taken = True
-        task.taken_by = request.user
-        task.save()
-        messages.success(request, "Task has been assigned to you.")
-    return redirect('home')
+        with transaction.atomic():
+            task.is_taken = True
+            task.taken_by = request.user
+            task.save()
+
+            conversation, created = Conversation.objects.get_or_create(task=task)
+            if created:
+                conversation.participants.add(task.posted_by, task.taken_by)
+                # Notify the task poster that their task has been taken
+                Notification.objects.create(
+                    recipient=task.posted_by,
+                    message=f"{request.user.username} has taken your task: {task.title}",
+                    link=f"{{% url 'my_tasks' %}}" # Link to my tasks page
+                )
+                messages.success(request, "Task has been assigned to you and a chat has been created.")
+            else:
+                messages.success(request, "Task has been assigned to you.")
+
+    return redirect('my_tasks')
 
 @login_required
 def complete_task(request, task_id):
@@ -261,6 +299,12 @@ def send_friend_request(request, user_id):
         )
         if created:
             messages.success(request, 'Friend request sent.')
+            # Create notification for the recipient
+            Notification.objects.create(
+                recipient=to_user,
+                message=f"{request.user.username} sent you a friend request.",
+                link=f"{{% url 'friends' %}}" # Link to the friends page
+            )
         else:
             messages.info(request, 'Friend request already sent.')
     return redirect('friends')
@@ -285,6 +329,12 @@ def accept_friend_request(request, request_id):
         )
         friend_request.delete()
         messages.success(request, 'Friend request accepted.')
+        # Create notification for the sender
+        Notification.objects.create(
+            recipient=from_user_profile.user,
+            message=f"{request.user.username} accepted your friend request.",
+            link=f"{{% url 'friends' %}}" # Link to the friends page
+        )
     else:
         messages.error(request, 'Invalid request.')
     return redirect('friends')
@@ -295,6 +345,19 @@ def decline_friend_request(request, request_id):
     if friend_request.to_user == request.user:
         friend_request.delete()
         messages.success(request, 'Friend request declined.')
+        # Optionally, notify the sender that their request was declined
+        # Notification.objects.create(
+        #     recipient=friend_request.from_user,
+        #     message=f"{request.user.username} declined your friend request.",
+        #     link=f"{{% url 'friends' %}}"
+        # )
     else:
         messages.error(request, 'Invalid request.')
     return redirect('friends')
+
+@login_required
+def notifications_view(request):
+    notifications = Notification.objects.filter(recipient=request.user).order_by('-created_at')
+    # Mark all unread notifications as read when the page is viewed
+    Notification.objects.filter(recipient=request.user, is_read=False).update(is_read=True)
+    return render(request, 'notifications.html', {'notifications': notifications})

@@ -15,8 +15,18 @@
                 <b>Status:</b>
                 {% if task.is_completed %}
                     Completed by {{ task.taken_by.username }}
+                    {% with conversation=task.conversation %}
+                        {% if conversation %}
+                            <a href="{% url 'chat_view' conversation.id %}"><button>View Chat History</button></a>
+                        {% endif %}
+                    {% endwith %}
                 {% elif task.is_taken %}
                     In progress by {{ task.taken_by.username }}
+                    {% with conversation=task.conversation %}
+                        {% if conversation %}
+                            <a href="{% url 'chat_view' conversation.id %}"><button>Go to Chat</button></a>
+                        {% endif %}
+                    {% endwith %}
                     <a href="{% url 'complete_task' task.id %}"><button>Mark as Complete</button></a>
                 {% else %}
                     Waiting for someone to take it
@@ -41,8 +51,18 @@
                 <b>Status:</b>
                 {% if task.is_completed %}
                     Completed
+                    {% with conversation=task.conversation %}
+                        {% if conversation %}
+                            <a href="{% url 'chat_view' conversation.id %}"><button>View Chat History</button></a>
+                        {% endif %}
+                    {% endwith %}
                 {% else %}
                     In Progress
+                    {% with conversation=task.conversation %}
+                        {% if conversation %}
+                            <a href="{% url 'chat_view' conversation.id %}"><button>Go to Chat</button></a>
+                        {% endif %}
+                    {% endwith %}
                 {% endif %}
             </p>
             <hr>

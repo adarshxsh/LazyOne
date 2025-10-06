@@ -20,6 +20,7 @@ class UserProfile(models.Model):
     is_phone_verified = models.BooleanField(default=False)
     instagram_username = models.CharField(max_length=100, blank=True)
     is_instagram_verified = models.BooleanField(default=False)
+    firebase_uid = models.CharField(max_length=128, blank=True, null=True, unique=True)
 
     def __str__(self):
         return self.user.username
@@ -51,3 +52,23 @@ class Friendship(models.Model):
     from_user = models.ForeignKey(UserProfile, related_name='friendship_from_user', on_delete=models.CASCADE)
     to_user = models.ForeignKey(UserProfile, related_name='friendship_to_user', on_delete=models.CASCADE)
     closeness = models.IntegerField(default=50)
+
+class Conversation(models.Model):
+    task = models.OneToOneField(Task, on_delete=models.CASCADE)
+    participants = models.ManyToManyField(User, related_name='conversations')
+
+    def __str__(self):
+        return f"Chat for task: {self.task.title}"
+
+class Notification(models.Model):
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    message = models.CharField(max_length=255)
+    link = models.URLField(blank=True, null=True) # Optional link for the notification
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Notification for {self.recipient.username}: {self.message}"
+
+    class Meta:
+        ordering = ['-created_at']
