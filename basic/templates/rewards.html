@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+
+{% block title %}My Rewards{% endblock %}
+
+{% block content %}
+<div class="space-y-12">
+    <div class="text-center">
+        <h1 class="text-4xl font-bold tracking-tight text-white sm:text-5xl">My Rewards Dashboard</h1>
+        <p class="mt-3 text-lg text-gray-300">Track your points and see your transaction history.</p>
+    </div>
+
+    <!-- Key Metrics -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
+        <div class="bg-gray-700/50 p-6 rounded-2xl">
+            <p class="text-sm font-medium text-gray-400">Current Balance</p>
+            <p class="mt-1 text-4xl font-bold text-cyan-400">{{ current_balance }}</p>
+        </div>
+        <div class="bg-gray-700/50 p-6 rounded-2xl">
+            <p class="text-sm font-medium text-gray-400">Total Earned</p>
+            <p class="mt-1 text-4xl font-bold text-green-400">+{{ rewards_earned.count }}</p>
+        </div>
+        <div class="bg-gray-700/50 p-6 rounded-2xl">
+            <p class="text-sm font-medium text-gray-400">Points Pending</p>
+            <p class="mt-1 text-4xl font-bold text-yellow-400">{{ pending_points }}</p>
+        </div>
+    </div>
+
+    <!-- Transaction History -->
+    <div>
+        <h2 class="text-2xl font-semibold text-white mb-4">Transaction History</h2>
+        <div class="bg-gray-700/20 rounded-xl overflow-hidden">
+            <ul class="divide-y divide-gray-700">
+                {% for transaction in all_transactions %}
+                <li class="p-4 flex justify-between items-center hover:bg-gray-700/40 transition-colors">
+                    <div>
+                        <p class="font-semibold text-white">{{ transaction.description }}</p>
+                        <p class="text-sm text-gray-400">{{ transaction.created_at|date:"F j, Y, g:i a" }}</p>
+                    </div>
+                    <div>
+                        <span class="font-bold text-lg {% if transaction.amount > 0 %}text-green-400{% else %}text-red-400{% endif %}">
+                            {% if transaction.amount > 0 %}+{% endif %}{{ transaction.amount }}
+                        </span>
+                    </div>
+                </li>
+                {% empty %}
+                <li class="p-6 text-center text-gray-400">
+                    <p>You have no transactions yet.</p>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

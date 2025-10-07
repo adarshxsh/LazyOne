@@ -10,17 +10,13 @@
     <div class="mb-8">
         <div class="border-b border-gray-700">
             <nav class="-mb-px flex space-x-6" aria-label="Tabs">
-                <button id="tab-posted" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-lg text-cyan-400 border-cyan-400">
-                    Posted Tasks
-                </button>
-                <button id="tab-taken" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-lg text-gray-400 hover:text-white hover:border-gray-300 border-transparent">
-                    Taken Tasks
-                </button>
+                <button id="tab-posted" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-lg text-cyan-400 border-cyan-400">Posted Tasks</button>
+                <button id="tab-taken" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-lg text-gray-400 hover:text-white hover:border-gray-300 border-transparent">Taken Tasks</button>
             </nav>
         </div>
     </div>
 
-    <!-- Tab Content -->
+    <!-- Posted Tasks Content -->
     <div id="content-posted" class="space-y-4">
         {% for task in posted_tasks %}
             <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-5 transition-all duration-300 hover:shadow-cyan-500/20 hover:shadow-lg hover:border-cyan-500/50">
@@ -29,11 +25,16 @@
                         <h3 class="text-lg font-bold text-white">{{ task.title }}</h3>
                         <p class="text-sm text-gray-400 mt-1">
                             Status: 
-                            {% if task.is_completed %}<span class="text-green-400">Completed by {{ task.taken_by.username }}</span>
-                            {% elif task.is_taken %}<span class="text-amber-400">In progress by {{ task.taken_by.username }}</span>
-                            {% else %}<span class="text-cyan-400">Waiting for taker</span>
-                            {% endif %}
+                            <span class="font-semibold 
+                                {% if task.status == 'available' %}text-cyan-400{% endif %}
+                                {% if task.status == 'in_progress' %}text-yellow-400{% endif %}
+                                {% if task.status == 'completed' %}text-green-400{% endif %}
+                                {% if task.status == 'disputed' %}text-red-400{% endif %}
+                                {% if task.status == 'cancelled' %}text-gray-500{% endif %}
+                            ">{{ task.get_status_display }}</span>
+                            {% if task.status == 'in_progress' or task.status == 'completed' or task.status == 'disputed' %}by {{ task.taken_by.username }}{% endif %}
                         </p>
+                        {% if task.deadline %}<p class="text-xs text-gray-500 mt-1">Deadline: {{ task.deadline|date:"F j, Y, g:i a" }}</p>{% endif %}
                     </div>
                     <div class="text-right flex-shrink-0 ml-4">
                         <p class="text-xl font-semibold text-cyan-400">{{ task.reward }}</p>
@@ -41,25 +42,32 @@
                     </div>
                 </div>
                 <div class="mt-4 flex items-center space-x-3">
-                    {% if task.is_completed %}
-                        {% if task.conversation %}
-                            <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-500 transition-colors text-sm">View Chat</a>
-                        {% endif %}
-                    {% elif task.is_taken %}
+                    {% if task.status == 'available' %}
+                        <a href="{% url 'cancel_task' task.id %}" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-500 transition-colors text-sm">Cancel Task</a>
+                    {% elif task.status == 'in_progress' %}
                         <a href="{% url 'complete_task' task.id %}" class="inline-block bg-green-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-green-500 transition-colors text-sm">Mark as Complete</a>
-                        {% if task.conversation %}
-                            <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-cyan-500/80 text-white font-semibold px-4 py-2 rounded-lg hover:bg-cyan-500 transition-colors text-sm">Go to Chat</a>
+                        {% if task.cancellation_requested %}
+                            <span class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg text-sm">Cancellation Requested</span>
+                        {% else %}
+                            <a href="{% url 'request_cancellation' task.id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-500 transition-colors text-sm">Request Cancellation</a>
                         {% endif %}
+                        <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-cyan-500/80 text-white font-semibold px-4 py-2 rounded-lg hover:bg-cyan-500 transition-colors text-sm">Go to Chat</a>
+                    {% elif task.status == 'disputed' %}
+                        <p class="text-sm text-red-400">This task is in dispute. You can end the dispute by completing the task.</p>
+                        <a href="{% url 'complete_task' task.id %}" class="inline-block bg-green-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-green-500 transition-colors text-sm">Mark as Complete</a>
+                        <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-500/80 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-500 transition-colors text-sm">Go to Chat</a>
+                        <a href="{% url 'dispute_detail' task.dispute.id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-500 transition-colors text-sm">View Dispute</a>
+                    {% elif task.status == 'completed' and task.conversation %}
+                         <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-500 transition-colors text-sm">View Chat</a>
                     {% endif %}
                 </div>
             </div>
         {% empty %}
-            <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-8 text-center">
-                <p class="text-gray-400">You haven't posted any tasks yet.</p>
-            </div>
+            <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-8 text-center"><p class="text-gray-400">You haven't posted any tasks yet.</p></div>
         {% endfor %}
     </div>
 
+    <!-- Taken Tasks Content -->
     <div id="content-taken" class="space-y-4 hidden">
         {% for task in taken_tasks %}
             <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-5 transition-all duration-300 hover:shadow-cyan-500/20 hover:shadow-lg hover:border-cyan-500/50">
@@ -67,32 +75,57 @@
                     <div>
                         <h3 class="text-lg font-bold text-white">{{ task.title }}</h3>
                         <p class="text-sm text-gray-400 mt-1">Posted by: {{ task.posted_by.username }}</p>
+                        {% if task.deadline %}<p class="text-xs text-gray-500 mt-1">Deadline: {{ task.deadline|date:"F j, Y, g:i a" }}</p>{% endif %}
                     </div>
                     <div class="text-right flex-shrink-0 ml-4">
                         <p class="text-xl font-semibold text-cyan-400">{{ task.reward }}</p>
                         <p class="text-xs text-gray-500">Points</p>
                     </div>
                 </div>
-                <p class="text-gray-300 mt-3">{{ task.description }}</p>
                 <div class="mt-4 flex items-center space-x-3">
-                    {% if task.is_completed %}
-                        <p class="text-green-400 font-semibold">Task Completed</p>
-                        {% if task.conversation %}
-                            <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-500 transition-colors text-sm">View Chat</a>
-                        {% endif %}
-                    {% else %}
-                        <p class="text-amber-400 font-semibold">In Progress</p>
-                        {% if task.conversation %}
+                    {% if task.status == 'in_progress' %}
+                        {% if task.cancellation_requested %}
+                            <a href="{% url 'accept_cancellation' task.id %}" class="inline-block bg-green-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-green-500 transition-colors text-sm">Accept Cancellation</a>
+                            <p class="text-sm text-yellow-400">The poster wants to cancel this task.</p>
+                        {% else %}
                             <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-cyan-500/80 text-white font-semibold px-4 py-2 rounded-lg hover:bg-cyan-500 transition-colors text-sm">Go to Chat</a>
+                            <a href="{% url 'abandon_task' task.id %}" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-500 transition-colors text-sm">Abandon Task</a>
+                            <button onclick="openDisputeModal('{{ task.id }}')" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-500 transition-colors text-sm">Raise Dispute</button>
                         {% endif %}
+                    {% elif task.status == 'disputed' %}
+                        <p class="text-sm text-red-400">You have raised a dispute. The poster can approve payment to resolve it.</p>
+                        <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-500/80 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-500 transition-colors text-sm">Go to Chat</a>
+                        <form action="{% url 'withdraw_dispute' task.dispute.id %}" method="post" class="inline">
+                            <a href="{% url 'dispute_detail' task.dispute.id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-500 transition-colors text-sm">View Dispute</a>
+                            {% csrf_token %}
+                            <button type="submit" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-500 transition-colors text-sm">Withdraw Dispute</button>
+                        </form>
+                    {% elif task.status == 'completed' %}
+                        <p class="text-green-400 font-semibold">Task Completed</p>
+                    {% else %}
+                        <p class="text-gray-400 font-semibold">{{ task.get_status_display }}</p>
                     {% endif %}
                 </div>
             </div>
         {% empty %}
-            <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-8 text-center">
-                <p class="text-gray-400">You haven't taken any tasks yet.</p>
-            </div>
+            <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-8 text-center"><p class="text-gray-400">You haven't taken any tasks yet.</p></div>
         {% endfor %}
+    </div>
+</div>
+
+<!-- Dispute Modal -->
+<div id="dispute-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 hidden">
+    <div class="bg-gray-800 rounded-2xl shadow-2xl p-8 max-w-md w-full border border-gray-700">
+        <h3 class="text-2xl font-bold text-white mb-4">Raise a Dispute</h3>
+        <p class="text-gray-400 mb-6">Please explain why you are raising a dispute. This will be visible to the task poster.</p>
+        <form id="dispute-form" method="post">
+            {% csrf_token %}
+            <textarea id="dispute-reason" name="reason" rows="4" required class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400"></textarea>
+            <div class="mt-6 flex justify-end space-x-4">
+                <button type="button" onclick="closeDisputeModal()" class="px-6 py-2 rounded-lg text-white bg-gray-600 hover:bg-gray-500 transition-colors">Cancel</button>
+                <button type="submit" class="px-6 py-2 rounded-lg text-white font-semibold bg-red-600 hover:bg-red-500 transition-colors">Submit Dispute</button>
+            </div>
+        </form>
     </div>
 </div>
 
@@ -104,28 +137,30 @@
         const contentTaken = document.getElementById('content-taken');
 
         tabPosted.addEventListener('click', () => {
-            // Activate Posted tab
-            tabPosted.classList.add('text-cyan-400', 'border-cyan-400');
-            tabPosted.classList.remove('text-gray-400', 'hover:text-white', 'hover:border-gray-300', 'border-transparent');
-            // Deactivate Taken tab
-            tabTaken.classList.add('text-gray-400', 'hover:text-white', 'hover:border-gray-300', 'border-transparent');
-            tabTaken.classList.remove('text-cyan-400', 'border-cyan-400');
-            // Show Posted content
+            tabPosted.className = 'whitespace-nowrap py-4 px-1 border-b-2 font-medium text-lg text-cyan-400 border-cyan-400';
+            tabTaken.className = 'whitespace-nowrap py-4 px-1 border-b-2 font-medium text-lg text-gray-400 hover:text-white hover:border-gray-300 border-transparent';
             contentPosted.classList.remove('hidden');
             contentTaken.classList.add('hidden');
         });
 
         tabTaken.addEventListener('click', () => {
-            // Activate Taken tab
-            tabTaken.classList.add('text-cyan-400', 'border-cyan-400');
-            tabTaken.classList.remove('text-gray-400', 'hover:text-white', 'hover:border-gray-300', 'border-transparent');
-            // Deactivate Posted tab
-            tabPosted.classList.add('text-gray-400', 'hover:text-white', 'hover:border-gray-300', 'border-transparent');
-            tabPosted.classList.remove('text-cyan-400', 'border-cyan-400');
-            // Show Taken content
+            tabTaken.className = 'whitespace-nowrap py-4 px-1 border-b-2 font-medium text-lg text-cyan-400 border-cyan-400';
+            tabPosted.className = 'whitespace-nowrap py-4 px-1 border-b-2 font-medium text-lg text-gray-400 hover:text-white hover:border-gray-300 border-transparent';
             contentTaken.classList.remove('hidden');
             contentPosted.classList.add('hidden');
         });
     });
+
+    const disputeModal = document.getElementById('dispute-modal');
+    const disputeForm = document.getElementById('dispute-form');
+
+    function openDisputeModal(taskId) {
+        disputeForm.action = `/task/dispute/${taskId}/`;
+        disputeModal.classList.remove('hidden');
+    }
+
+    function closeDisputeModal() {
+        disputeModal.classList.add('hidden');
+    }
 </script>
 {% endblock %}

@@ -3,6 +3,38 @@
 {% block title %}Home{% endblock %}
 
 {% block content %}
+
+<!-- Disputed Tasks Section -->
+{% if disputed_tasks %}
+<div class="mb-12">
+    <div class="text-center mb-6">
+        <h2 class="text-3xl font-bold text-red-400">Disputed Tasks - Community Review</h2>
+        <p class="text-gray-400 mt-2">The following tasks are in dispute. Community members are encouraged to review the chat and help mediate.</p>
+    </div>
+    <div class="space-y-4">
+        {% for task in disputed_tasks %}
+            <div class="scroll-animate bg-red-900/30 border border-red-500/50 rounded-xl p-5 transition-all duration-300 hover:shadow-red-500/20 hover:shadow-lg">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <h3 class="text-lg font-bold text-white">{{ task.title }}</h3>
+                        <p class="text-sm text-gray-300 mt-1">Posted by: {{ task.posted_by.username }} | Taken by: {{ task.taken_by.username }}</p>
+                        <p class="text-sm text-gray-400 mt-2">Reason for dispute: <em class="text-gray-300">"{{ task.dispute.reason }}"</em></p>
+                    </div>
+                    <div class="text-right flex-shrink-0 ml-4">
+                        <p class="text-xl font-semibold text-red-400">{{ task.reward }}</p>
+                        <p class="text-xs text-gray-500">Points</p>
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-600 text-white font-semibold px-5 py-2 rounded-lg hover:bg-red-500 transition-colors">View Dispute Chat</a>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
     <!-- Left Column -->
@@ -24,18 +56,18 @@
 
         <!-- Recent Tasks Section -->
         <div class="mt-8">
-            <h2 class="text-2xl font-bold text-white mb-4">Recent Tasks</h2>
+            <h2 class="text-2xl font-bold text-white mb-4">Available Tasks</h2>
             <form method="get" action="{% url 'home' %}" class="mb-6">
                 <input type="text" name="q" value="{{ search_query|default_if_none:'' }}" placeholder="Search for tasks..." class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
             </form>
 
             <div class="space-y-4">
-                {% for task in recent_tasks %}
+                {% for task in available_tasks %}
                     <div class="scroll-animate bg-gray-800/50 border border-gray-700/50 rounded-xl p-5 transition-all duration-300 hover:shadow-cyan-500/20 hover:shadow-lg hover:border-cyan-500/50">
                         <div class="flex justify-between items-start">
                             <div>
                                 <h3 class="text-lg font-bold text-white">{{ task.title }}</h3>
-                                <p class="text-sm text-gray-400 mt-1">Posted by: {% if task.posted_by %}{{ task.posted_by.username }}{% else %}an anonymous user{% endif %}</p>
+                                <p class="text-sm text-gray-400 mt-1">Posted by: {{ task.posted_by.username }}</p>
                             </div>
                             <div class="text-right flex-shrink-0 ml-4">
                                 <p class="text-xl font-semibold text-cyan-400">{{ task.reward }}</p>
@@ -43,26 +75,11 @@
                             </div>
                         </div>
                         <p class="text-gray-300 mt-3">{{ task.description }}</p>
-
-                        {% if task.is_taken %}
-                            <p class="text-sm text-amber-400 mt-3"><i>Taken by: {% if task.taken_by %}{{ task.taken_by.username }}{% else %}an anonymous user{% endif %}</i></p>
-                        {% endif %}
-
                         <div class="mt-4">
-                            {% if task.is_taken %}
-                                {% if request.user.is_authenticated %}
-                                    {% if request.user == task.posted_by or request.user == task.taken_by %}
-                                        {% if task.conversation_id %}
-                                            <a href="{% url 'chat_view' task.conversation_id %}" class="inline-block bg-cyan-500/80 text-white font-semibold px-5 py-2 rounded-lg hover:bg-cyan-500 transition-colors">Chat</a>
-                                        {% endif %}
-                                    {% endif %}
-                                {% endif %}
+                            {% if request.user.is_authenticated %}
+                                <a href="{% url 'take_task' task.id %}" class="inline-block bg-teal-500 text-white font-semibold px-5 py-2 rounded-lg hover:bg-teal-600 transition-colors">Take Task</a>
                             {% else %}
-                                {% if request.user.is_authenticated %}
-                                    <a href="{% url 'take_task' task.id %}" class="inline-block bg-teal-500 text-white font-semibold px-5 py-2 rounded-lg hover:bg-teal-600 transition-colors">Take Task</a>
-                                {% else %}
-                                    <a href="{% url 'login_page' %}" class="inline-block bg-gray-600 text-white font-semibold px-5 py-2 rounded-lg hover:bg-gray-500 transition-colors">Login to Take Task</a>
-                                {% endif %}
+                                <a href="{% url 'login_page' %}" class="inline-block bg-gray-600 text-white font-semibold px-5 py-2 rounded-lg hover:bg-gray-500 transition-colors">Login to Take Task</a>
                             {% endif %}
                         </div>
                     </div>
@@ -113,61 +130,16 @@
 </div>
 
 <style>
-    .circle-orbit {
-        position: absolute;
-        border: 1px dashed #4a5568; /* gray-600 */
-        border-radius: 50%;
-        top: 50%;
-        left: 50%;
-    }
-    .user-node {
-        position: absolute;
-        width: 60px;
-        height: 60px;
-        background-color: #0d9488; /* teal-600 */
-        color: white;
-        border-radius: 50%;
-        border: 3px solid #1a202c; /* page background */
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        text-align: center;
-        font-size: 10px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.2s ease-in-out;
-        overflow: hidden;
-        padding: 5px;
-        text-decoration: none;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
-    }
-    .user-node:hover {
-        transform: scale(1.15);
-        z-index: 1000;
-        border-color: #2dd4bf; /* cyan-400 */
-    }
-    .user-node.center-user {
-        width: 80px;
-        height: 80px;
-        background-color: #0f766e; /* teal-700 */
-        font-size: 14px;
-        z-index: 100;
-        border-width: 4px;
-    }
-    .scroll-animate {
-        opacity: 0;
-        transform: translateY(20px);
-        transition: opacity 0.5s ease-out, transform 0.5s ease-out;
-    }
-    .scroll-animate.is-visible {
-        opacity: 1;
-        transform: translateY(0);
-    }
+    .circle-orbit { position: absolute; border: 1px dashed #4a5568; border-radius: 50%; top: 50%; left: 50%; }
+    .user-node { position: absolute; width: 60px; height: 60px; background-color: #0d9488; color: white; border-radius: 50%; border: 3px solid #1a202c; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 10px; font-weight: 600; cursor: pointer; transition: all 0.2s ease-in-out; overflow: hidden; padding: 5px; text-decoration: none; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4); }
+    .user-node:hover { transform: scale(1.15); z-index: 1000; border-color: #2dd4bf; }
+    .user-node.center-user { width: 80px; height: 80px; background-color: #0f766e; font-size: 14px; z-index: 100; border-width: 4px; }
+    .scroll-animate { opacity: 0; transform: translateY(20px); transition: opacity 0.5s ease-out, transform 0.5s ease-out; }
+    .scroll-animate.is-visible { opacity: 1; transform: translateY(0); }
 </style>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Scroll Animation
     const observer = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
@@ -176,51 +148,24 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }, { threshold: 0.1 });
+    document.querySelectorAll('.scroll-animate').forEach(el => observer.observe(el));
 
-    const elementsToAnimate = document.querySelectorAll('.scroll-animate');
-    elementsToAnimate.forEach(el => observer.observe(el));
-
-    // Friend Circle Logic
     const isAuthenticated = {{ request.user.is_authenticated|yesno:"true,false" }};
     if (!isAuthenticated) return;
 
     const container = document.getElementById('friend-circle-container');
     const userNodesData = JSON.parse('{{ user_nodes_json|escapejs }}');
-    const currentUser = {
-        id: {{ request.user.id }},
-        username: '{{ request.user.username }}',
-        closeness: 101 // Center
-    };
-
+    const currentUser = { id: {{ request.user.id }}, username: '{{ request.user.username }}' };
     const contextMenu = document.getElementById('context-menu');
 
-    window.addEventListener('click', () => {
-        if (contextMenu.style.display === 'block') {
-            contextMenu.style.display = 'none';
-        }
-    });
+    window.addEventListener('click', () => { if (contextMenu.style.display === 'block') contextMenu.style.display = 'none'; });
 
-    const circles = {
-        c1: { radius: 100, nodes: [], orbitSize: 200 },
-        c2: { radius: 175, nodes: [], orbitSize: 350 },
-        c3: { radius: 250, nodes: [], orbitSize: 500 },
-        c4: { radius: 300, nodes: [], orbitSize: 600 }
-    };
-
-    for (const key in circles) {
-        const orbit = document.createElement('div');
-        orbit.className = 'circle-orbit';
-        orbit.style.width = `${circles[key].orbitSize}px`;
-        orbit.style.height = `${circles[key].orbitSize}px`;
-        orbit.style.transform = `translate(-50%, -50%)`;
-        container.appendChild(orbit);
-    }
-
+    const circles = { c1: { r: 100, n: [] }, c2: { r: 175, n: [] }, c3: { r: 250, n: [] }, c4: { r: 300, n: [] } };
     userNodesData.forEach(node => {
-        if (node.closeness > 75) circles.c1.nodes.push(node);
-        else if (node.closeness > 50) circles.c2.nodes.push(node);
-        else if (node.closeness > 25) circles.c3.nodes.push(node);
-        else if (node.closeness >= 0) circles.c4.nodes.push(node);
+        if (node.closeness > 75) circles.c1.n.push(node);
+        else if (node.closeness > 50) circles.c2.n.push(node);
+        else if (node.closeness > 25) circles.c3.n.push(node);
+        else if (node.closeness >= 0) circles.c4.n.push(node);
     });
 
     const placeNodes = (nodes, radius) => {
@@ -229,32 +174,24 @@ document.addEventListener('DOMContentLoaded', function() {
             const angle = index * angleStep;
             const x = container.offsetWidth / 2 + radius * Math.cos(angle) - 30;
             const y = container.offsetHeight / 2 + radius * Math.sin(angle) - 30;
-
-            const nodeElement = document.createElement('div');
-            nodeElement.className = 'user-node';
-            nodeElement.style.left = `${x}px`;
-            nodeElement.style.top = `${y}px`;
-            nodeElement.textContent = node.username.split('@')[0];
-            nodeElement.title = `${node.username} (Closeness: ${node.closeness})`;
-
-            nodeElement.addEventListener('click', (e) => {
+            const nodeEl = document.createElement('div');
+            nodeEl.className = 'user-node';
+            nodeEl.style.left = `${x}px`;
+            nodeEl.style.top = `${y}px`;
+            nodeEl.textContent = node.username.split('@')[0];
+            nodeEl.title = `${node.username} (Closeness: ${node.closeness})`;
+            nodeEl.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                
-                let menuContent = `<a href="/user/${node.id}/" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">See Profile</a>`;
-                menuContent += `<a href="/chat/start/${node.id}/" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">Chat</a>`;
-
-                if (node.is_phone_verified && node.phone) {
-                    menuContent += `<a href="https://wa.me/${node.phone}" target="_blank" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">Chat with WhatsApp</a>`;
-                }
-
-                contextMenu.innerHTML = menuContent;
+                let menu = `<a href="/user/${node.id}/" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">See Profile</a>`;
+                menu += `<a href="/chat/start/${node.id}/" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">Chat</a>`;
+                if (node.is_phone_verified && node.phone) menu += `<a href="https://wa.me/${node.phone}" target="_blank" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">Chat with WhatsApp</a>`;
+                contextMenu.innerHTML = menu;
                 contextMenu.style.top = `${e.pageY}px`;
                 contextMenu.style.left = `${e.pageX}px`;
                 contextMenu.style.display = 'block';
             });
-
-            container.appendChild(nodeElement);
+            container.appendChild(nodeEl);
         });
     };
 
@@ -269,9 +206,7 @@ document.addEventListener('DOMContentLoaded', function() {
     container.appendChild(centerNode);
 
     for (const key in circles) {
-        if (circles[key].nodes.length > 0) {
-            placeNodes(circles[key].nodes, circles[key].radius);
-        }
+        if (circles[key].n.length > 0) placeNodes(circles[key].n, circles[key].r);
     }
 });
 </script>

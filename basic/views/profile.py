@@ -6,11 +6,13 @@ from django.contrib.auth.models import User
 import json
 from django.http import JsonResponse
 from firebase_admin import auth
+from LazyOne.settings import db # Import the Firestore client
 
 @login_required(login_url='/login/')
 def profile_view(request):
     profile, created = UserProfile.objects.get_or_create(user=request.user)
     if request.method == 'POST':
+        # Update Django model
         profile.first_name = request.POST.get('first_name', '')
         profile.last_name = request.POST.get('last_name', '')
         profile.bio = request.POST.get('bio', '')
@@ -18,9 +20,37 @@ def profile_view(request):
         profile.major = request.POST.get('major', '')
         profile.roll_no = request.POST.get('roll_no', '')
         profile.batch = request.POST.get('batch', 2029)
-        profile.phone_number = request.POST.get('phone_number', '')
+        
+        # Check if phone number has changed
+        new_phone_number = request.POST.get('phone_number', '')
+        if new_phone_number != profile.phone_number:
+            profile.phone_number = new_phone_number
+            profile.is_phone_verified = False # Reset verification status
+
         profile.instagram_username = request.POST.get('instagram_username', '')
         profile.save()
+
+        # Update Firestore document
+        if db and request.user.userprofile.firebase_uid:
+            try:
+                user_ref = db.collection('users').document(request.user.userprofile.firebase_uid)
+                user_ref.set({
+                    'username': request.user.username,
+                    'first_name': profile.first_name,
+                    'last_name': profile.last_name,
+                    'bio': profile.bio,
+                    'college': profile.college,
+                    'major': profile.major,
+                    'roll_no': profile.roll_no,
+                    'batch': profile.batch,
+                    'phone_number': profile.phone_number,
+                    'is_phone_verified': profile.is_phone_verified,
+                    'instagram_username': profile.instagram_username,
+                }, merge=True) # merge=True prevents overwriting the whole document
+                messages.success(request, 'Profile updated in Firebase.')
+            except Exception as e:
+                messages.error(request, f'Error updating Firebase profile: {e}')
+
         messages.success(request, 'Profile updated successfully.')
         return redirect('profile')
     return render(request, 'profile.html', {'profile': profile})
@@ -53,18 +83,34 @@ def verify_phone_token(request):
             decoded_token = auth.verify_id_token(id_token)
             firebase_phone_number = decoded_token.get('phone_number')
 
+            if not firebase_phone_number:
+                return JsonResponse({'success': False, 'error': 'Could not verify phone number from token.'}, status=400)
+
             user_profile = request.user.userprofile
 
-            if user_profile.phone_number == firebase_phone_number:
-                user_profile.is_phone_verified = True
-                user_profile.save()
-                return JsonResponse({'success': True})
-            else:
-                return JsonResponse({'success': False, 'error': 'Phone number mismatch.'}, status=400)
+            # Trust the number from the Firebase token, since the user just verified it.
+            # This avoids issues where the number isn't saved to the profile before verification.
+            user_profile.is_phone_verified = True
+            user_profile.phone_number = firebase_phone_number
+            user_profile.save()
+
+            # Also update the phone number in Firestore
+            if db and user_profile.firebase_uid:
+                try:
+                    user_ref = db.collection('users').document(user_profile.firebase_uid)
+                    user_ref.set({
+                        'phone_number': firebase_phone_number,
+                        'is_phone_verified': True
+                    }, merge=True)
+                except Exception as e:
+                    print(f"Error updating phone number in Firebase: {e}") # Log error
+
+            return JsonResponse({'success': True})
 
         except json.JSONDecodeError:
             return JsonResponse({'success': False, 'error': 'Invalid JSON.'}, status=400)
         except Exception as e:
+            print(f"Error in verify_phone_token: {e}") # Log error
             return JsonResponse({'success': False, 'error': str(e)}, status=500)
 
     return JsonResponse({'success': False, 'error': 'Invalid request method.'}, status=405)
