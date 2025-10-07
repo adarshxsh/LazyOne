@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User
+from django.utils import timezone
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -56,6 +57,7 @@ class Friendship(models.Model):
 class Conversation(models.Model):
     task = models.OneToOneField(Task, on_delete=models.CASCADE, null=True, blank=True)
     participants = models.ManyToManyField(User, related_name='conversations')
+    last_message_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self):
         if self.task:

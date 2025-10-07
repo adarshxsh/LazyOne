@@ -1,28 +1,30 @@
 {% extends 'base.html' %}
 
-{% block title %}Chat for: {{ conversation.task.title }}{% endblock %}
+{% block title %}Chat for: {{ conversation.task.title|default:"Direct Message" }}{% endblock %}
 
 {% block content %}
 <style>
-    .chat-container { height: 75vh; display: flex; flex-direction: column; }
+    .chat-container { height: 75vh; display: flex; flex-direction: column; position: relative; /* Needed for emoji picker positioning */ }
     .message-list { flex-grow: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 1.5rem; }
     .message { max-width: 75%; padding: 0.75rem 1rem; border-radius: 1.25rem; display: flex; flex-direction: column; line-height: 1.5; }
     .message.me { background-color: #06b6d4; /* cyan-600 */ color: white; align-self: flex-end; border-bottom-right-radius: 0.5rem; }
     .message.other { background-color: #374151; /* gray-700 */ color: #d1d5db; /* gray-300 */ align-self: flex-start; border-bottom-left-radius: 0.5rem; }
     .message-author { font-weight: 600; font-size: 0.875rem; margin-bottom: 0.25rem; color: #9ca3af; /* gray-400 */ }
     .message.me .message-author { color: #cffafe; /* cyan-100 */ }
-    .message-content { margin: 0; font-size: 1rem; }
+    .message-content { margin: 0; font-size: 1rem; white-space: pre-wrap; word-wrap: break-word; }
+    .message-content img { max-width: 100%; max-height: 250px; width: auto; border-radius: 0.75rem; margin-top: 0.5rem; cursor: pointer; }
     .message-timestamp { font-size: 0.75rem; color: #6b7280; /* gray-500 */ text-align: right; margin-top: 0.5rem; }
     .message.me .message-timestamp { color: #a5f3fc; /* cyan-200 */ }
     .message-wrapper { display: flex; gap: 0.75rem; max-width: 80%; }
     .message-wrapper.me { align-self: flex-end; flex-direction: row-reverse; }
     .message-wrapper.other { align-self: flex-start; }
     .avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background-color: #4b5563; }
+    #emoji-picker { position: absolute; bottom: 80px; right: 20px; z-index: 100; display: none; }
 </style>
 
 <div class="chat-container">
     <div class="border-b border-gray-700/50 pb-4 mb-4">
-        <h2 class="text-xl font-bold text-white">Chat for: {{ conversation.task.title }}</h2>
+        <h2 class="text-xl font-bold text-white">Chat for: {{ conversation.task.title|default:"Direct Message" }}</h2>
         <p class="text-sm text-gray-400">
             With:
             {% for participant in conversation.participants.all %}
@@ -37,169 +39,230 @@
         <p id="loading-messages" class="text-center text-gray-400">Loading chat...</p>
     </div>
 
+    <emoji-picker id="emoji-picker" class="light"></emoji-picker>
+
     <form class="mt-4 flex items-center space-x-3" id="message-form">
+        <input type="file" id="image-upload-input" accept="image/*" hidden>
+        <button type="button" id="image-upload-button" title="Attach Image" class="flex-shrink-0 text-gray-400 hover:text-cyan-400 transition-colors p-2 rounded-full hover:bg-gray-700/50">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+        </button>
+        <button type="button" id="emoji-button" title="Insert Emoji" class="flex-shrink-0 text-gray-400 hover:text-cyan-400 transition-colors p-2 rounded-full hover:bg-gray-700/50">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+        </button>
+        <button type="button" title="Record Voice" class="flex-shrink-0 text-gray-400 hover:text-cyan-400 transition-colors p-2 rounded-full hover:bg-gray-700/50">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
+        </button>
+
         <input type="text" id="message-input" placeholder="Type your message..." autocomplete="off" required class="flex-grow w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-full text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
-        <button type="submit" id="message-submit" class="flex-shrink-0 bg-cyan-500 hover:bg-cyan-600 text-white font-bold rounded-full h-12 w-12 flex items-center justify-center transition-colors">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+        
+        <button type="submit" id="message-submit" title="Send Message" class="flex-shrink-0 bg-cyan-500 hover:bg-cyan-600 text-white font-bold rounded-full h-12 w-12 flex items-center justify-center transition-colors">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
         </button>
     </form>
 </div>
 
-<!-- Include Firebase SDKs -->
+<!-- SDKs -->
 <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-storage.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/browser-image-compression@2.0.2/dist/browser-image-compression.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/emoji-picker-element@^1/index.js"></script>
 
 <script>
-    // Securely initialize Firebase from backend context
-    var firebaseConfig = {
-        apiKey: "{{ FIREBASE_API_KEY }}",
-        authDomain: "{{ FIREBASE_AUTH_DOMAIN }}",
-        projectId: "{{ FIREBASE_PROJECT_ID }}",
-        storageBucket: "{{ FIREBASE_STORAGE_BUCKET }}",
-        messagingSenderId: "{{ FIREBASE_MESSAGING_SENDER_ID }}",
-        appId: "{{ FIREBASE_APP_ID }}"
-    };
-    if (!firebase.apps.length) {
-        firebase.initializeApp(firebaseConfig);
-    } else {
-        firebase.app();
-    }
+    document.addEventListener('DOMContentLoaded', function() {
+        // Firebase Config
+        var firebaseConfig = {
+            apiKey: "{{ FIREBASE_API_KEY }}",
+            authDomain: "{{ FIREBASE_AUTH_DOMAIN }}",
+            projectId: "{{ FIREBASE_PROJECT_ID }}",
+            storageBucket: "{{ FIREBASE_STORAGE_BUCKET }}",
+            messagingSenderId: "{{ FIREBASE_MESSAGING_SENDER_ID }}",
+            appId: "{{ FIREBASE_APP_ID }}"
+        };
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
 
-    const db = firebase.firestore();
-    const conversationId = "{{ conversation.id }}";
-    const currentUser = {
-        username: "{{ request.user.username }}",
-        id: "{{ request.user.id }}"
-    };
+        // Globals
+        const db = firebase.firestore();
+        const storage = firebase.storage();
+        const conversationId = "{{ conversation.id }}";
+        const currentUser = { id: "{{ request.user.id }}", username: "{{ request.user.username }}" };
+        const userProfileCache = {};
 
-    const messageList = document.getElementById('message-list');
-    const messageForm = document.getElementById('message-form');
-    const messageInput = document.getElementById('message-input');
-    const messageSubmitButton = document.getElementById('message-submit');
-    const loadingIndicator = document.getElementById('loading-messages');
+        // DOM Elements
+        const messageList = document.getElementById('message-list');
+        const messageForm = document.getElementById('message-form');
+        const messageInput = document.getElementById('message-input');
+        const messageSubmitButton = document.getElementById('message-submit');
+        const loadingIndicator = document.getElementById('loading-messages');
+        const imageUploadButton = document.getElementById('image-upload-button');
+        const imageUploadInput = document.getElementById('image-upload-input');
+        const emojiButton = document.getElementById('emoji-button');
+        const emojiPicker = document.getElementById('emoji-picker');
 
-    // Cache for user profiles to avoid re-fetching
-    const userProfileCache = {};
+        messageInput.focus();
 
-    // --- Firestore Real-Time Listener ---
-    const messagesRef = db.collection('conversations').doc(conversationId).collection('messages').orderBy('timestamp');
+        // --- Main Listener ---
+        const messagesRef = db.collection('conversations').doc(conversationId).collection('messages').orderBy('timestamp');
+        messagesRef.onSnapshot(snapshot => {
+            loadingIndicator.style.display = 'none';
+            snapshot.docChanges().forEach(change => {
+                if (change.type === 'added') {
+                    fetchUserAndRenderMessage(change.doc.data());
+                }
+            });
+            scrollToBottom();
+        }, error => {
+            console.error("Error listening for messages: ", error);
+            loadingIndicator.textContent = "Error loading chat. Please refresh.";
+        });
 
-    messagesRef.onSnapshot(snapshot => {
-        loadingIndicator.style.display = 'none';
-        snapshot.docChanges().forEach(change => {
-            if (change.type === 'added') {
-                const data = change.doc.data();
-                fetchUserAndRenderMessage(data);
+        // --- Event Handlers ---
+        messageForm.addEventListener('submit', e => {
+            e.preventDefault();
+            const messageContent = messageInput.value;
+            if (messageContent.trim() === '' || messageSubmitButton.disabled) return;
+            sendTextMessage(messageContent);
+        });
+
+        imageUploadButton.addEventListener('click', () => imageUploadInput.click());
+        imageUploadInput.addEventListener('change', async e => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const options = { maxSizeMB: 1, maxWidthOrHeight: 1920, useWebWorker: true };
+            try {
+                const compressedFile = await imageCompression(file, options);
+                uploadImage(compressedFile, file.name);
+            } catch (error) {
+                console.error('Image compression error:', error);
+                alert('Failed to compress image.');
             }
         });
-        scrollToBottom();
-    }, error => {
-        console.error("Error listening for messages: ", error);
-        loadingIndicator.textContent = "Error loading chat. Please refresh.";
-    });
 
-    // --- Form Submission ---
-    messageForm.addEventListener('submit', function(e) {
-        e.preventDefault();
-        const messageContent = messageInput.value;
-        if (messageContent.trim() === '' || messageSubmitButton.disabled) return;
-
-        messageSubmitButton.disabled = true;
-        messageSubmitButton.classList.add('opacity-50');
-
-        // Add a new message to Firestore
-        db.collection('conversations').doc(conversationId).collection('messages').add({
-            content: messageContent,
-            authorId: currentUser.id,
-            authorUsername: currentUser.username,
-            timestamp: firebase.firestore.FieldValue.serverTimestamp()
-        }).catch(error => {
-            console.error("Error sending message: ", error);
-            alert("Could not send message.");
+        emojiButton.addEventListener('click', e => {
+            e.stopPropagation();
+            emojiPicker.style.display = emojiPicker.style.display === 'none' ? 'block' : 'none';
+        });
+        emojiPicker.addEventListener('emoji-click', event => {
+            messageInput.value += event.detail.unicode;
+        });
+        document.addEventListener('click', e => {
+            if (!emojiPicker.contains(e.target) && !emojiButton.contains(e.target)) {
+                emojiPicker.style.display = 'none';
+            }
         });
 
-        messageInput.value = ''; // Clear input immediately for better UX
-        setTimeout(() => { // Re-enable button after a short delay
-            messageSubmitButton.disabled = false;
-            messageSubmitButton.classList.remove('opacity-50');
-        }, 1000);
-    });
+        // --- Core Functions ---
+        function uploadImage(file, originalName) {
+            const filePath = `chat_images/${conversationId}/${Date.now()}-${originalName}`;
+            const storageRef = storage.ref(filePath);
+            const uploadTask = storageRef.put(file);
+            uploadTask.on('state_changed', null, 
+                error => {
+                    console.error("Upload failed:", error);
+                    alert("Image upload failed.");
+                },
+                () => uploadTask.snapshot.ref.getDownloadURL().then(sendImageMessage)
+            );
+        }
 
-    // --- Utility Functions ---
-    async function fetchUserAndRenderMessage(messageData) {
-        const authorId = messageData.authorId;
-        let userProfile = userProfileCache[authorId];
+        function sendTextMessage(content) {
+            sendMessage({ content: content, type: 'text' });
+            messageInput.value = '';
+        }
 
-        if (!userProfile) {
+        function sendImageMessage(imageUrl) {
+            sendMessage({ content: imageUrl, type: 'image' });
+        }
+
+        function sendMessage(messageData) {
+            messageSubmitButton.disabled = true;
+            const payload = {
+                authorId: currentUser.id,
+                authorUsername: currentUser.username,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                type: messageData.type,
+            };
+
+            if (messageData.type === 'image') {
+                payload.imageUrl = messageData.content;
+            } else {
+                payload.content = messageData.content;
+            }
+
+            db.collection('conversations').doc(conversationId).collection('messages').add(payload).catch(console.error);
+
+            fetch(`{% url 'send_message' conversation.id %}`, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'content=' + encodeURIComponent(messageData.type === 'image' ? '[Image]' : messageData.content)
+            });
+
+            setTimeout(() => { messageSubmitButton.disabled = false; messageInput.focus(); }, 500);
+        }
+
+        async function fetchUserAndRenderMessage(messageData) {
+            const authorId = messageData.authorId;
+            // Pass messageData to the fetch function as a fallback
+            let userProfile = userProfileCache[authorId] || (await fetchUserProfile(authorId, messageData));
+            renderMessage(messageData, userProfile);
+        }
+
+        async function fetchUserProfile(authorId, messageData) {
             try {
                 const userDoc = await db.collection('users').doc(authorId).get();
                 if (userDoc.exists) {
-                    userProfile = userDoc.data();
-                    userProfileCache[authorId] = userProfile; // Cache the result
+                    const profile = userDoc.data();
+                    userProfileCache[authorId] = profile;
+                    return profile;
                 }
-            } catch (e) {
-                console.error("Could not fetch user profile:", e);
-            }
+            } catch (e) { console.error("Could not fetch user profile:", e); }
+            // Use the authorUsername from the message as a fallback
+            return { username: messageData.authorUsername || 'User', avatarUrl: null };
         }
-        
-        // Use a fallback profile if fetch fails or user doesn't exist in 'users' collection
-        userProfile = userProfile || { username: messageData.authorUsername, avatarUrl: null };
-        renderMessage(messageData, userProfile);
-    }
 
-    function renderMessage(messageData, authorProfile) {
-        const wrapper = document.createElement('div');
-        wrapper.className = `message-wrapper ${messageData.authorId == currentUser.id ? 'me' : 'other'}`;
-
-        const avatarUrl = authorProfile.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(authorProfile.username)}&background=random`;
-
-        const timeAgo = messageData.timestamp ? timeSince(new Date(messageData.timestamp.seconds * 1000)) : 'just now';
-
-        wrapper.innerHTML = `
-            <img src="${avatarUrl}" alt="${authorProfile.username}" class="avatar">
-            <div class="message ${messageData.authorId == currentUser.id ? 'me' : 'other'}" data-timestamp="${messageData.timestamp ? messageData.timestamp.seconds : ''}">
-                <p class="message-author">${authorProfile.username}</p>
-                <p class="message-content">${messageData.content}</p>
-                <p class="message-timestamp">${timeAgo}</p>
-            </div>
-        `;
-        messageList.appendChild(wrapper);
-    }
-
-    function scrollToBottom() {
-        messageList.scrollTop = messageList.scrollHeight;
-    }
-
-    function timeSince(date) {
-        const seconds = Math.floor((new Date() - date) / 1000);
-        let interval = seconds / 31536000;
-        if (interval > 1) return Math.floor(interval) + " years ago";
-        interval = seconds / 2592000;
-        if (interval > 1) return Math.floor(interval) + " months ago";
-        interval = seconds / 86400;
-        if (interval > 1) return Math.floor(interval) + " days ago";
-        interval = seconds / 3600;
-        if (interval > 1) return Math.floor(interval) + " hours ago";
-        interval = seconds / 60;
-        if (interval > 1) return Math.floor(interval) + " minutes ago";
-        return "just now";
-    }
-
-    // --- Real-time Timestamp Updater ---
-    function updateTimestamps() {
-        const messages = document.querySelectorAll('.message[data-timestamp]');
-        messages.forEach(msg => {
-            const timestamp = parseFloat(msg.dataset.timestamp);
-            if (timestamp) {
-                const timeAgo = timeSince(new Date(timestamp * 1000));
-                const timestampEl = msg.querySelector('.message-timestamp');
-                if (timestampEl) timestampEl.textContent = timeAgo;
+        function renderMessage(messageData, authorProfile) {
+            const wrapper = document.createElement('div');
+            wrapper.className = `message-wrapper ${messageData.authorId == currentUser.id ? 'me' : 'other'}`;
+            const avatarUrl = authorProfile.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(authorProfile.username)}&background=random`;
+            const timeAgo = messageData.timestamp ? timeSince(new Date(messageData.timestamp.seconds * 1000)) : 'just now';
+            
+            let messageContentHTML = '';
+            if (messageData.type === 'image') {
+                const imageUrl = messageData.imageUrl || messageData.content; // Backward compatible
+                messageContentHTML = `<img src="${imageUrl}" alt="User uploaded image" class="message-image" onclick="window.open('${imageUrl}', '_blank')">`;
+            } else {
+                messageContentHTML = escapeHTML(messageData.content || '');
             }
-        });
-    }
-    setInterval(updateTimestamps, 60000); // Update every minute
 
+            wrapper.innerHTML = `
+                <img src="${avatarUrl}" alt="${authorProfile.username}" class="avatar">
+                <div class="message ${messageData.authorId == currentUser.id ? 'me' : 'other'}" data-timestamp="${messageData.timestamp ? messageData.timestamp.seconds : ''}">
+                    <p class="message-author">${authorProfile.username}</p>
+                    <div class="message-content">${messageContentHTML}</div>
+                    <p class="message-timestamp">${timeAgo}</p>
+                </div>
+            `;
+            messageList.appendChild(wrapper);
+        }
+
+        // --- Utility Functions ---
+        function scrollToBottom() { messageList.scrollTop = messageList.scrollHeight; }
+        function escapeHTML(str) { const p = document.createElement("p"); p.appendChild(document.createTextNode(str)); return p.innerHTML; }
+        function timeSince(date) {
+            const seconds = Math.floor((new Date() - date) / 1000);
+            let interval = seconds / 31536000; if (interval > 1) return Math.floor(interval) + " years ago";
+            interval = seconds / 2592000; if (interval > 1) return Math.floor(interval) + " months ago";
+            interval = seconds / 86400; if (interval > 1) return Math.floor(interval) + " days ago";
+            interval = seconds / 3600; if (interval > 1) return Math.floor(interval) + " hours ago";
+            interval = seconds / 60; if (interval > 1) return Math.floor(interval) + " minutes ago";
+            return "just now";
+        }
+        setInterval(() => document.querySelectorAll('.message[data-timestamp]').forEach(msg => {
+            const ts = parseFloat(msg.dataset.timestamp);
+            if (ts) msg.querySelector('.message-timestamp').textContent = timeSince(new Date(ts * 1000));
+        }), 60000);
+    });
 </script>
 
 {% endblock %}

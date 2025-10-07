@@ -4,6 +4,7 @@ from ..models import Conversation, Message, Notification
 from django.contrib.auth.models import User
 from django.http import HttpResponseForbidden, JsonResponse
 from django.urls import reverse
+from django.utils import timezone
 
 @login_required(login_url='/login/')
 def chat_view(request, conversation_id):
@@ -41,6 +42,10 @@ def send_message(request, conversation_id):
                 sender=request.user,
                 content=content
             )
+
+            # Update the conversation's last_message_at timestamp
+            conversation.last_message_at = timezone.now()
+            conversation.save()
 
             # Notify other participants
             for participant in conversation.participants.all():

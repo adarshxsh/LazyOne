@@ -16,13 +16,20 @@
             height: 100%;
             z-index: -1; /* Ensure it's in the background */
         }
+        /* Styles for the auto-hiding navbar */
+        #main-navbar {
+            transition: transform 0.3s ease-in-out;
+        }
+        #main-navbar.navbar-hidden {
+            transform: translateY(-100%);
+        }
     </style>
 </head>
 <body class="font-sans antialiased text-gray-200">
 
     <div id="vanta-bg"></div>
 
-    <nav class="bg-gray-800/70 backdrop-blur-lg border-b border-gray-700/50 sticky top-0 z-50">
+    <nav id="main-navbar" class="bg-gray-800/70 backdrop-blur-lg border-b border-gray-700/50 sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between items-center h-16">
                 <div class="flex-shrink-0">
@@ -122,6 +129,20 @@
                 points: 12.00,
                 maxDistance: 25.00,
                 spacing: 18.00
+            });
+
+            // Auto-hiding navbar logic
+            let lastScrollY = window.scrollY;
+            const navbar = document.getElementById('main-navbar');
+            window.addEventListener('scroll', () => {
+                if (lastScrollY < window.scrollY && window.scrollY > navbar.offsetHeight) {
+                    // Scrolling down, hide navbar
+                    navbar.classList.add('navbar-hidden');
+                } else {
+                    // Scrolling up, show navbar
+                    navbar.classList.remove('navbar-hidden');
+                }
+                lastScrollY = window.scrollY;
             });
         });
     </script>

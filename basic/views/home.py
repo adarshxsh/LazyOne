@@ -30,7 +30,7 @@ def home(request):
         user_profile, created = UserProfile.objects.get_or_create(user=request.user)
 
         # --- Data for Recent Conversations ---
-        context['recent_conversations'] = Conversation.objects.filter(participants=request.user).order_by('-task__created_at')[:10]
+        context['recent_conversations'] = Conversation.objects.filter(participants=request.user).order_by('-last_message_at')[:10]
 
         # --- Data for Friend Circle Visualization ---
         user_nodes = []
