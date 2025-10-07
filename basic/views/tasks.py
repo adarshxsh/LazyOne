@@ -117,7 +117,7 @@ def cancel_task(request, task_id):
         user_profile.save()
         RewardLedger.objects.create(
             user=request.user, task=task, amount=task.reward,
-            transaction_type='task_cancellation', description=f"Refund for cancelled task: '{title}'"
+            transaction_type='task_cancellation', description=f"Refund for cancelled task: "
         )
         messages.success(request, "You have cancelled the task and your points have been refunded.")
     return redirect('my_tasks')

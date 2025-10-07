@@ -4,36 +4,6 @@
 
 {% block content %}
 
-<!-- Disputed Tasks Section -->
-{% if disputed_tasks %}
-<div class="mb-12">
-    <div class="text-center mb-6">
-        <h2 class="text-3xl font-bold text-red-400">Disputed Tasks - Community Review</h2>
-        <p class="text-gray-400 mt-2">The following tasks are in dispute. Community members are encouraged to review the chat and help mediate.</p>
-    </div>
-    <div class="space-y-4">
-        {% for task in disputed_tasks %}
-            <div class="scroll-animate bg-red-900/30 border border-red-500/50 rounded-xl p-5 transition-all duration-300 hover:shadow-red-500/20 hover:shadow-lg">
-                <div class="flex justify-between items-start">
-                    <div>
-                        <h3 class="text-lg font-bold text-white">{{ task.title }}</h3>
-                        <p class="text-sm text-gray-300 mt-1">Posted by: {{ task.posted_by.username }} | Taken by: {{ task.taken_by.username }}</p>
-                        <p class="text-sm text-gray-400 mt-2">Reason for dispute: <em class="text-gray-300">"{{ task.dispute.reason }}"</em></p>
-                    </div>
-                    <div class="text-right flex-shrink-0 ml-4">
-                        <p class="text-xl font-semibold text-red-400">{{ task.reward }}</p>
-                        <p class="text-xs text-gray-500">Points</p>
-                    </div>
-                </div>
-                <div class="mt-4">
-                    <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-600 text-white font-semibold px-5 py-2 rounded-lg hover:bg-red-500 transition-colors">View Dispute Chat</a>
-                </div>
-            </div>
-        {% endfor %}
-    </div>
-</div>
-{% endif %}
-
 
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
@@ -42,52 +12,54 @@
         <!-- Social Circle Section -->
         <div>
             {% if request.user.is_authenticated %}
-                <h1 class="text-3xl font-bold text-white mb-4">Your Social Circle</h1>
-                <div id="friend-circle-container" class="relative w-full max-w-xl mx-auto aspect-square rounded-full bg-gray-800/50 border border-gray-700/50 shadow-2xl flex items-center justify-center">
+                <h1 class="text-3xl font-bold text-gray-800 mb-4">Your Social Circle</h1>
+                <div id="friend-circle-container" class="relative w-full max-w-xl mx-auto aspect-square rounded-full bg-gray-100 border border-gray-300 shadow-lg flex items-center justify-center">
                     <!-- JS will inject nodes here -->
                 </div>
             {% else %}
                 <div class="text-center p-8">
-                    <h1 class="text-3xl font-bold text-white">Welcome to LazyOne</h1>
-                    <p class="text-gray-400 mt-2">Please <a href="{% url 'login_page' %}" class="text-cyan-400 font-bold hover:underline">login</a> to see your social circle and interact with tasks.</p>
+                    <h1 class="text-3xl font-bold text-gray-800">Welcome to LazyOne</h1>
+                    <p class="text-gray-600 mt-2">Please <a href="{% url 'login_page' %}" class="text-cyan-600 font-bold hover:underline">login</a> to see your social circle and interact with tasks.</p>
                 </div>
             {% endif %}
         </div>
 
         <!-- Recent Tasks Section -->
         <div class="mt-8">
-            <h2 class="text-2xl font-bold text-white mb-4">Available Tasks</h2>
+            <h2 class="text-2xl font-bold text-gray-800 mb-4">Available Tasks</h2>
             <form method="get" action="{% url 'home' %}" class="mb-6">
-                <input type="text" name="q" value="{{ search_query|default_if_none:'' }}" placeholder="Search for tasks..." class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
+                <input type="text" name="q" value="{{ search_query|default_if_none:'' }}" placeholder="Search for tasks..." class="w-full px-4 py-3 bg-gray-100 border border-gray-300 rounded-lg text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-600 transition-shadow duration-200">
             </form>
 
-            <div class="space-y-4">
-                {% for task in available_tasks %}
-                    <div class="scroll-animate bg-gray-800/50 border border-gray-700/50 rounded-xl p-5 transition-all duration-300 hover:shadow-cyan-500/20 hover:shadow-lg hover:border-cyan-500/50">
-                        <div class="flex justify-between items-start">
-                            <div>
-                                <h3 class="text-lg font-bold text-white">{{ task.title }}</h3>
-                                <p class="text-sm text-gray-400 mt-1">Posted by: {{ task.posted_by.username }}</p>
+            <div class="h-96 overflow-y-auto p-4 border border-gray-300 rounded-lg bg-gray-100">
+                <div class="space-y-4">
+                    {% for task in available_tasks %}
+                        <div class="scroll-animate bg-white border border-gray-200 rounded-xl p-5 transition-all duration-300 hover:shadow-cyan-200 hover:shadow-lg hover:border-cyan-300">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <h3 class="text-lg font-bold text-gray-800">{{ task.title }}</h3>
+                                    <p class="text-sm text-gray-600 mt-1">Posted by: {{ task.posted_by.username }}</p>
+                                </div>
+                                <div class="text-right flex-shrink-0 ml-4">
+                                    <p class="text-xl font-semibold text-cyan-600">{{ task.reward }}</p>
+                                    <p class="text-xs text-gray-500">Points</p>
+                                </div>
                             </div>
-                            <div class="text-right flex-shrink-0 ml-4">
-                                <p class="text-xl font-semibold text-cyan-400">{{ task.reward }}</p>
-                                <p class="text-xs text-gray-500">Points</p>
+                            <p class="text-gray-700 mt-3">{{ task.description }}</p>
+                            <div class="mt-4">
+                                {% if request.user.is_authenticated %}
+                                    <a href="{% url 'take_task' task.id %}" class="inline-block bg-teal-500 text-white font-semibold px-5 py-2 rounded-lg hover:bg-teal-600 transition-colors">Take Task</a>
+                                {% else %}
+                                    <a href="{% url 'login_page' %}" class="inline-block bg-gray-600 text-white font-semibold px-5 py-2 rounded-lg hover:bg-gray-500 transition-colors">Login to Take Task</a>
+                                {% endif %}
                             </div>
                         </div>
-                        <p class="text-gray-300 mt-3">{{ task.description }}</p>
-                        <div class="mt-4">
-                            {% if request.user.is_authenticated %}
-                                <a href="{% url 'take_task' task.id %}" class="inline-block bg-teal-500 text-white font-semibold px-5 py-2 rounded-lg hover:bg-teal-600 transition-colors">Take Task</a>
-                            {% else %}
-                                <a href="{% url 'login_page' %}" class="inline-block bg-gray-600 text-white font-semibold px-5 py-2 rounded-lg hover:bg-gray-500 transition-colors">Login to Take Task</a>
-                            {% endif %}
+                    {% empty %}
+                        <div class="scroll-animate bg-white border border-gray-200 rounded-xl p-8 text-center">
+                            <p class="text-gray-600">No tasks available at the moment.</p>
                         </div>
-                    </div>
-                {% empty %}
-                    <div class="scroll-animate bg-gray-800/50 border border-gray-700/50 rounded-xl p-8 text-center">
-                        <p class="text-gray-400">No tasks available at the moment.</p>
-                    </div>
-                {% endfor %}
+                    {% endfor %}
+                </div>
             </div>
         </div>
     </div>
@@ -96,27 +68,29 @@
     <div class="lg:col-span-1 space-y-8">
         {% if request.user.is_authenticated %}
             <div>
-                <h2 class="text-2xl font-bold text-white mb-4">Recent Chats</h2>
-                <div class="space-y-3">
-                    {% for conv in recent_conversations %}
-                        <a href="{% url 'chat_view' conv.id %}" class="scroll-animate block bg-gray-800/50 border border-gray-700/50 rounded-xl p-4 hover:bg-gray-700/50 transition-colors">
-                            {% if conv.task %}
-                                <p class="text-sm text-gray-400">Task Chat</p>
-                                <strong class="text-white">{{ conv.task.title }}</strong>
-                            {% else %}
-                                {% for participant in conv.participants.all %}
-                                    {% if participant.id != request.user.id %}
-                                        <p class="text-sm text-gray-400">Direct Chat</p>
-                                        <strong class="text-white">{{ participant.username }}</strong>
-                                    {% endif %}
-                                {% endfor %}
-                            {% endif %}
-                        </a>
-                    {% empty %}
-                        <div class="scroll-animate bg-gray-800/50 border border-gray-700/50 rounded-xl p-8 text-center">
-                            <p class="text-gray-400">No recent conversations.</p>
-                        </div>
-                    {% endfor %}
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">Recent Chats</h2>
+                <div class="h-96 overflow-y-auto p-4 border border-gray-300 rounded-lg bg-gray-100">
+                    <div class="space-y-3">
+                        {% for conv in recent_conversations %}
+                            <a href="{% url 'chat_view' conv.id %}" class="scroll-animate block bg-white border border-gray-200 rounded-xl p-4 hover:bg-gray-50 transition-colors">
+                                {% if conv.task %}
+                                    <p class="text-sm text-gray-600">Task Chat</p>
+                                    <strong class="text-gray-800">{{ conv.task.title }}</strong>
+                                {% else %}
+                                    {% for participant in conv.participants.all %}
+                                        {% if participant.id != request.user.id %}
+                                            <p class="text-sm text-gray-600">Direct Chat</p>
+                                            <strong class="text-gray-800">{{ participant.username }}</strong>
+                                        {% endif %}
+                                    {% endfor %}
+                                {% endif %}
+                            </a>
+                        {% empty %}
+                            <div class="scroll-animate bg-white border border-gray-200 rounded-xl p-8 text-center">
+                                <p class="text-gray-600">No recent conversations.</p>
+                            </div>
+                        {% endfor %}
+                    </div>
                 </div>
             </div>
         {% endif %}
@@ -124,15 +98,48 @@
 
 </div>
 
+<!-- Disputed Tasks Section -->
+{% if disputed_tasks %}
+<div class="mb-12 mt-8">
+    <div class="text-center mb-6">
+        <h2 class="text-3xl font-bold text-red-600">Disputed Tasks - Community Review</h2>
+        <p class="text-gray-600 mt-2">The following tasks are in dispute. Community members are encouraged to review the chat and help mediate.</p>
+    </div>
+    <div class="h-96 overflow-y-auto p-4 border border-gray-300 rounded-lg bg-gray-100">
+        <div class="space-y-4">
+            {% for task in disputed_tasks %}
+                <div class="scroll-animate bg-red-100 border border-red-300 rounded-xl p-5 transition-all duration-300 hover:shadow-red-200 hover:shadow-lg">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <h3 class="text-lg font-bold text-gray-800">{{ task.title }}</h3>
+                            <p class="text-sm text-gray-600 mt-1">Posted by: {{ task.posted_by.username }} | Taken by: {{ task.taken_by.username }}</p>
+                            <p class="text-sm text-gray-700 mt-2">Reason for dispute: <em class="text-gray-800">"{{ task.dispute.reason }}"</em></p>
+                        </div>
+                        <div class="text-right flex-shrink-0 ml-4">
+                            <p class="text-xl font-semibold text-red-600">{{ task.reward }}</p>
+                            <p class="text-xs text-gray-500">Points</p>
+                        </div>
+                    </div>
+                    <div class="mt-4">
+                        <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-600 text-white font-semibold px-5 py-2 rounded-lg hover:bg-red-700 transition-colors">View Dispute Chat</a>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+
 <!-- Context Menu (hidden by default) -->
-<div id="context-menu" class="context-menu fixed hidden bg-gray-800/90 backdrop-blur-md border border-gray-700 rounded-lg shadow-2xl py-2 z-50">
+<div id="context-menu" class="context-menu fixed hidden bg-gray-100 border border-gray-300 rounded-lg shadow-lg py-2 z-50">
     <!-- JS will inject links here -->
 </div>
 
 <style>
-    .circle-orbit { position: absolute; border: 1px dashed #4a5568; border-radius: 50%; top: 50%; left: 50%; }
-    .user-node { position: absolute; width: 60px; height: 60px; background-color: #0d9488; color: white; border-radius: 50%; border: 3px solid #1a202c; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 10px; font-weight: 600; cursor: pointer; transition: all 0.2s ease-in-out; overflow: hidden; padding: 5px; text-decoration: none; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4); }
-    .user-node:hover { transform: scale(1.15); z-index: 1000; border-color: #2dd4bf; }
+    .circle-orbit { position: absolute; border: 1px dashed #a0aec0; border-radius: 50%; top: 50%; left: 50%; }
+    .user-node { position: absolute; width: 60px; height: 60px; background-color: #2dd4bf; color: white; border-radius: 50%; border: 3px solid #e2e8f0; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 10px; font-weight: 600; cursor: pointer; transition: all 0.2s ease-in-out; overflow: hidden; padding: 5px; text-decoration: none; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1); }
+    .user-node:hover { transform: scale(1.15); z-index: 1000; border-color: #0d9488; }
     .user-node.center-user { width: 80px; height: 80px; background-color: #0f766e; font-size: 14px; z-index: 100; border-width: 4px; }
     .scroll-animate { opacity: 0; transform: translateY(20px); transition: opacity 0.5s ease-out, transform 0.5s ease-out; }
     .scroll-animate.is-visible { opacity: 1; transform: translateY(0); }
@@ -183,9 +190,9 @@ document.addEventListener('DOMContentLoaded', function() {
             nodeEl.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                let menu = `<a href="/user/${node.id}/" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">See Profile</a>`;
-                menu += `<a href="/chat/start/${node.id}/" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">Chat</a>`;
-                if (node.is_phone_verified && node.phone) menu += `<a href="https://wa.me/${node.phone}" target="_blank" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">Chat with WhatsApp</a>`;
+                let menu = `<a href="/user/${node.id}/" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-200 hover:text-gray-900">See Profile</a>`;
+                menu += `<a href="/chat/start/${node.id}/" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-200 hover:text-gray-900">Chat</a>`;
+                if (node.is_phone_verified && node.phone) menu += `<a href="https://wa.me/${node.phone}" target="_blank" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-200 hover:text-gray-900">Chat with WhatsApp</a>`;
                 contextMenu.innerHTML = menu;
                 contextMenu.style.top = `${e.pageY}px`;
                 contextMenu.style.left = `${e.pageX}px`;

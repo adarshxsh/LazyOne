@@ -5,25 +5,32 @@
 {% block content %}
 <div class="min-h-[60vh] flex flex-col items-center justify-center">
     <div class="w-full max-w-md">
-        <div class="text-center mb-8">
+        <!-- Updated Card Styling -->
+        <div class="bg-gray-800/50 backdrop-blur-lg border border-gray-700/50 rounded-2xl shadow-2xl shadow-cyan-500/10 p-8">
+            <div class="text-center mb-8">
             <h2 class="text-3xl font-bold text-white">Welcome Back</h2>
             <p class="text-gray-400 mt-2">Sign in or create an account to continue</p>
         </div>
 
-        <div class="space-y-4">
-            <div>
-                <label for="email" class="sr-only">Email</label>
-                <input type="email" id="email" placeholder="Email" required class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 transition-all duration-200">
+            <!-- Updated Input Fields with Icons -->
+            <div class="space-y-5">
+                <div class="relative">
+                    <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" /><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" /></svg>
+                    </div>
+                    <input type="email" id="email" placeholder="Email" required class="w-full pl-12 pr-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 transition-all duration-200">
+                </div>
+                <div class="relative">
+                    <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" /></svg>
+                    </div>
+                    <input type="password" id="password" placeholder="Password" required class="w-full pl-12 pr-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 transition-all duration-200">
+                </div>
             </div>
-            <div>
-                <label for="password" class="sr-only">Password</label>
-                <input type="password" id="password" placeholder="Password" required class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 transition-all duration-200">
-            </div>
-        </div>
 
         <div id="error-message" class="mt-4 text-red-400 text-sm font-medium text-center"></div>
 
-        <div class="mt-6 space-y-3">
+            <div class="mt-6 space-y-3">
             <button id="signin-button" class="w-full py-3 px-4 bg-cyan-500 hover:bg-cyan-600 rounded-lg text-white font-bold text-lg transition-all transform hover:scale-105 duration-200 flex items-center justify-center disabled:opacity-75 disabled:scale-100">
                 <span class="button-text">Sign In</span>
                 <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden button-spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -40,17 +47,18 @@
             </button>
         </div>
 
-        <div class="mt-6 flex items-center justify-center">
+            <div class="mt-6 flex items-center justify-center">
             <div class="flex-grow border-t border-gray-600/50"></div>
             <span class="mx-4 text-gray-400 text-sm">OR</span>
             <div class="flex-grow border-t border-gray-600/50"></div>
         </div>
 
-        <div class="mt-6">
+            <div class="mt-6">
             <button id="google-signin-button" class="w-full py-3 px-4 bg-white/10 hover:bg-white/20 rounded-lg text-white font-bold flex items-center justify-center transition-colors duration-200">
                 <svg class="w-5 h-5 mr-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8c-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4C12.955 4 4 12.955 4 24s8.955 20 20 20s20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/><path fill="#FF3D00" d="M6.306 14.691c-1.946 3.44-3.006 7.38-3.006 11.584C3.3 31.548 6.221 36.333 10.608 39.12l5.657-5.657C14.07 31.323 12 28.058 12 24c0-2.682.688-5.182 1.86-7.309l-7.554-6.001z"/><path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-5.657-5.657C30.07 35.323 27.318 36 24 36c-4.058 0-7.323-2.07-9.392-5.12l-5.657 5.657C8.667 40.023 15.849 44 24 44z"/><path fill="#1976D2" d="M43.611 20.083H24v8h11.303c-.792 2.237-2.231 4.16-4.087 5.571l5.657 5.657C42.488 36.463 44 31.283 44 24c0-1.341-.138-2.65-.389-3.917z"/></svg>
                 Sign In with Google
             </button>
+        </div>
         </div>
     </div>
 </div>

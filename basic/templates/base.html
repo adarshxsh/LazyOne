@@ -23,39 +23,75 @@
         #main-navbar.navbar-hidden {
             transform: translateY(-100%);
         }
+        /* Custom scrollbar for dark mode */
+        .dark ::-webkit-scrollbar {
+            width: 8px;
+        }
+        .dark ::-webkit-scrollbar-track {
+            background: #2d3748; /* gray-800 */
+        }
+        .dark ::-webkit-scrollbar-thumb {
+            background: #4a5568; /* gray-700 */
+            border-radius: 4px;
+        }
+        .dark ::-webkit-scrollbar-thumb:hover {
+            background: #718096; /* gray-600 */
+            cursor: pointer;
+        }
+        /* Custom scrollbar for light mode */
+        html:not(.dark) ::-webkit-scrollbar {
+            width: 8px;
+        }
+        html:not(.dark) ::-webkit-scrollbar-track {
+            background: #f7fafc; /* gray-50 */
+        }
+        html:not(.dark) ::-webkit-scrollbar-thumb {
+            background: #cbd5e0; /* gray-300 */
+            border-radius: 4px;
+        }
+        html:not(.dark) ::-webkit-scrollbar-thumb:hover {
+            background: #a0aec0; /* gray-400 */
+            cursor: pointer;
+        }
     </style>
 </head>
-<body class="font-sans antialiased text-gray-200">
+<body class="font-sans antialiased text-gray-800 bg-gray-50 dark:text-gray-200 dark:bg-gray-900 transition-colors duration-300">
 
     <div id="vanta-bg"></div>
 
-    <nav id="main-navbar" class="bg-gray-800/70 backdrop-blur-lg border-b border-gray-700/50 sticky top-0 z-50">
+    <nav id="main-navbar" class="bg-white/80 backdrop-blur-lg border-b border-gray-200/50 sticky top-0 z-50 dark:bg-gray-800/80 dark:border-gray-700/50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between items-center h-16">
                 <div class="flex-shrink-0">
-                    <a href="{% url 'home' %}" class="text-2xl font-bold text-white tracking-wider">LazyOne</a>
+                    <a href="{% url 'home' %}" class="text-2xl font-bold text-gray-800 tracking-wider dark:text-white">LazyOne</a>
                 </div>
                 <div class="hidden md:flex md:items-center md:space-x-2">
-                    <a href="{% url 'home' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'home' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Home</a>
+                    <a href="{% url 'home' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'home' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">Home</a>
                     {% if user.is_authenticated %}
-                        <a href="{% url 'my_tasks' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'my_tasks' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">My Tasks</a>
-                        <a href="{% url 'rewards' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'rewards' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">My Rewards</a>
-                        <a href="{% url 'add_task' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'add_task' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Add Task</a>
-                        <a href="{% url 'friends' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'friends' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Friends</a>
-                        <a href="{% url 'notifications' %}" class="flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'notifications' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">
+                        <a href="{% url 'my_tasks' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'my_tasks' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">My Tasks</a>
+                        <a href="{% url 'rewards' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'rewards' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">My Rewards</a>
+                        <a href="{% url 'add_task' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'add_task' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">Add Task</a>
+                        <a href="{% url 'friends' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'friends' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">Friends</a>
+                        <a href="{% url 'notifications' %}" class="flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'notifications' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">
                             <span>Notifications</span>
                             {% if unread_notifications_count > 0 %}
                                 <span class="ml-2 h-2.5 w-2.5 rounded-full bg-red-500"></span>
                             {% endif %}
                         </a>
-                        <a href="{% url 'profile' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'profile' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Profile</a>
+                        <a href="{% url 'profile' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'profile' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">Profile</a>
                         <a href="{% url 'logout' %}" class="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 ml-4">Logout</a>
                     {% else %}
                         <a href="{% url 'login_page' %}" class="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors duration-200 ml-4">Login</a>
                     {% endif %}
+                    <!-- Theme Selection Buttons (Desktop) -->
+                    <button id="light-theme-btn" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white">Light</button>
+                    <button id="dark-theme-btn" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white">Dark</button>
                 </div>
                 <div class="md:hidden flex items-center">
-                    <button id="mobile-menu-button" class="inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-white hover:bg-gray-700 focus:outline-none">
+                    <!-- Theme Selection Buttons (Mobile) -->
+                    <button id="light-theme-btn-mobile" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white">Light</button>
+                    <button id="dark-theme-btn-mobile" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white">Dark</button>
+                    <button id="mobile-menu-button" class="inline-flex items-center justify-center p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white focus:outline-none">
                         <svg class="h-6 w-6" stroke="currentColor" fill="none" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7" />
                         </svg>
@@ -63,47 +99,52 @@
                 </div>
             </div>
         </div>
-        <div id="mobile-menu" class="md:hidden hidden">
+        <div id="mobile-menu" class="md:hidden hidden dark:bg-gray-800">
             <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
-                <a href="{% url 'home' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'home' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Home</a>
+                <a href="{% url 'home' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'home' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">Home</a>
                 {% if user.is_authenticated %}
-                    <a href="{% url 'my_tasks' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'my_tasks' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">My Tasks</a>
-                    <a href="{% url 'rewards' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'rewards' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">My Rewards</a>
-                    <a href="{% url 'add_task' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'add_task' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Add Task</a>
-                    <a href="{% url 'friends' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'friends' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Friends</a>
-                    <a href="{% url 'notifications' %}" class="flex items-center block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'notifications' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">
+                    <a href="{% url 'my_tasks' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'my_tasks' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">My Tasks</a>
+                    <a href="{% url 'rewards' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'rewards' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">My Rewards</a>
+                    <a href="{% url 'add_task' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'add_task' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">Add Task</a>
+                    <a href="{% url 'friends' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'friends' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">Friends</a>
+                    <a href="{% url 'notifications' %}" class="flex items-center block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'notifications' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">
                         <span>Notifications</span>
                         {% if unread_notifications_count > 0 %}
                             <span class="ml-2 h-2.5 w-2.5 rounded-full bg-red-500"></span>
                         {% endif %}
                     </a>
-                    <a href="{% url 'profile' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'profile' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Profile</a>
-                    <a href="{% url 'logout' %}" class="block px-3 py-2 rounded-md text-base font-medium text-gray-300 hover:bg-gray-700/50 hover:text-white">Logout</a>
+                    <a href="{% url 'profile' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'profile' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">Profile</a>
+                    <a href="{% url 'logout' %}" class="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white">Logout</a>
                 {% else %}
-                    <a href="{% url 'login_page' %}" class="block px-3 py-2 rounded-md text-base font-medium text-gray-300 hover:bg-gray-700/50 hover:text-white">Login</a>
+                    <a href="{% url 'login_page' %}" class="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white">Login</a>
                 {% endif %}
+            </div>
+            <!-- Mobile Theme Selection Buttons -->
+            <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3 border-t border-gray-200 dark:border-gray-700 mt-2">
+                <button id="light-theme-btn-mobile" class="block w-full text-left px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white">Light Theme</button>
+                <button id="dark-theme-btn-mobile" class="block w-full text-left px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white">Dark Theme</button>
             </div>
         </div>
     </nav>
 
     <main class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {% if user.is_authenticated and user.userprofile %}
-            <div class="bg-gray-800/50 backdrop-blur-lg p-4 rounded-xl mb-8 text-center shadow-lg border border-gray-700/50">
-                <p class="text-lg text-gray-300">Your Reward Points: <strong class="text-cyan-400 font-semibold">{{ request.user.userprofile.rewards }}</strong> | Unread: {{ unread_notifications_count }}</p>
+            <div class="bg-white/80 backdrop-blur-lg p-4 rounded-xl mb-8 text-center shadow-lg border border-gray-200/50 dark:bg-gray-800/80 dark:border-gray-700/50">
+                <p class="text-lg text-gray-700 dark:text-gray-300">Your Reward Points: <strong class="text-cyan-600 font-semibold">{{ request.user.userprofile.rewards }}</strong> | Unread: {{ unread_notifications_count }}</p>
             </div>
         {% endif %}
         
         {% if messages %}
             <div class="mb-6 space-y-3">
                 {% for message in messages %}
-                    <div class="p-4 rounded-lg font-medium text-sm {% if message.tags == 'success' %}bg-green-500/20 text-green-300 border border-green-500/30{% elif message.tags == 'error' %}bg-red-500/20 text-red-300 border border-red-500/30{% else %}bg-blue-500/20 text-blue-300 border border-blue-500/30{% endif %}" role="alert">
+                    <div class="p-4 rounded-lg font-medium text-sm {% if message.tags == 'success' %}bg-green-100 text-green-700 border border-green-200 dark:bg-green-800/50 dark:text-green-200 dark:border-green-700/50{% elif message.tags == 'error' %}bg-red-100 text-red-700 border border-red-200 dark:bg-red-800/50 dark:text-red-200 dark:border-red-700/50{% else %}bg-blue-100 text-blue-700 border border-blue-200 dark:bg-blue-800/50 dark:text-blue-200 dark:border-blue-700/50{% endif %}" role="alert">
                         {{ message }}
                     </div>
                 {% endfor %}
             </div>
         {% endif %}
         
-        <div class="bg-gray-800/50 backdrop-blur-lg p-6 sm:p-8 rounded-2xl shadow-2xl border border-gray-700/50">
+        <div class="bg-white/80 backdrop-blur-lg p-6 sm:p-8 rounded-2xl shadow-2xl border border-gray-200/50 dark:bg-gray-800/80 dark:border-gray-700/50">
             {% block content %}
             {% endblock content %}
         </div>
@@ -116,22 +157,68 @@
             const mobileMenu = document.getElementById('mobile-menu');
             mobileMenuButton.addEventListener('click', () => mobileMenu.classList.toggle('hidden'));
 
-            // Vanta.js animation
-            VANTA.NET({
-                el: "#vanta-bg",
-                mouseControls: true,
-                touchControls: true,
-                gyroControls: false,
-                minHeight: 200.00,
-                minWidth: 200.00,
-                scale: 1.00,
-                scaleMobile: 1.00,
-                color: 0x2dd4bf,      /* cyan-400 */
-                backgroundColor: 0x1a202c, /* gray-900 */
-                points: 12.00,
-                maxDistance: 25.00,
-                spacing: 18.00
-            });
+            // Theme Selection Logic
+            const lightThemeBtn = document.getElementById('light-theme-btn');
+            const darkThemeBtn = document.getElementById('dark-theme-btn');
+            const lightThemeBtnMobile = document.getElementById('light-theme-btn-mobile');
+            const darkThemeBtnMobile = document.getElementById('dark-theme-btn-mobile');
+            const htmlElement = document.documentElement;
+
+            let vantaEffect;
+
+            function updateVantaTheme(isDarkMode) {
+                if (vantaEffect) {
+                    vantaEffect.destroy();
+                }
+                vantaEffect = VANTA.NET({
+                    el: "#vanta-bg",
+                    mouseControls: true,
+                    touchControls: true,
+                    gyroControls: false,
+                    minHeight: 200.00,
+                    minWidth: 200.00,
+                    scale: 1.00,
+                    scaleMobile: 1.00,
+                    color: isDarkMode ? 0x2dd4bf : 0x06b6d4,      /* cyan-400 (dark) / cyan-500 (light) */
+                    backgroundColor: isDarkMode ? 0x1a202c : 0xf0f0f0, /* gray-900 (dark) / light gray (light) */
+                    points: 12.00,
+                    maxDistance: 25.00,
+                    spacing: 18.00
+                });
+            }
+
+            function setTheme(isDarkMode) {
+                if (isDarkMode) {
+                    htmlElement.classList.add('dark');
+                    localStorage.setItem('theme', 'dark');
+                } else {
+                    htmlElement.classList.remove('dark');
+                    localStorage.setItem('theme', 'light');
+                }
+                updateVantaTheme(isDarkMode);
+            }
+
+            // Initial theme setup
+            const savedTheme = localStorage.getItem('theme');
+            if (savedTheme === 'dark') {
+                setTheme(true);
+            } else { // Default to light if no saved theme or saved as light
+                setTheme(false);
+            }
+
+            // Event listeners for theme selection buttons
+            if (lightThemeBtn) {
+                lightThemeBtn.addEventListener('click', () => setTheme(false));
+            }
+            if (darkThemeBtn) {
+                darkThemeBtn.addEventListener('click', () => setTheme(true));
+            }
+            if (lightThemeBtnMobile) {
+                lightThemeBtnMobile.addEventListener('click', () => setTheme(false));
+            }
+            if (darkThemeBtnMobile) {
+                darkThemeBtnMobile.addEventListener('click', () => setTheme(true));
+            }
 
             // Auto-hiding navbar logic
             let lastScrollY = window.scrollY;
