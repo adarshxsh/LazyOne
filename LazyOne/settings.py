@@ -29,12 +29,15 @@ load_dotenv(BASE_DIR / '.env')
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-9755rcl^sg+)6z4%8n(4h7oq%$o+36mu35iv)*bgw+5su#a3z1')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG', 'True') == 'True'
+DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = []
-
+ALLOWED_HOSTS = ['127.0.0.1', 'vercel.app']
 
 # Application definition
+
+STATIC_URL = 'static/'
+
+
 
 INSTALLED_APPS = [
     'basic.apps.BasicConfig',
@@ -71,6 +74,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'basic.context_processors.firebase_keys', # Custom context processor
+                'basic.context_processors.unread_notifications_count', # Custom context processor
             ],
         },
     },

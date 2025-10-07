@@ -12,3 +12,12 @@ def firebase_keys(request):
         'FIREBASE_MESSAGING_SENDER_ID': settings.FIREBASE_MESSAGING_SENDER_ID,
         'FIREBASE_APP_ID': settings.FIREBASE_APP_ID,
     }
+
+def unread_notifications_count(request):
+    """
+    Returns the number of unread notifications for the current user.
+    """
+    if request.user.is_authenticated:
+        count = request.user.notifications.filter(is_read=False).count()
+        return {'unread_notifications_count': count}
+    return {'unread_notifications_count': 0}

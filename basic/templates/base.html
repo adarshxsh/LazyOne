@@ -34,7 +34,12 @@
                         <a href="{% url 'my_tasks' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'my_tasks' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">My Tasks</a>
                         <a href="{% url 'add_task' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'add_task' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Add Task</a>
                         <a href="{% url 'friends' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'friends' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Friends</a>
-                        <a href="{% url 'notifications' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'notifications' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Notifications</a>
+                        <a href="{% url 'notifications' %}" class="flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'notifications' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">
+                            <span>Notifications</span>
+                            {% if unread_notifications_count > 0 %}
+                                <span class="ml-2 h-2.5 w-2.5 rounded-full bg-red-500"></span>
+                            {% endif %}
+                        </a>
                         <a href="{% url 'profile' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'profile' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Profile</a>
                         <a href="{% url 'logout' %}" class="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 ml-4">Logout</a>
                     {% else %}
@@ -57,7 +62,12 @@
                     <a href="{% url 'my_tasks' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'my_tasks' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">My Tasks</a>
                     <a href="{% url 'add_task' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'add_task' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Add Task</a>
                     <a href="{% url 'friends' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'friends' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Friends</a>
-                    <a href="{% url 'notifications' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'notifications' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Notifications</a>
+                    <a href="{% url 'notifications' %}" class="flex items-center block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'notifications' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">
+                        <span>Notifications</span>
+                        {% if unread_notifications_count > 0 %}
+                            <span class="ml-2 h-2.5 w-2.5 rounded-full bg-red-500"></span>
+                        {% endif %}
+                    </a>
                     <a href="{% url 'profile' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'profile' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Profile</a>
                     <a href="{% url 'logout' %}" class="block px-3 py-2 rounded-md text-base font-medium text-gray-300 hover:bg-gray-700/50 hover:text-white">Logout</a>
                 {% else %}
@@ -70,7 +80,7 @@
     <main class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {% if user.is_authenticated and user.userprofile %}
             <div class="bg-gray-800/50 backdrop-blur-lg p-4 rounded-xl mb-8 text-center shadow-lg border border-gray-700/50">
-                <p class="text-lg text-gray-300">Your Reward Points: <strong class="text-cyan-400 font-semibold">{{ request.user.userprofile.rewards }}</strong></p>
+                <p class="text-lg text-gray-300">Your Reward Points: <strong class="text-cyan-400 font-semibold">{{ request.user.userprofile.rewards }}</strong> | Unread: {{ unread_notifications_count }}</p>
             </div>
         {% endif %}
         
