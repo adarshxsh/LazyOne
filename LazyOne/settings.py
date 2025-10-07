@@ -12,8 +12,8 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 import os
 from pathlib import Path
-import firebase_admin
-from firebase_admin import credentials, firestore
+from django.core.exceptions import ImproperlyConfigured # Import for SECRET_KEY check
+import dj_database_url # For PostgreSQL database configuration
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -26,20 +26,23 @@ load_dotenv(BASE_DIR / '.env')
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-9755rcl^sg+)6z4%8n(4h7oq%$o+36mu35iv)*bgw+5su#a3z1')
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
+if not SECRET_KEY:
+    raise ImproperlyConfigured("DJANGO_SECRET_KEY environment variable not set.")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = ['127.0.0.1', 'vercel.app']
+# ALLOWED_HOSTS should be a comma-separated list in your .env file (e.g., "example.com,www.example.com")
+ALLOWED_HOSTS = os.getenv('DJANGO_ALLOWED_HOSTS', '').split(',')
+if DEBUG:
+    ALLOWED_HOSTS.extend(['127.0.0.1', 'localhost'])
+ALLOWED_HOSTS = [h.strip() for h in ALLOWED_HOSTS if h.strip()] # Clean up any empty strings or whitespace
 
 # Application definition
 
-STATIC_URL = 'static/'
-
-
-
 INSTALLED_APPS = [
+    'whitenoise.runserver_nostatic', # Must be first for WhiteNoise in dev
     'basic.apps.BasicConfig',
     'django.contrib.admin',
     'django.contrib.auth',
@@ -51,6 +54,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware', # For serving static files in production
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -87,11 +91,12 @@ WSGI_APPLICATION = 'LazyOne.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+# Use dj_database_url to parse DATABASE_URL environment variable for production
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    'default': dj_database_url.config(
+        default=os.getenv('DATABASE_URL', f'sqlite:///{BASE_DIR / "db.sqlite3"}'), # Fallback to SQLite for local dev
+        conn_max_age=600 # Optional: connection pool max age
+    )
 }
 
 
@@ -136,22 +141,23 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles' # Directory where collectstatic will put files
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage' # WhiteNoise storage
+
+# Media files (for user uploads)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'mediafiles' # Directory for user-uploaded files
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Firebase Admin SDK (for backend)
+# Firebase Admin SDK (for backend) - Initialization should be in basic/apps.py
 FIREBASE_SERVICE_ACCOUNT_KEY_PATH = os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY_PATH')
-if FIREBASE_SERVICE_ACCOUNT_KEY_PATH:
-    if not firebase_admin._apps:
-        cred = credentials.Certificate(FIREBASE_SERVICE_ACCOUNT_KEY_PATH)
-        firebase_admin.initialize_app(cred)
-    db = firestore.client()
-else:
-    print("WARNING: Firebase Admin SDK credentials not found. Backend Firebase features will be disabled.")
-    db = None
+# Note: The actual Firebase Admin SDK initialization logic should be moved to basic/apps.py
+# and the 'db' client should be accessed from there or passed around.
+# For now, we keep the path here for configuration.
 
 # Firebase Client-Side Config (for frontend)
 FIREBASE_API_KEY = os.getenv('FIREBASE_API_KEY')
@@ -165,7 +171,28 @@ FIREBASE_APP_ID = os.getenv('FIREBASE_APP_ID')
 INSTAGRAM_APP_ID = os.getenv('INSTAGRAM_APP_ID')
 INSTAGRAM_APP_SECRET = os.getenv('INSTAGRAM_APP_SECRET')
 
+# Email Configuration for Production
+# Use a real email backend in production (e.g., SendGrid, Mailgun, AWS SES)
+# For development, console backend is fine.
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST = os.getenv('EMAIL_HOST')
+EMAIL_PORT = os.getenv('EMAIL_PORT')
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'False') == 'True'
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'webmaster@localhost')
+SERVER_EMAIL = os.getenv('SERVER_EMAIL', 'root@localhost') # For error reporting
 
-# Media files (for user uploads)
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+# Security Settings
+# https://docs.djangoproject.com/en/5.2/topics/security/
+if not DEBUG:
+    SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', 'True') == 'True'
+    SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'True') == 'True'
+    CSRF_COOKIE_SECURE = os.getenv('CSRF_COOKIE_SECURE', 'True') == 'True'
+    SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '31536000')) # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = os.getenv('SECURE_HSTS_INCLUDE_SUBDOMAINS', 'True') == 'True'
+    SECURE_HSTS_PRELOAD = os.getenv('SECURE_HSTS_PRELOAD', 'True') == 'True'
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = 'DENY' # Prevents clickjacking
+    # CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',') # Uncomment and configure if needed

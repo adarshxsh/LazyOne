@@ -18,6 +18,7 @@ constantly==23.10.4
 cookiecutter==2.6.0
 cryptography==46.0.2
 daphne==3.0.2
+dj-database-url==2.1.0 # Added for production database configuration
 Django==5.2.7
 django-tailwind==4.2.0
 dotenv==0.9.9
@@ -74,4 +75,5 @@ txaio==25.9.2
 types-python-dateutil==2.9.0.20250822
 typing_extensions==4.15.0
 urllib3==2.5.0
+whitenoise==6.7.0 # Added for serving static files in production
 zope.interface==8.0.1
