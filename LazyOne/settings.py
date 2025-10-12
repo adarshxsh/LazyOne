@@ -15,6 +15,7 @@ from pathlib import Path
 from django.core.exceptions import ImproperlyConfigured
 import dj_database_url
 from dotenv import load_dotenv
+from urllib.parse import urlparse # Import urlparse
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -28,17 +29,15 @@ if not SECRET_KEY:
     raise ImproperlyConfigured("DJANGO_SECRET_KEY environment variable not set.")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-# Vercel sets NODE_ENV to 'production' by default.
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
 # ALLOWED_HOSTS
 ALLOWED_HOSTS = []
 vercel_url = os.getenv('VERCEL_URL')
 if vercel_url:
-    # The VERCEL_URL is the full URL, like 'https://lazy-one-munl.vercel.app'
-    # We need to extract just the hostname.
-    hostname = vercel_url.split('//')[1]
-    ALLOWED_HOSTS.append(hostname)
+    # Use urlparse for robust URL parsing
+    parsed_url = urlparse(vercel_url)
+    ALLOWED_HOSTS.append(parsed_url.netloc)
 else:
     # For local development
     ALLOWED_HOSTS.extend(['127.0.0.1', 'localhost'])
