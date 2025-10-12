@@ -5,11 +5,11 @@ attrs==25.3.0
 autobahn==24.4.2
 Automat==25.4.16
 binaryornot==0.4.4
-CacheControl==0.14.3
+CacheControl==0.14.0
 cachetools==6.2.0
 certifi==2025.8.3
 cffi==2.0.0
-channels==4.3.0
+channels==3.0.5
 channels_redis==4.3.0
 chardet==5.2.0
 charset-normalizer==3.4.3
@@ -18,11 +18,13 @@ constantly==23.10.4
 cookiecutter==2.6.0
 cryptography==46.0.2
 daphne==3.0.2
-dj-database-url==2.1.0 # Added for production database configuration
+deta-db-django==1.0.2
+dj-database-url==2.1.0
 Django==5.2.7
 django-tailwind==4.2.0
 dotenv==0.9.9
 firebase_admin==7.1.0
+gunicorn==22.0.0
 google-api-core==2.25.2
 google-auth==2.41.1
 google-cloud-core==2.4.3
@@ -48,6 +50,7 @@ MarkupSafe==3.0.3
 mdurl==0.1.2
 msgpack==1.1.1
 pillow==11.3.0
+psycopg2-binary==2.9.9 # For PostgreSQL
 proto-plus==1.26.1
 protobuf==6.32.1
 pyasn1==0.6.1
@@ -75,5 +78,5 @@ txaio==25.9.2
 types-python-dateutil==2.9.0.20250822
 typing_extensions==4.15.0
 urllib3==2.5.0
-whitenoise==6.7.0 # Added for serving static files in production
+whitenoise==6.7.0
 zope.interface==8.0.1
