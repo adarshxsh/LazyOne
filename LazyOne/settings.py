@@ -12,26 +12,33 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 import os
 from pathlib import Path
-import firebase_admin
-from firebase_admin import credentials, firestore
+from django.core.exceptions import ImproperlyConfigured
+import dj_database_url
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load environment variables from .env file
+# Load environment variables from .env file for local development
 load_dotenv(BASE_DIR / '.env')
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
-
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-9755rcl^sg+)6z4%8n(4h7oq%$o+36mu35iv)*bgw+5su#a3z1')
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
+if not SECRET_KEY:
+    raise ImproperlyConfigured("DJANGO_SECRET_KEY environment variable not set.")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG', 'True') == 'True'
+# Vercel sets NODE_ENV to 'production' by default.
+DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
+# ALLOWED_HOSTS
+# Vercel provides the VERCEL_URL environment variable.
 ALLOWED_HOSTS = []
+if os.getenv('VERCEL_URL'):
+    ALLOWED_HOSTS.append(os.getenv('VERCEL_URL').split('//')[1])
+else:
+    # For local development
+    ALLOWED_HOSTS.extend(['127.0.0.1', 'localhost'])
 
 
 # Application definition
@@ -48,6 +55,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware', # For serving static files
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -61,39 +69,36 @@ ROOT_URLCONF = 'LazyOne.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates']
-        ,
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
-            'context_processors': [  # Add this line to provide key to all templates
+            'context_processors': [
                 'django.template.context_processors.debug',
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
-                'basic.context_processors.firebase_keys', # Custom context processor
+                'basic.context_processors.firebase_keys',
+                'basic.context_processors.unread_notifications_count',
             ],
         },
     },
 ]
 
-# The standard WSGI application is now used.
 WSGI_APPLICATION = 'LazyOne.wsgi.application'
-
+ASGI_APPLICATION = 'LazyOne.asgi.application'
 
 # Database
-# https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-
+# Uses DATABASE_URL environment variable for production (e.g., PostgreSQL from Neon)
+# Falls back to SQLite for local development if DATABASE_URL is not set.
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    'default': dj_database_url.config(
+        default=f'sqlite:///{BASE_DIR / "db.sqlite3"}',
+        conn_max_age=600
+    )
 }
 
 
 # Password validation
-# https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
-
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
@@ -117,37 +122,34 @@ AUTHENTICATION_BACKENDS = [
 
 
 # Internationalization
-# https://docs.djangoproject.com/en/5.2/topics/i18n/
-
 LANGUAGE_CODE = 'en-us'
-
 TIME_ZONE = 'UTC'
-
 USE_I18N = True
-
 USE_TZ = True
 
 
 # Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.2/howto/static-files/
-
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+# Media files
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'mediafiles'
 
 # Default primary key field type
-# https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
-
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Firebase Admin SDK (for backend)
+# On Vercel, we'll write the JSON content from an env var to a temp file
 FIREBASE_SERVICE_ACCOUNT_KEY_PATH = os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY_PATH')
-if FIREBASE_SERVICE_ACCOUNT_KEY_PATH:
-    if not firebase_admin._apps:
-        cred = credentials.Certificate(FIREBASE_SERVICE_ACCOUNT_KEY_PATH)
-        firebase_admin.initialize_app(cred)
-    db = firestore.client()
-else:
-    print("WARNING: Firebase Admin SDK credentials not found. Backend Firebase features will be disabled.")
-    db = None
+if os.getenv('VERCEL') == '1':
+    firebase_json_content = os.getenv('FIREBASE_SERVICE_ACCOUNT_JSON')
+    if firebase_json_content:
+        key_path = "/tmp/serviceAccountKey.json"
+        with open(key_path, "w") as f:
+            f.write(firebase_json_content)
+        FIREBASE_SERVICE_ACCOUNT_KEY_PATH = key_path
 
 # Firebase Client-Side Config (for frontend)
 FIREBASE_API_KEY = os.getenv('FIREBASE_API_KEY')
@@ -161,7 +163,9 @@ FIREBASE_APP_ID = os.getenv('FIREBASE_APP_ID')
 INSTAGRAM_APP_ID = os.getenv('INSTAGRAM_APP_ID')
 INSTAGRAM_APP_SECRET = os.getenv('INSTAGRAM_APP_SECRET')
 
-
-# Media files (for user uploads)
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+# Security Settings for Vercel
+if os.getenv('VERCEL') == '1':
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_SSL_REDIRECT = False # Vercel handles this
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True

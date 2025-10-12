@@ -1,7 +1,7 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from ..models import Dispute
+from ..models import Dispute, Conversation, Message # Import Conversation and Message
 from django.views.decorators.http import require_POST
 
 @login_required(login_url='/login/')
@@ -17,9 +17,20 @@ def dispute_detail_view(request, dispute_id):
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
 
+    # Get the main chat conversation for the task
+    conversation = task.main_chat
+    messages_list = []
+    if conversation:
+        # Fetch the 10 most recent messages
+        messages_list = conversation.messages.order_by('-timestamp')[:10]
+        # Reverse the list so the oldest of the 10 is first, for correct display order
+        messages_list = reversed(messages_list)
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'conversation': conversation,
+        'messages': messages_list
     }
     return render(request, 'dispute_detail.html', context)
 

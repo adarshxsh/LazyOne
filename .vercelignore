@@ -1,0 +1,19 @@
+# Ignore local database
+db.sqlite3
+
+# Ignore environment variables file
+.env
+
+# Ignore Python virtual environment
+venv/
+
+# Ignore IDE configuration files
+.idea/
+
+# Ignore Python cache
+__pycache__/
+*.pyc
+
+# Ignore local static and media files (Vercel will generate these)
+staticfiles/
+mediafiles/

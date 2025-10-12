@@ -202,10 +202,10 @@ def raise_dispute(request, task_id):
             Notification.objects.create(
                 recipient=task.posted_by,
                 message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
-                link=reverse('dispute_detail', args=[dispute.id])
+                # link=reverse('dispute_detail', args=[dispute.id])
             )
             messages.success(request, "Dispute raised successfully.")
-        return redirect('dispute_detail', dispute_id=dispute.id)
+        return redirect('my_tasks')
 
     # If GET, just redirect back. The modal is handled client-side.
     return redirect('my_tasks')

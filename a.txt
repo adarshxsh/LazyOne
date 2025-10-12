@@ -1,0 +1,46 @@
+Shri Ganeshaya Namah:
+
+LazyOne will facilitate you with :
+    1. You can post your task
+        - With some basic details along with deadline
+        - Cancel it if no one has taken
+        - Request for cancellation if someone has take then he will get request to abend the task
+        - Mark as done - if satisfied by completion and reward will credited to him
+        - Chat for more further chat
+    2. You can take task
+        - If you are first then directly can take it
+        - Otherwise you should chat with poster then he will request for cancellation
+        - If you took task the would be Abend it then it could be allocated to other
+        - you can raise dispute if the task is completed but not got what commited also it can be withdrawn
+        - Chat is absolute you can ask further details
+    3.Home Page :
+        A. Social connect:
+            this will be people around you and organise in a circle of radius as closeness
+            Comment : This is for future - We will make sure that the task will travel according to closeness
+            You can see the profile & chat with him
+
+        B. Recent Chat :
+            Here will be your recent chat regarding task or personal
+
+        C. Tasks :
+            All the posted task will display here
+
+        D. Disputed Task:
+            The disputed task chat will be here, it dispute resolve then chat will be disappeared
+            Here we only show the last 10 chats
+            Community can give there opinion
+    4.Rewards : An optimistic feature can be used further more for data structure
+        Here you can track your rewards
+
+    5.Friends: A way to connect with others
+        A. Your friends - request accepted
+        B. Pending friend request
+        C. Here is the user of app whom you can send the friend request adjusting the closeness
+
+    6. Authentication :
+        phone no.
+        can add basic details here
+
+
+
+
