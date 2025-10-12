@@ -32,10 +32,13 @@ if not SECRET_KEY:
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
 # ALLOWED_HOSTS
-# Vercel provides the VERCEL_URL environment variable.
 ALLOWED_HOSTS = []
-if os.getenv('VERCEL_URL'):
-    ALLOWED_HOSTS.append(os.getenv('VERCEL_URL').split('//')[1])
+vercel_url = os.getenv('VERCEL_URL')
+if vercel_url:
+    # The VERCEL_URL is the full URL, like 'https://lazy-one-munl.vercel.app'
+    # We need to extract just the hostname.
+    hostname = vercel_url.split('//')[1]
+    ALLOWED_HOSTS.append(hostname)
 else:
     # For local development
     ALLOWED_HOSTS.extend(['127.0.0.1', 'localhost'])
