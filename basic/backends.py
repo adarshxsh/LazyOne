@@ -3,6 +3,7 @@ from django.contrib.auth.models import User
 from firebase_admin import auth
 from .models import UserProfile
 import logging
+from .firebase_init import initialize_firebase # Import the new initializer
 
 # Get an instance of a logger
 logger = logging.getLogger(__name__)
@@ -12,6 +13,8 @@ class FirebaseBackend(BaseBackend):
         """
         Verifies a Firebase ID token and returns a Django user.
         """
+        initialize_firebase() # Ensure Firebase is initialized before any auth call
+
         if token is None:
             return None
 
@@ -29,9 +32,15 @@ class FirebaseBackend(BaseBackend):
                 defaults={'email': email}
             )
 
-            if created:
-                logger.info(f"New user created: {email}")
-                UserProfile.objects.create(user=user, rewards=1500)
+            # Ensure profile exists and firebase_uid is set
+            profile, profile_created = UserProfile.objects.get_or_create(user=user)
+            if profile_created:
+                logger.info(f"New user profile created for: {email}")
+                profile.rewards = 1500 # Set initial rewards for new profiles
+            
+            if not profile.firebase_uid:
+                profile.firebase_uid = uid
+                profile.save()
             
             return user
 
