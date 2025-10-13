@@ -42,6 +42,7 @@ if 'VERCEL_BRANCH_URL' in os.environ:
 if not DEBUG:
     # Add your production domain here if you have one
     # e.g., ALLOWED_HOSTS.append('yourdomain.com')
+    ALLOWED_HOSTS.append('lazy-one-munl-1q50q82sf-adarsh-kumars-projects-d27a2c9f.vercel.app');
 
     pass
 else:
