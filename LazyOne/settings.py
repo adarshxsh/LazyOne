@@ -15,7 +15,6 @@ from pathlib import Path
 from django.core.exceptions import ImproperlyConfigured
 import dj_database_url
 from dotenv import load_dotenv
-from urllib.parse import urlparse # Import urlparse
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -32,20 +31,14 @@ if not SECRET_KEY:
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
 # ALLOWED_HOSTS
-ALLOWED_HOSTS = []
-
-# For Vercel, use the system environment variable VERCEL_BRANCH_URL
-if 'VERCEL_BRANCH_URL' in os.environ:
-    ALLOWED_HOSTS.append(os.environ['VERCEL_BRANCH_URL'])
-
-# For local development
+# This is the most robust way for Vercel deployments.
+ALLOWED_HOSTS = ['.vercel.app']
 if not DEBUG:
-    # Add your production domain here if you have one
+    # Add your custom production domain here if you have one
     # e.g., ALLOWED_HOSTS.append('yourdomain.com')
-    ALLOWED_HOSTS.append('lazy-one-munl-1q50q82sf-adarsh-kumars-projects-d27a2c9f.vercel.app');
-
     pass
 else:
+    # For local development
     ALLOWED_HOSTS.extend(['127.0.0.1', 'localhost'])
 
 
