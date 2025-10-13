@@ -33,13 +33,18 @@ DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
 # ALLOWED_HOSTS
 ALLOWED_HOSTS = []
-vercel_url = os.getenv('VERCEL_URL')
-if vercel_url:
-    # Use urlparse for robust URL parsing
-    parsed_url = urlparse(vercel_url)
-    ALLOWED_HOSTS.append(parsed_url.netloc)
+
+# For Vercel, use the system environment variable VERCEL_BRANCH_URL
+if 'VERCEL_BRANCH_URL' in os.environ:
+    ALLOWED_HOSTS.append(os.environ['VERCEL_BRANCH_URL'])
+
+# For local development
+if not DEBUG:
+    # Add your production domain here if you have one
+    # e.g., ALLOWED_HOSTS.append('yourdomain.com')
+
+    pass
 else:
-    # For local development
     ALLOWED_HOSTS.extend(['127.0.0.1', 'localhost'])
 
 
