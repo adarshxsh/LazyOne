@@ -1,15 +1,21 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from ..models import UserProfile, Task
+from ..models import UserProfile, Task, Friendship
 from django.contrib.auth.models import User
 import json
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from firebase_admin import auth
-from LazyOne.settings import db # Import the Firestore client
+from django.apps import apps # Import apps to access app config
+
+# Health check endpoint
+def ping(request):
+    """A simple view that returns a 200 OK response."""
+    return HttpResponse("pong")
 
 @login_required(login_url='/login/')
 def profile_view(request):
+    db = apps.get_app_config('basic').firestore_db # Get Firestore client
     profile, created = UserProfile.objects.get_or_create(user=request.user)
     if request.method == 'POST':
         # Update Django model
@@ -63,15 +69,60 @@ def user_profile_view(request, user_id):
     posted_tasks = Task.objects.filter(posted_by=viewed_user).order_by('-created_at')
     user_friends = viewed_profile.friends.all()
 
+    # Check if the viewed user is a friend of the logged-in user
+    is_friend = request.user.userprofile.friends.filter(id=viewed_profile.id).exists()
+    friendship = None
+    if is_friend:
+        # Get the friendship object to access the closeness value
+        friendship = Friendship.objects.filter(
+            from_user=request.user.userprofile, 
+            to_user=viewed_profile
+        ).first() or Friendship.objects.filter(
+            from_user=viewed_profile, 
+            to_user=request.user.userprofile
+        ).first()
+
     context = {
         'viewed_profile': viewed_profile,
         'posted_tasks': posted_tasks,
-        'user_friends': user_friends
+        'user_friends': user_friends,
+        'is_friend': is_friend,
+        'friendship': friendship
     }
     return render(request, 'user_profile.html', context)
 
 @login_required(login_url='/login/')
+def update_closeness(request, friendship_id):
+    friendship = get_object_or_404(Friendship, id=friendship_id)
+    # Authorization check
+    if request.user.userprofile != friendship.from_user and request.user.userprofile != friendship.to_user:
+        messages.error(request, "You are not authorized to change this friendship.")
+        return redirect('home')
+
+    if request.method == 'POST':
+        closeness = request.POST.get('closeness')
+        if closeness:
+            friendship.closeness = closeness
+            friendship.save()
+            messages.success(request, f"Closeness with {friendship.to_user.user.username} updated!")
+            # Correctly get the user id to redirect back to their profile
+            if request.user.userprofile == friendship.from_user:
+                redirect_user_id = friendship.to_user.user.id
+            else:
+                redirect_user_id = friendship.from_user.user.id
+            return redirect('user_profile', user_id=redirect_user_id)
+    
+    # Redirect back if not a POST request
+    if request.user.userprofile == friendship.from_user:
+        redirect_user_id = friendship.to_user.user.id
+    else:
+        redirect_user_id = friendship.from_user.user.id
+    return redirect('user_profile', user_id=redirect_user_id)
+
+
+@login_required(login_url='/login/')
 def verify_phone_token(request):
+    db = apps.get_app_config('basic').firestore_db # Get Firestore client
     if request.method == 'POST':
         try:
             data = json.loads(request.body)
@@ -89,7 +140,6 @@ def verify_phone_token(request):
             user_profile = request.user.userprofile
 
             # Trust the number from the Firebase token, since the user just verified it.
-            # This avoids issues where the number isn't saved to the profile before verification.
             user_profile.is_phone_verified = True
             user_profile.phone_number = firebase_phone_number
             user_profile.save()
