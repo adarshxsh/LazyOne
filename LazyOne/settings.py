@@ -141,17 +141,6 @@ MEDIA_ROOT = BASE_DIR / 'mediafiles'
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Firebase Admin SDK (for backend)
-# On Vercel, we'll write the JSON content from an env var to a temp file
-FIREBASE_SERVICE_ACCOUNT_KEY_PATH = os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY_PATH')
-if os.getenv('VERCEL') == '1':
-    firebase_json_content = os.getenv('FIREBASE_SERVICE_ACCOUNT_JSON')
-    if firebase_json_content:
-        key_path = "/tmp/serviceAccountKey.json"
-        with open(key_path, "w") as f:
-            f.write(firebase_json_content)
-        FIREBASE_SERVICE_ACCOUNT_KEY_PATH = key_path
-
 # Firebase Client-Side Config (for frontend)
 FIREBASE_API_KEY = os.getenv('FIREBASE_API_KEY')
 FIREBASE_AUTH_DOMAIN = os.getenv('FIREBASE_AUTH_DOMAIN')

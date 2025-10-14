@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from firebase_admin import auth
 from .models import UserProfile
 import logging
-from .firebase_init import initialize_firebase # Import the new initializer
+from .firebase_init import initialize_firebase # Import the new robust initializer
 
 # Get an instance of a logger
 logger = logging.getLogger(__name__)
