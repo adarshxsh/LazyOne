@@ -1,12 +1,13 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from ..models import Task, Conversation, Notification, RewardLedger, Dispute
+from ..models import Task, Conversation, Notification, RewardLedger
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
 from django.db.models import Q
 from datetime import datetime, timedelta
+
 
 @login_required(login_url='/login/')
 def add_task(request):
@@ -20,21 +21,18 @@ def add_task(request):
             reward = int(reward_str)
             if reward <= 0:
                 messages.error(request, "Reward must be a positive number.")
-                # Recalculate default_deadline for re-rendering the form
                 default_deadline = (timezone.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
                 return render(request, 'add_task.html', {'default_deadline': default_deadline})
 
             user_profile = request.user.userprofile
             if user_profile.rewards < reward:
                 messages.error(request, f"You only have {user_profile.rewards} points, not enough to offer this reward.")
-                # Recalculate default_deadline for re-rendering the form
                 default_deadline = (timezone.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
                 return render(request, 'add_task.html', {'default_deadline': default_deadline})
 
             deadline = timezone.make_aware(datetime.strptime(deadline_str, '%Y-%m-%dT%H:%M'))
             if deadline <= timezone.now():
                 messages.error(request, "Deadline must be in the future.")
-                # Recalculate default_deadline for re-rendering the form
                 default_deadline = (timezone.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
                 return render(request, 'add_task.html', {'default_deadline': default_deadline})
 
@@ -53,12 +51,10 @@ def add_task(request):
             return redirect('home')
         except (ValueError, TypeError):
             messages.error(request, 'Invalid reward amount or deadline format.')
-            # Recalculate default_deadline for re-rendering the form
             default_deadline = (timezone.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
             return render(request, 'add_task.html', {'default_deadline': default_deadline})
 
     else:
-        # For GET request, set the default deadline to 1 day from now
         default_deadline = (timezone.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
         return render(request, 'add_task.html', {'default_deadline': default_deadline})
 
@@ -85,7 +81,6 @@ def take_task(request, task_id):
 
 @login_required(login_url='/login/')
 def complete_task(request, task_id):
-    # Allow completion if the task is in progress OR disputed
     task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
@@ -94,7 +89,6 @@ def complete_task(request, task_id):
         task.status = 'completed'
         task.save()
 
-        # If there was a dispute, mark it as resolved
         if hasattr(task, 'dispute'):
             task.dispute.status = 'resolved'
             task.dispute.save()
@@ -171,59 +165,6 @@ def abandon_task(request, task_id):
             link=reverse('my_tasks')
         )
         messages.success(request, "You have abandoned the task. It is now available for others.")
-    return redirect('my_tasks')
-
-@login_required(login_url='/login/')
-def raise_dispute(request, task_id):
-    task = get_object_or_404(Task, id=task_id)
-
-    # If a dispute already exists, just go to the detail page.
-    if hasattr(task, 'dispute'):
-        return redirect('dispute_detail', dispute_id=task.dispute.id)
-
-    # Check if the user is allowed to raise a dispute
-    if task.taken_by != request.user or task.status != 'in_progress':
-        messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
-        return redirect('my_tasks')
-
-    if request.method == 'POST':
-        reason = request.POST.get('reason')
-        if not reason:
-            messages.error(request, "A reason is required to raise a dispute.")
-            return redirect('my_tasks')
-
-        with transaction.atomic():
-            # Create the dispute
-            dispute = Dispute.objects.create(task=task, raised_by=request.user, reason=reason)
-            # Update task status
-            task.status = 'disputed'
-            task.save()
-            # Create notification
-            Notification.objects.create(
-                recipient=task.posted_by,
-                message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
-                # link=reverse('dispute_detail', args=[dispute.id])
-            )
-            messages.success(request, "Dispute raised successfully.")
-        return redirect('my_tasks')
-
-    # If GET, just redirect back. The modal is handled client-side.
-    return redirect('my_tasks')
-
-@login_required(login_url='/login/')
-def withdraw_dispute(request, task_id):
-    task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='disputed')
-    with transaction.atomic():
-        task.status = 'in_progress'
-        task.save()
-        task.dispute.status = 'resolved'
-        task.dispute.save()
-        Notification.objects.create(
-            recipient=task.posted_by,
-            message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
-            link=reverse('my_tasks')
-        )
-        messages.success(request, "You have withdrawn the dispute.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')

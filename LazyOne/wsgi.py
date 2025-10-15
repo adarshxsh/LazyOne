@@ -13,5 +13,5 @@ from django.core.wsgi import get_wsgi_application
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'LazyOne.settings')
 
-# Rename 'application' to 'app' for Vercel compatibility
+# Vercel expects this variable to be named `app`.
 app = get_wsgi_application()

@@ -1,44 +1,25 @@
-from django.contrib import admin
-from django.urls import path, include
-from .views import (
-    home,
-    login_page,
-    logout_view,
-    firebase_login,
-    profile_view,
-    user_profile_view,
-    verify_phone_token,
-    add_task,
-    take_task,
-    complete_task,
-    my_tasks,
-    start_chat,
-    chat_view,
-    send_message,
-    user_list,
-    friends_view,
-    send_friend_request,
-    accept_friend_request,
-    decline_friend_request,
-    notifications_view,
-    rewards_view,
-    cancel_task,
-    request_cancellation,  # New
-    accept_cancellation,  # New
-    abandon_task,
-    raise_dispute,
-    dispute_detail_view,
-    withdraw_dispute,
+from django.urls import path
+from .views.home import home
+from .views.authentication import login_page, logout_view, register_view, verify_otp_view
+from .views.profile import profile_view, user_profile_view, update_closeness
+from .views.tasks import (
+    add_task, take_task, complete_task, my_tasks, cancel_task, 
+    request_cancellation, accept_cancellation, abandon_task
 )
+from .views.dispute import dispute_detail_view, withdraw_dispute, raise_dispute
+from .views.chat import start_chat, chat_view, send_message
+from .views.friends import friends_view, send_friend_request, accept_friend_request, decline_friend_request, user_list
+from .views.notifications import notifications_view
+from .views.rewards import rewards_view
 
 urlpatterns = [
     path('', home, name='home'),
     path('login/', login_page, name='login_page'),
+    path('register/', register_view, name='register'),
+    path('verify-otp/', verify_otp_view, name='verify_otp'), # Add this line
     path('logout/', logout_view, name='logout'),
-    path('firebase-login/', firebase_login, name='firebase_login'),
     path('profile/', profile_view, name='profile'),
     path('user/<int:user_id>/', user_profile_view, name='user_profile'),
-    path('verify-phone-token/', verify_phone_token, name='verify_phone_token'),
     path('rewards/', rewards_view, name='rewards'),
 
     # Task Lifecycle URLs
@@ -49,10 +30,12 @@ urlpatterns = [
     path('task/cancel/request/<int:task_id>/', request_cancellation, name='request_cancellation'),
     path('task/cancel/accept/<int:task_id>/', accept_cancellation, name='accept_cancellation'),
     path('task/abandon/<int:task_id>/', abandon_task, name='abandon_task'),
+    path('my_tasks/', my_tasks, name='my_tasks'),
+
+    # Dispute URLs
     path('task/dispute/<int:task_id>/', raise_dispute, name='raise_dispute'),
     path('dispute/<int:dispute_id>/', dispute_detail_view, name='dispute_detail'),
     path('dispute/withdraw/<int:dispute_id>/', withdraw_dispute, name='withdraw_dispute'),
-    path('my_tasks/', my_tasks, name='my_tasks'),
 
     # Chat URLs
     path('chat/start/<int:user_id>/', start_chat, name='start_chat'),
@@ -65,6 +48,7 @@ urlpatterns = [
     path('friend/send/<int:user_id>/', send_friend_request, name='send_friend_request'),
     path('friend/accept/<int:request_id>/', accept_friend_request, name='accept_friend_request'),
     path('friend/decline/<int:request_id>/', decline_friend_request, name='decline_friend_request'),
+    path('friend/closeness/update/<int:friendship_id>/', update_closeness, name='update_closeness'),
 
     # Notifications
     path('notifications/', notifications_view, name='notifications'),

@@ -1,173 +1,45 @@
 {% extends 'base.html' %}
 
-{% block title %}Login or Sign Up{% endblock %}
+{% block title %}Login{% endblock %}
 
 {% block content %}
 <div class="min-h-[60vh] flex flex-col items-center justify-center">
     <div class="w-full max-w-md">
-        <!-- Updated Card Styling -->
-        <div class="bg-gray-800/50 backdrop-blur-lg border border-gray-700/50 rounded-2xl shadow-2xl shadow-cyan-500/10 p-8">
+        <div class="bg-gray-800/50 backdrop-blur-lg border border-gray-700/50 rounded-2xl shadow-2xl p-8">
             <div class="text-center mb-8">
-            <h2 class="text-3xl font-bold text-white">Welcome Back</h2>
-            <p class="text-gray-400 mt-2">Sign in or create an account to continue</p>
-        </div>
-
-            <!-- Updated Input Fields with Icons -->
-            <div class="space-y-5">
-                <div class="relative">
-                    <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                        <svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" /><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" /></svg>
-                    </div>
-                    <input type="email" id="email" placeholder="Email" required class="w-full pl-12 pr-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 transition-all duration-200">
-                </div>
-                <div class="relative">
-                    <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                        <svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" /></svg>
-                    </div>
-                    <input type="password" id="password" placeholder="Password" required class="w-full pl-12 pr-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 transition-all duration-200">
-                </div>
+                <h2 class="text-3xl font-bold text-white">Login</h2>
+                <p class="text-gray-400 mt-2">Access your account</p>
             </div>
 
-        <div id="error-message" class="mt-4 text-red-400 text-sm font-medium text-center"></div>
+            {% if messages %}
+                <div class="mb-4">
+                {% for message in messages %}
+                    <div class="p-3 rounded-lg bg-red-500/20 text-red-300 text-sm font-medium" role="alert">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+                </div>
+            {% endif %}
 
-            <div class="mt-6 space-y-3">
-            <button id="signin-button" class="w-full py-3 px-4 bg-cyan-500 hover:bg-cyan-600 rounded-lg text-white font-bold text-lg transition-all transform hover:scale-105 duration-200 flex items-center justify-center disabled:opacity-75 disabled:scale-100">
-                <span class="button-text">Sign In</span>
-                <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden button-spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-            </button>
-            <button id="signup-button" class="w-full py-3 px-4 bg-gray-600 hover:bg-gray-700 rounded-lg text-white font-bold transition-colors duration-200 flex items-center justify-center disabled:opacity-75">
-                <span class="button-text">Create Account</span>
-                <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden button-spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-            </button>
-        </div>
+            <form method="post" action="{% url 'login_page' %}" class="space-y-5">
+                {% csrf_token %}
+                <div class="relative">
+                    <input type="text" name="username" placeholder="Username" required class="w-full pl-4 pr-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-all duration-200">
+                </div>
+                <div class="relative">
+                    <input type="password" name="password" placeholder="Password" required class="w-full pl-4 pr-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-all duration-200">
+                </div>
+                <div class="mt-6">
+                    <button type="submit" class="w-full py-3 px-4 bg-cyan-500 hover:bg-cyan-600 rounded-lg text-white font-bold text-lg transition-all transform hover:scale-105 duration-200">
+                        Sign In
+                    </button>
+                </div>
+            </form>
 
-            <div class="mt-6 flex items-center justify-center">
-            <div class="flex-grow border-t border-gray-600/50"></div>
-            <span class="mx-4 text-gray-400 text-sm">OR</span>
-            <div class="flex-grow border-t border-gray-600/50"></div>
-        </div>
-
-            <div class="mt-6">
-            <button id="google-signin-button" class="w-full py-3 px-4 bg-white/10 hover:bg-white/20 rounded-lg text-white font-bold flex items-center justify-center transition-colors duration-200">
-                <svg class="w-5 h-5 mr-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8c-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4C12.955 4 4 12.955 4 24s8.955 20 20 20s20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/><path fill="#FF3D00" d="M6.306 14.691c-1.946 3.44-3.006 7.38-3.006 11.584C3.3 31.548 6.221 36.333 10.608 39.12l5.657-5.657C14.07 31.323 12 28.058 12 24c0-2.682.688-5.182 1.86-7.309l-7.554-6.001z"/><path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-5.657-5.657C30.07 35.323 27.318 36 24 36c-4.058 0-7.323-2.07-9.392-5.12l-5.657 5.657C8.667 40.023 15.849 44 24 44z"/><path fill="#1976D2" d="M43.611 20.083H24v8h11.303c-.792 2.237-2.231 4.16-4.087 5.571l5.657 5.657C42.488 36.463 44 31.283 44 24c0-1.341-.138-2.65-.389-3.917z"/></svg>
-                Sign In with Google
-            </button>
-        </div>
+            <div class="mt-6 text-center">
+                <p class="text-gray-400">Don't have an account? <a href="{% url 'register' %}" class="font-semibold text-cyan-400 hover:underline">Sign Up</a></p>
+            </div>
         </div>
     </div>
 </div>
-
-<script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
-<script>
-    var firebaseConfig = {
-        apiKey: "{{ FIREBASE_API_KEY|default:'' }}",
-        authDomain: "{{ FIREBASE_AUTH_DOMAIN|default:'' }}",
-        projectId: "{{ FIREBASE_PROJECT_ID|default:'' }}",
-        storageBucket: "{{ FIREBASE_STORAGE_BUCKET|default:'' }}",
-        messagingSenderId: "{{ FIREBASE_MESSAGING_SENDER_ID|default:'' }}",
-        appId: "{{ FIREBASE_APP_ID|default:'' }}"
-    };
-
-    if (!firebaseConfig.apiKey) {
-        document.getElementById('error-message').textContent = 'CRITICAL ERROR: Firebase configuration is missing.';
-    } else if (!firebase.apps.length) {
-        firebase.initializeApp(firebaseConfig);
-    } else {
-        firebase.app();
-    }
-
-    const signupButton = document.getElementById('signup-button');
-    const signinButton = document.getElementById('signin-button');
-    const googleSigninButton = document.getElementById('google-signin-button');
-    const errorMessageDiv = document.getElementById('error-message');
-
-    function setLoadingState(button, isLoading) {
-        const text = button.querySelector('.button-text');
-        const spinner = button.querySelector('.button-spinner');
-        if (isLoading) {
-            button.disabled = true;
-            text.classList.add('hidden');
-            spinner.classList.remove('hidden');
-        } else {
-            button.disabled = false;
-            text.classList.remove('hidden');
-            spinner.classList.add('hidden');
-        }
-    }
-
-    function sendTokenToBackend(idToken) {
-        fetch('{% url "firebase_login" %}', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': '{{ csrf_token }}'
-            },
-            body: JSON.stringify({ token: idToken })
-        }).then(response => response.json())
-          .then(data => {
-              if (data.status === 'success') {
-                  window.location.href = "{% url 'home' %}";
-              } else {
-                  errorMessageDiv.textContent = 'Backend login failed: ' + data.message;
-                  setLoadingState(signinButton, false);
-                  setLoadingState(signupButton, false);
-              }
-          }).catch(error => {
-              errorMessageDiv.textContent = 'An error occurred while communicating with the server.';
-          });
-    }
-
-    signupButton.addEventListener('click', () => {
-        const email = document.getElementById('email').value;
-        const password = document.getElementById('password').value;
-        errorMessageDiv.textContent = '';
-        setLoadingState(signupButton, true);
-
-        firebase.auth().createUserWithEmailAndPassword(email, password)
-            .then(userCredential => userCredential.user.getIdToken())
-            .then(idToken => sendTokenToBackend(idToken))
-            .catch(error => {
-                errorMessageDiv.textContent = error.message;
-                setLoadingState(signupButton, false);
-            });
-    });
-
-    signinButton.addEventListener('click', () => {
-        const email = document.getElementById('email').value;
-        const password = document.getElementById('password').value;
-        errorMessageDiv.textContent = '';
-        setLoadingState(signinButton, true);
-
-        firebase.auth().signInWithEmailAndPassword(email, password)
-            .then(userCredential => userCredential.user.getIdToken())
-            .then(idToken => sendTokenToBackend(idToken))
-            .catch(error => {
-                setLoadingState(signinButton, false);
-                if (error.code === 'auth/user-not-found') {
-                    errorMessageDiv.textContent = "No account found with this email. Please create an account.";
-                } else {
-                    errorMessageDiv.textContent = error.message;
-                }
-            });
-    });
-
-    googleSigninButton.addEventListener('click', () => {
-        const provider = new firebase.auth.GoogleAuthProvider();
-        errorMessageDiv.textContent = '';
-
-        firebase.auth().signInWithPopup(provider)
-            .then(result => result.user.getIdToken())
-            .then(idToken => sendTokenToBackend(idToken))
-            .catch(error => {
-                errorMessageDiv.textContent = error.message;
-            });
-    });
-</script>
 {% endblock %}

@@ -1,9 +1,2 @@
-from .authentication import *
-from .profile import *
-from .tasks import *
-from .friends import *
-from .chat import *
-from .notifications import *
-from .home import *
-from .rewards import *
-from .dispute import *
+# This file is intentionally left blank to prevent import errors.
+from . import tasks

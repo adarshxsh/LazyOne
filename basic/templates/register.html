@@ -1,20 +1,78 @@
 {% extends 'base.html' %}
 
-{% block title %}Register{% endblock %}
+{% block title %}Create an Account{% endblock %}
 
 {% block content %}
-    <h2>Register</h2>
-    <form method="post">
-        {% csrf_token %}
-        <input type="email" name="email" placeholder="Email" required><br>
-        <input type="password" name="password" placeholder="Password" required><br>
-        <button type="submit">Register</button>
-    </form>
-    {% if messages %}
-        <ul>
-            {% for message in messages %}
-                <li>{{ message }}</li>
-            {% endfor %}
-        </ul>
-    {% endif %}
+<div class="min-h-[60vh] flex flex-col items-center justify-center">
+    <div class="w-full max-w-md">
+        <div class="bg-gray-800/50 backdrop-blur-lg border border-gray-700/50 rounded-2xl shadow-2xl p-8">
+            <div class="text-center mb-8">
+                <h2 class="text-3xl font-bold text-white">Create Account</h2>
+                <p class="text-gray-400 mt-2">Join the community</p>
+            </div>
+
+            {% if form.errors and not username_taken_error %}
+                <div class="mb-4 p-3 rounded-lg bg-red-500/20 text-red-300 text-sm font-medium">
+                    <p>Please correct the errors below:</p>
+                    <ul class="list-disc list-inside mt-1">
+                    {% for field in form %}
+                        {% for error in field.errors %}
+                            <li>{{ error|escape }}</li>
+                        {% endfor %}
+                    {% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
+
+            {% if username_taken_error %}
+                <div class="mb-4 p-3 rounded-lg bg-yellow-500/20 text-yellow-300 text-sm font-medium">
+                    <p>That username is already taken. Try one of these suggestions:</p>
+                    <div class="flex flex-wrap gap-2 mt-2">
+                        {% for suggestion in username_suggestions %}
+                            <button type="button" class="suggestion-btn text-xs bg-gray-700 hover:bg-gray-600 text-white font-semibold py-1 px-3 rounded-full">{{ suggestion }}</button>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+
+            <form method="post" action="{% url 'register' %}" class="space-y-5">
+                {% csrf_token %}
+                <div>
+                    <input type="text" name="username" id="username-field" value="{{ request.POST.username }}" placeholder="Username" required class="w-full pl-4 pr-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-all">
+                </div>
+                <div>
+                    <input type="email" name="email" value="{{ request.POST.email }}" placeholder="Email" required class="w-full pl-4 pr-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-all">
+                </div>
+                <div>
+                    <input type="password" name="password" placeholder="Password" required class="w-full pl-4 pr-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-all">
+                </div>
+                 <div>
+                    <input type="password" name="password2" placeholder="Confirm Password" required class="w-full pl-4 pr-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-all">
+                </div>
+                <div class="mt-6">
+                    <button type="submit" class="w-full py-3 px-4 bg-cyan-500 hover:bg-cyan-600 rounded-lg text-white font-bold text-lg transition-all transform hover:scale-105">
+                        Sign Up
+                    </button>
+                </div>
+            </form>
+
+            <div class="mt-6 text-center">
+                <p class="text-gray-400">Already have an account? <a href="{% url 'login_page' %}" class="font-semibold text-cyan-400 hover:underline">Log In</a></p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const usernameField = document.getElementById('username-field');
+        document.querySelectorAll('.suggestion-btn').forEach(button => {
+            button.addEventListener('click', function() {
+                usernameField.value = this.textContent;
+                usernameField.focus();
+            });
+        });
+    });
+</script>
+
 {% endblock %}
