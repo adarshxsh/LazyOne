@@ -75,3 +75,5 @@ types-python-dateutil==2.9.0.20250822
 typing_extensions==4.15.0
 urllib3==2.5.0
 zope.interface==8.0.1
+
+django-allauth>=0.63.0

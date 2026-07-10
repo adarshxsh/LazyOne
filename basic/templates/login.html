@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load socialaccount %}
 
 {% block title %}Login or Sign Up{% endblock %}
 
@@ -47,10 +48,13 @@
         </div>
 
         <div class="mt-6">
-            <button id="google-signin-button" class="w-full py-3 px-4 bg-white/10 hover:bg-white/20 rounded-lg text-white font-bold flex items-center justify-center transition-colors duration-200">
-                <svg class="w-5 h-5 mr-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8c-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4C12.955 4 4 12.955 4 24s8.955 20 20 20s20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/><path fill="#FF3D00" d="M6.306 14.691c-1.946 3.44-3.006 7.38-3.006 11.584C3.3 31.548 6.221 36.333 10.608 39.12l5.657-5.657C14.07 31.323 12 28.058 12 24c0-2.682.688-5.182 1.86-7.309l-7.554-6.001z"/><path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-5.657-5.657C30.07 35.323 27.318 36 24 36c-4.058 0-7.323-2.07-9.392-5.12l-5.657 5.657C8.667 40.023 15.849 44 24 44z"/><path fill="#1976D2" d="M43.611 20.083H24v8h11.303c-.792 2.237-2.231 4.16-4.087 5.571l5.657 5.657C42.488 36.463 44 31.283 44 24c0-1.341-.138-2.65-.389-3.917z"/></svg>
-                Sign In with Google
-            </button>
+            <form action="{% provider_login_url 'google' process='login' %}" method="post">
+                {% csrf_token %}
+                <button type="submit" id="google-signin-button" class="w-full py-3 px-4 bg-white/10 hover:bg-white/20 rounded-lg text-white font-bold flex items-center justify-center transition-colors duration-200">
+                    <svg class="w-5 h-5 mr-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8c-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4C12.955 4 4 12.955 4 24s8.955 20 20 20s20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/><path fill="#FF3D00" d="M6.306 14.691c-1.946 3.44-3.006 7.38-3.006 11.584C3.3 31.548 6.221 36.333 10.608 39.12l5.657-5.657C14.07 31.323 12 28.058 12 24c0-2.682.688-5.182 1.86-7.309l-7.554-6.001z"/><path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-5.657-5.657C30.07 35.323 27.318 36 24 36c-4.058 0-7.323-2.07-9.392-5.12l-5.657 5.657C8.667 40.023 15.849 44 24 44z"/><path fill="#1976D2" d="M43.611 20.083H24v8h11.303c-.792 2.237-2.231 4.16-4.087 5.571l5.657 5.657C42.488 36.463 44 31.283 44 24c0-1.341-.138-2.65-.389-3.917z"/></svg>
+                    Sign In with Google
+                </button>
+            </form>
         </div>
     </div>
 </div>
@@ -147,18 +151,6 @@
                 } else {
                     errorMessageDiv.textContent = error.message;
                 }
-            });
-    });
-
-    googleSigninButton.addEventListener('click', () => {
-        const provider = new firebase.auth.GoogleAuthProvider();
-        errorMessageDiv.textContent = '';
-
-        firebase.auth().signInWithPopup(provider)
-            .then(result => result.user.getIdToken())
-            .then(idToken => sendTokenToBackend(idToken))
-            .catch(error => {
-                errorMessageDiv.textContent = error.message;
             });
     });
 </script>
