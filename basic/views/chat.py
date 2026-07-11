@@ -24,9 +24,8 @@ def chat_view(request, conversation_id):
         return redirect('home')
 
     if request.user not in conversation.participants.all():
-        logger.warning("Step 2: User is not a participant. Redirecting to home.")
-        messages.error(request, "You are not authorized to view this chat.")
-        return redirect('home') # Redirect to home page
+        logger.warning("Step 2: User is not a participant. Returning 403 Forbidden.")
+        return HttpResponseForbidden("You are not authorized to view this chat.")
     logger.info("Step 2: User is a valid participant.")
 
     try:
@@ -57,11 +56,11 @@ def chat_view(request, conversation_id):
 
 @login_required(login_url='/login/')
 def send_message(request, conversation_id):
+    conversation = get_object_or_404(Conversation, id=conversation_id)
+    if request.user not in conversation.participants.all():
+        return HttpResponseForbidden("You are not authorized to send messages in this chat.")
+
     if request.method == 'POST':
-        conversation = get_object_or_404(Conversation, id=conversation_id)
-        if request.user not in conversation.participants.all():
-            return HttpResponseForbidden("You are not authorized to send messages in this chat.")
-        
         content = request.POST.get('content')
         if content:
             Message.objects.create(
