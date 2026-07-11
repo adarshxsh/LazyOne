@@ -70,42 +70,41 @@ def user_profile_view(request, user_id):
     }
     return render(request, 'user_profile.html', context)
 
-@login_required(login_url='/login/')
+from basic.services.phone_verification import PhoneVerificationService
+
+@login_required(login_url='/accounts/login/')
 def verify_phone_token(request):
     if request.method == 'POST':
         try:
             data = json.loads(request.body)
             id_token = data.get('token')
 
-            if not id_token:
-                return JsonResponse({'success': False, 'error': 'No token provided.'}, status=400)
+            # Delegate verification to our PhoneVerificationService
+            result = PhoneVerificationService.verify_and_extract_phone(id_token)
 
-            decoded_token = auth.verify_id_token(id_token)
-            firebase_phone_number = decoded_token.get('phone_number')
+            if result['status'] == 'success':
+                phone_number = result['phone_number']
+                
+                # Mark as verified in Django DB
+                success = PhoneVerificationService.mark_user_phone_verified(request.user, phone_number)
+                if not success:
+                    return JsonResponse({'success': False, 'error': 'Failed to update user profile.'}, status=500)
 
-            if not firebase_phone_number:
-                return JsonResponse({'success': False, 'error': 'Could not verify phone number from token.'}, status=400)
+                # Also update the phone number in Firestore
+                user_profile = request.user.userprofile
+                if db and user_profile.firebase_uid:
+                    try:
+                        user_ref = db.collection('users').document(user_profile.firebase_uid)
+                        user_ref.set({
+                            'phone_number': phone_number,
+                            'is_phone_verified': True
+                        }, merge=True)
+                    except Exception as e:
+                        print(f"Error updating phone number in Firebase: {e}") # Log error
 
-            user_profile = request.user.userprofile
-
-            # Trust the number from the Firebase token, since the user just verified it.
-            # This avoids issues where the number isn't saved to the profile before verification.
-            user_profile.is_phone_verified = True
-            user_profile.phone_number = firebase_phone_number
-            user_profile.save()
-
-            # Also update the phone number in Firestore
-            if db and user_profile.firebase_uid:
-                try:
-                    user_ref = db.collection('users').document(user_profile.firebase_uid)
-                    user_ref.set({
-                        'phone_number': firebase_phone_number,
-                        'is_phone_verified': True
-                    }, merge=True)
-                except Exception as e:
-                    print(f"Error updating phone number in Firebase: {e}") # Log error
-
-            return JsonResponse({'success': True})
+                return JsonResponse({'success': True})
+            else:
+                return JsonResponse({'success': False, 'error': result['message']}, status=400)
 
         except json.JSONDecodeError:
             return JsonResponse({'success': False, 'error': 'Invalid JSON.'}, status=400)

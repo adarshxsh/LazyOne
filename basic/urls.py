@@ -2,9 +2,7 @@ from django.contrib import admin
 from django.urls import path, include
 from .views import (
     home,
-    login_page,
     logout_view,
-    firebase_login,
     profile_view,
     user_profile_view,
     verify_phone_token,
@@ -33,9 +31,7 @@ from .views import (
 
 urlpatterns = [
     path('', home, name='home'),
-    path('login/', login_page, name='login_page'),
     path('logout/', logout_view, name='logout'),
-    path('firebase-login/', firebase_login, name='firebase_login'),
     path('profile/', profile_view, name='profile'),
     path('user/<int:user_id>/', user_profile_view, name='user_profile'),
     path('verify-phone-token/', verify_phone_token, name='verify_phone_token'),
