@@ -153,7 +153,6 @@ AUTH_PASSWORD_VALIDATORS = [
 
 # Custom Authentication Backend
 AUTHENTICATION_BACKENDS = [
-    'basic.backends.FirebaseBackend',  # Keep Firebase backend for Email/Password
     'django.contrib.auth.backends.ModelBackend', # Default Django backend
     'allauth.account.auth_backends.AuthenticationBackend', # Allauth backend
 ]
@@ -219,9 +218,18 @@ if os.getenv('VERCEL') == '1':
 # Allauth Settings
 SITE_ID = 1
 LOGIN_REDIRECT_URL = 'home'
-ACCOUNT_EMAIL_VERIFICATION = 'none' # Or 'mandatory' if you want to verify emails
+ACCOUNT_EMAIL_VERIFICATION = 'mandatory'
 ACCOUNT_LOGIN_METHODS = {'email'}
 ACCOUNT_SIGNUP_FIELDS = ['email*', 'password1*', 'password2*']
+
+# Email settings (Console backend for local development)
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+EMAIL_HOST = 'localhost'
+EMAIL_PORT = 25
+EMAIL_HOST_USER = ''
+EMAIL_HOST_PASSWORD = ''
+EMAIL_USE_TLS = False
+
 SOCIALACCOUNT_PROVIDERS = {
     'google': {
         'APPS': [
