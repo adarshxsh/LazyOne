@@ -180,8 +180,8 @@ def raise_dispute(request, task_id):
         return redirect('dispute_detail', dispute_id=task.dispute.id)
 
     # Check if the user is allowed to raise a dispute
-    if task.taken_by != request.user or task.status != 'in_progress':
-        messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
+    if request.user not in [task.posted_by, task.taken_by] or task.status != 'in_progress':
+        messages.error(request, "You can only raise a dispute for a task you are involved in that is currently in progress.")
         return redirect('my_tasks')
 
     if request.method == 'POST':
@@ -197,9 +197,10 @@ def raise_dispute(request, task_id):
             task.status = 'disputed'
             task.save()
             # Create notification
+            other_user = task.posted_by if request.user == task.taken_by else task.taken_by
             Notification.objects.create(
-                recipient=task.posted_by,
-                message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
+                recipient=other_user,
+                message=f"{request.user.username} has raised a dispute for the task: '{task.title}'.",
                 link=reverse('dispute_detail', args=[dispute.id])
             )
             messages.success(request, "Dispute raised successfully.")
@@ -208,21 +209,6 @@ def raise_dispute(request, task_id):
     # If GET, just redirect back. The modal is handled client-side.
     return redirect('my_tasks')
 
-@login_required(login_url='/login/')
-def withdraw_dispute(request, task_id):
-    task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='disputed')
-    with transaction.atomic():
-        task.status = 'in_progress'
-        task.save()
-        task.dispute.status = 'resolved'
-        task.dispute.save()
-        Notification.objects.create(
-            recipient=task.posted_by,
-            message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
-            link=reverse('my_tasks')
-        )
-        messages.success(request, "You have withdrawn the dispute.")
-    return redirect('my_tasks')
 
 @login_required(login_url='/login/')
 def my_tasks(request):
