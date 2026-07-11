@@ -39,21 +39,21 @@ urlpatterns = [
 
     # Task Lifecycle URLs
     path('add_task/', add_task, name='add_task'),
-    path('task/take/<int:task_id>/', take_task, name='take_task'),
-    path('task/complete/<int:task_id>/', complete_task, name='complete_task'),
-    path('task/cancel/<int:task_id>/', cancel_task, name='cancel_task'),
-    path('task/cancel/request/<int:task_id>/', request_cancellation, name='request_cancellation'),
-    path('task/cancel/accept/<int:task_id>/', accept_cancellation, name='accept_cancellation'),
-    path('task/abandon/<int:task_id>/', abandon_task, name='abandon_task'),
-    path('task/dispute/<int:task_id>/', raise_dispute, name='raise_dispute'),
-    path('dispute/<int:dispute_id>/', dispute_detail_view, name='dispute_detail'),
-    path('dispute/withdraw/<int:dispute_id>/', withdraw_dispute, name='withdraw_dispute'),
+    path('task/take/<str:public_id>/', take_task, name='take_task'),
+    path('task/complete/<str:public_id>/', complete_task, name='complete_task'),
+    path('task/cancel/<str:public_id>/', cancel_task, name='cancel_task'),
+    path('task/cancel/request/<str:public_id>/', request_cancellation, name='request_cancellation'),
+    path('task/cancel/accept/<str:public_id>/', accept_cancellation, name='accept_cancellation'),
+    path('task/abandon/<str:public_id>/', abandon_task, name='abandon_task'),
+    path('task/dispute/<str:public_id>/', raise_dispute, name='raise_dispute'),
+    path('dispute/<str:public_id>/', dispute_detail_view, name='dispute_detail'),
+    path('dispute/withdraw/<str:public_id>/', withdraw_dispute, name='withdraw_dispute'),
     path('my_tasks/', my_tasks, name='my_tasks'),
 
     # Chat URLs
     path('chat/start/<int:user_id>/', start_chat, name='start_chat'),
-    path('chat/<int:conversation_id>/', chat_view, name='chat_view'),
-    path('chat/send/<int:conversation_id>/', send_message, name='send_message'),
+    path('chat/<str:public_id>/', chat_view, name='chat_view'),
+    path('chat/send/<str:public_id>/', send_message, name='send_message'),
 
     # User & Friend URLs
     path('users/', user_list, name='user_list'),

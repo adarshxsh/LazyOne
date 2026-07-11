@@ -71,8 +71,6 @@ def accept_friend_request(request, request_id):
     if friend_request.to_user == request.user:
         from_user_profile = UserProfile.objects.get(user=friend_request.from_user)
         to_user_profile = UserProfile.objects.get(user=request.user)
-        from_user_profile.friends.add(to_user_profile)
-        to_user_profile.friends.add(from_user_profile)
         Friendship.objects.get_or_create(
             from_user=from_user_profile,
             to_user=to_user_profile,

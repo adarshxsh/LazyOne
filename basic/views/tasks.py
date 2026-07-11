@@ -62,10 +62,10 @@ def add_task(request):
         return render(request, 'add_task.html', {'default_deadline': default_deadline})
 
 @login_required(login_url='/login/')
-def take_task(request, task_id):
+def take_task(request, public_id):
     with transaction.atomic():
         try:
-            task = Task.objects.select_for_update().get(id=task_id, status='available')
+            task = Task.objects.select_for_update().get(public_id=public_id, status=Task.Status.AVAILABLE)
         except Task.DoesNotExist:
             messages.error(request, "Task is no longer available.")
             return redirect('my_tasks')
@@ -88,17 +88,17 @@ def take_task(request, task_id):
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
-def complete_task(request, task_id):
+def complete_task(request, public_id):
     # Allow completion if the task is in progress OR disputed
-    task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
+    task = get_object_or_404(Task, Q(status=Task.Status.IN_PROGRESS) | Q(status=Task.Status.DISPUTED), public_id=public_id, posted_by=request.user)
     with transaction.atomic():
         UserProfile.objects.filter(pk=task.taken_by.userprofile.pk).update(rewards=F('rewards') + task.reward)
         task.status = 'completed'
         task.save()
 
-        # If there was a dispute, mark it as resolved
-        if hasattr(task, 'dispute'):
-            task.dispute.status = 'resolved'
+        # If there was an active dispute, mark it as resolved
+        if hasattr(task, 'dispute') and task.dispute.status == Dispute.Status.OPEN:
+            task.dispute.status = Dispute.Status.RESOLVED
             task.dispute.save()
 
         RewardLedger.objects.create(
@@ -109,8 +109,8 @@ def complete_task(request, task_id):
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
-def cancel_task(request, task_id):
-    task = get_object_or_404(Task, id=task_id, posted_by=request.user, status='available')
+def cancel_task(request, public_id):
+    task = get_object_or_404(Task, public_id=public_id, posted_by=request.user, status=Task.Status.AVAILABLE)
     with transaction.atomic():
         task.status = 'cancelled'
         task.save()
@@ -123,8 +123,8 @@ def cancel_task(request, task_id):
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
-def request_cancellation(request, task_id):
-    task = get_object_or_404(Task, id=task_id, posted_by=request.user, status='in_progress')
+def request_cancellation(request, public_id):
+    task = get_object_or_404(Task, public_id=public_id, posted_by=request.user, status=Task.Status.IN_PROGRESS)
     task.cancellation_requested = True
     task.save()
     Notification.objects.create(
@@ -136,8 +136,8 @@ def request_cancellation(request, task_id):
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
-def accept_cancellation(request, task_id):
-    task = get_object_or_404(Task, id=task_id, taken_by=request.user, cancellation_requested=True)
+def accept_cancellation(request, public_id):
+    task = get_object_or_404(Task, public_id=public_id, taken_by=request.user, cancellation_requested=True, status=Task.Status.IN_PROGRESS)
     with transaction.atomic():
         UserProfile.objects.filter(pk=task.posted_by.userprofile.pk).update(rewards=F('rewards') + task.reward)
         RewardLedger.objects.create(
@@ -157,8 +157,8 @@ def accept_cancellation(request, task_id):
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
-def abandon_task(request, task_id):
-    task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
+def abandon_task(request, public_id):
+    task = get_object_or_404(Task, public_id=public_id, taken_by=request.user, status=Task.Status.IN_PROGRESS)
     with transaction.atomic():
         task.status = 'available'
         task.taken_by = None
@@ -172,15 +172,15 @@ def abandon_task(request, task_id):
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
-def raise_dispute(request, task_id):
-    task = get_object_or_404(Task, id=task_id)
+def raise_dispute(request, public_id):
+    task = get_object_or_404(Task, public_id=public_id)
 
-    # If a dispute already exists, just go to the detail page.
-    if hasattr(task, 'dispute'):
-        return redirect('dispute_detail', dispute_id=task.dispute.id)
+    # If an active dispute already exists, just go to the detail page.
+    if hasattr(task, 'dispute') and task.dispute.status == Dispute.Status.OPEN:
+        return redirect('dispute_detail', public_id=task.dispute.public_id)
 
     # Check if the user is allowed to raise a dispute
-    if request.user not in [task.posted_by, task.taken_by] or task.status != 'in_progress':
+    if request.user not in [task.posted_by, task.taken_by] or task.status != Task.Status.IN_PROGRESS:
         messages.error(request, "You can only raise a dispute for a task you are involved in that is currently in progress.")
         return redirect('my_tasks')
 
@@ -191,20 +191,28 @@ def raise_dispute(request, task_id):
             return redirect('my_tasks')
 
         with transaction.atomic():
-            # Create the dispute
-            dispute = Dispute.objects.create(task=task, raised_by=request.user, reason=reason)
+            # Create or update the dispute
+            if hasattr(task, 'dispute'):
+                dispute = task.dispute
+                dispute.raised_by = request.user
+                dispute.reason = reason
+                dispute.status = Dispute.Status.OPEN
+                dispute.save()
+            else:
+                dispute = Dispute.objects.create(task=task, raised_by=request.user, reason=reason)
+                
             # Update task status
-            task.status = 'disputed'
+            task.status = Task.Status.DISPUTED
             task.save()
             # Create notification
             other_user = task.posted_by if request.user == task.taken_by else task.taken_by
             Notification.objects.create(
                 recipient=other_user,
                 message=f"{request.user.username} has raised a dispute for the task: '{task.title}'.",
-                link=reverse('dispute_detail', args=[dispute.id])
+                link=reverse('dispute_detail', args=[dispute.public_id])
             )
             messages.success(request, "Dispute raised successfully.")
-        return redirect('dispute_detail', dispute_id=dispute.id)
+        return redirect('dispute_detail', public_id=dispute.public_id)
 
     # If GET, just redirect back. The modal is handled client-side.
     return redirect('my_tasks')

@@ -1,5 +1,6 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
+from django.views.decorators.http import require_POST
 from ..models import Conversation, Message, Notification
 from django.contrib.auth.models import User
 from django.http import HttpResponseForbidden, JsonResponse
@@ -12,11 +13,11 @@ from ..services.permissions import ChatService
 logger = logging.getLogger(__name__)
 
 @login_required(login_url='/login/')
-def chat_view(request, conversation_id):
-    logger.info(f"--- CHAT_VIEW START: conv_id={conversation_id}, user={request.user.username} ---")
+def chat_view(request, public_id):
+    logger.info(f"--- CHAT_VIEW START: public_id={public_id}, user={request.user.username} ---")
     
     try:
-        conversation = get_object_or_404(Conversation, id=conversation_id)
+        conversation = get_object_or_404(Conversation, public_id=public_id)
         logger.info("Step 1: Conversation object found.")
     except Exception as e:
         logger.error(f"FATAL ERROR at Step 1 (get_object_or_404): {e}")
@@ -40,7 +41,7 @@ def chat_view(request, conversation_id):
 
     try:
         # Mark related notifications as read
-        notification_link = reverse('chat_view', args=[conversation_id])
+        notification_link = reverse('chat_view', args=[public_id])
         updated_count = Notification.objects.filter(
             recipient=request.user, 
             link=notification_link, 
@@ -57,9 +58,10 @@ def chat_view(request, conversation_id):
 
 
 @login_required(login_url='/login/')
-def send_message(request, conversation_id):
-    if request.method == 'POST':
-        conversation = get_object_or_404(Conversation, id=conversation_id)
+@require_POST
+def send_message(request, public_id):
+    try:
+        conversation = get_object_or_404(Conversation, public_id=public_id)
         if not ChatService.can_send(request.user, conversation):
             return HttpResponseForbidden("You are not authorized to send messages in this chat.")
         
@@ -77,9 +79,11 @@ def send_message(request, conversation_id):
                     Notification.objects.create(
                         recipient=participant,
                         message=f"New message from {request.user.username}",
-                        link=reverse('chat_view', args=[conversation_id])
+                        link=reverse('chat_view', args=[public_id])
                     )
             return JsonResponse({'status': 'success'})
+    except Exception:
+        pass
     return JsonResponse({'status': 'error'}, status=400)
 
 @login_required(login_url='/login/')

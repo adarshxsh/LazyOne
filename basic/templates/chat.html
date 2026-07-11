@@ -65,7 +65,7 @@
 
         // Globals
         const db = firebase.firestore();
-        const conversationId = "{{ conversation.id }}";
+        const conversationId = "{{ conversation.public_id }}";
         const currentUser = { id: "{{ request.user.id }}", username: "{{ request.user.username }}" };
 
         // DOM Elements
@@ -114,7 +114,7 @@
             }).catch(console.error);
 
             // Notify Django backend for notifications and timestamps
-            fetch(`{% url 'send_message' conversation.id %}`, {
+            fetch(`{% url 'send_message' conversation.public_id %}`, {
                 method: 'POST',
                 headers: {
                     'X-CSRFToken': '{{ csrf_token }}',

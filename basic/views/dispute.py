@@ -7,11 +7,11 @@ from django.db import transaction
 from ..services.permissions import DisputeService
 
 @login_required(login_url='/login/')
-def dispute_detail_view(request, dispute_id):
+def dispute_detail_view(request, public_id):
     """
     Displays the details of a specific dispute.
     """
-    dispute = get_object_or_404(Dispute, id=dispute_id)
+    dispute = get_object_or_404(Dispute, public_id=public_id)
     task = dispute.task
 
     # Authorization: Use DisputeService
@@ -27,11 +27,11 @@ def dispute_detail_view(request, dispute_id):
 
 @login_required(login_url='/login/')
 @require_POST # Ensures this view only accepts POST requests
-def withdraw_dispute(request, dispute_id):
+def withdraw_dispute(request, public_id):
     """
     Allows the user who raised a dispute to withdraw it.
     """
-    dispute = get_object_or_404(Dispute, id=dispute_id)
+    dispute = get_object_or_404(Dispute, public_id=public_id)
     task = dispute.task
 
     # Authorization: Use DisputeService

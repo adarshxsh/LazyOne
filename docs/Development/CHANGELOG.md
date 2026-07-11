@@ -2,6 +2,13 @@
 
 All notable changes to the LazyOne project are documented in this file.
 
+## [2.0.1] - Unreleased
+### Changed
+- Swapped out internal database IDs for secure, 16-character `public_id`s across Tasks, Chats, and Disputes.
+- Fixed a sneaky loophole where task cancellations could bypass active disputes.
+- Upgraded the Dispute engine! You can now reopen a withdrawn dispute, and the backend has a `resolve_dispute` safety net to prevent tasks from getting stuck in an "Eternal Dispute".
+- Squashed a bug that was wiping the history of withdrawn disputes when a task was completed.
+
 ## [1.0.0] - 2025-11-16
 ### Added
 - Deployment configurations and setup for Amazon Web Services (AWS).
