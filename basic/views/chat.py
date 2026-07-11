@@ -7,6 +7,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.contrib import messages # Import messages
 import logging
+from ..services.permissions import ChatService
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +24,11 @@ def chat_view(request, conversation_id):
         messages.error(request, "Chat not found.")
         return redirect('home')
 
-    if request.user not in conversation.participants.all():
-        logger.warning("Step 2: User is not a participant. Redirecting to home.")
+    if not ChatService.can_read(request.user, conversation):
+        logger.warning("Step 2: User is not authorized. Redirecting to home.")
         messages.error(request, "You are not authorized to view this chat.")
         return redirect('home') # Redirect to home page
-    logger.info("Step 2: User is a valid participant.")
+    logger.info("Step 2: User is authorized to read.")
 
     try:
         # This is for the Django-based message system, which we are bypassing for Firestore.
@@ -59,7 +60,7 @@ def chat_view(request, conversation_id):
 def send_message(request, conversation_id):
     if request.method == 'POST':
         conversation = get_object_or_404(Conversation, id=conversation_id)
-        if request.user not in conversation.participants.all():
+        if not ChatService.can_send(request.user, conversation):
             return HttpResponseForbidden("You are not authorized to send messages in this chat.")
         
         content = request.POST.get('content')

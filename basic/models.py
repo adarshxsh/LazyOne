@@ -89,28 +89,24 @@ class RewardLedger(models.Model):
     def __str__(self):
         return f"{self.user.username}: {self.amount} points for {self.description}"
 
-def sync_dispute_to_firestore(dispute_id, is_resolved):
+def sync_dispute_to_firestore(dispute_id):
     if not db:
         return
     try:
         doc_ref = db.collection('disputes').document(str(dispute_id))
-        if is_resolved:
-            doc_ref.delete()
-            logger.info(f"Dispute {dispute_id} deleted from Firestore.")
-        else:
-            dispute = Dispute.objects.get(id=dispute_id)
-            dispute_data = {
-                'task_id': dispute.task.id,
-                'raised_by_user_id': dispute.raised_by.id,
-                'raised_by_username': dispute.raised_by.username,
-                'reason': dispute.reason,
-                'dispute_type': dispute.dispute_type,
-                'status': dispute.status,
-                'created_at': dispute.created_at.isoformat(),
-                'django_id': dispute.id,
-            }
-            doc_ref.set(dispute_data)
-            logger.info(f"Dispute {dispute_id} synced to Firestore.")
+        dispute = Dispute.objects.get(id=dispute_id)
+        dispute_data = {
+            'task_id': dispute.task.id,
+            'raised_by_user_id': dispute.raised_by.id,
+            'raised_by_username': dispute.raised_by.username,
+            'reason': dispute.reason,
+            'dispute_type': dispute.dispute_type,
+            'status': dispute.status,
+            'created_at': dispute.created_at.isoformat(),
+            'django_id': dispute.id,
+        }
+        doc_ref.set(dispute_data)
+        logger.info(f"Dispute {dispute_id} synced to Firestore.")
     except Exception as e:
         logger.exception(f"Error syncing dispute {dispute_id} to Firestore")
 
@@ -118,6 +114,7 @@ class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
         ('resolved', 'Resolved'),
+        ('withdrawn', 'Withdrawn'),
     )
     DISPUTE_TYPE_CHOICES = (
         ('payment', 'Payment Issue'),
@@ -138,18 +135,8 @@ class Dispute(models.Model):
         return f"Dispute for task: {self.task.title}"
 
     def save(self, *args, **kwargs):
-        old_instance = None
-        if self.pk:
-            try:
-                old_instance = Dispute.objects.get(pk=self.pk)
-            except Dispute.DoesNotExist:
-                pass
-
         super().save(*args, **kwargs) # Call the original save method
-
-        is_resolved = self.status == 'resolved' and (old_instance and old_instance.status != 'resolved')
-        
-        transaction.on_commit(lambda: sync_dispute_to_firestore(self.id, is_resolved))
+        transaction.on_commit(lambda: sync_dispute_to_firestore(self.id))
 
 
 class FriendRequest(models.Model):

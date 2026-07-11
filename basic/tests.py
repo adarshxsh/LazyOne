@@ -82,4 +82,4 @@ class ArchitecturalFixesTests(TransactionTestCase): # Use TransactionTestCase fo
         self.assertEqual(dispute.raised_by, self.user2)
         
         # Assert the sync function was called after transaction committed
-        mock_sync.assert_called_once_with(dispute.id, False)
+        mock_sync.assert_called_once_with(dispute.id)

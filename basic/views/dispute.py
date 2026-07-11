@@ -3,6 +3,8 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from ..models import Dispute
 from django.views.decorators.http import require_POST
+from django.db import transaction
+from ..services.permissions import DisputeService
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
@@ -12,8 +14,8 @@ def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
 
-    # Authorization: Ensure the user is part of the disputed task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+    # Authorization: Use DisputeService
+    if not DisputeService.can_view(request.user, dispute):
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
 
@@ -32,15 +34,17 @@ def withdraw_dispute(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
 
-    # Authorization: Only the user who raised the dispute can withdraw it.
-    if request.user != dispute.raised_by:
+    # Authorization: Use DisputeService
+    if not DisputeService.can_withdraw(request.user, dispute):
         messages.error(request, "You are not authorized to perform this action.")
         return redirect('my_tasks')
 
-    # Revert task status and delete the dispute
-    task.status = 'in_progress'
-    task.save()
-    dispute.delete()
+    # Revert task status and mark dispute withdrawn
+    with transaction.atomic():
+        task.status = 'in_progress'
+        task.save()
+        dispute.status = 'withdrawn'
+        dispute.save()
 
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'.")
     return redirect('my_tasks')
