@@ -2,8 +2,11 @@ import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
 import os
-from django.db import models
+from django.db import models, transaction
 from django.contrib.auth.models import User
+import logging
+
+logger = logging.getLogger(__name__)
 from django.utils import timezone
 
 # Initialize Firebase Admin SDK if not already initialized
@@ -86,6 +89,31 @@ class RewardLedger(models.Model):
     def __str__(self):
         return f"{self.user.username}: {self.amount} points for {self.description}"
 
+def sync_dispute_to_firestore(dispute_id, is_resolved):
+    if not db:
+        return
+    try:
+        doc_ref = db.collection('disputes').document(str(dispute_id))
+        if is_resolved:
+            doc_ref.delete()
+            logger.info(f"Dispute {dispute_id} deleted from Firestore.")
+        else:
+            dispute = Dispute.objects.get(id=dispute_id)
+            dispute_data = {
+                'task_id': dispute.task.id,
+                'raised_by_user_id': dispute.raised_by.id,
+                'raised_by_username': dispute.raised_by.username,
+                'reason': dispute.reason,
+                'dispute_type': dispute.dispute_type,
+                'status': dispute.status,
+                'created_at': dispute.created_at.isoformat(),
+                'django_id': dispute.id,
+            }
+            doc_ref.set(dispute_data)
+            logger.info(f"Dispute {dispute_id} synced to Firestore.")
+    except Exception as e:
+        logger.exception(f"Error syncing dispute {dispute_id} to Firestore")
+
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
@@ -119,36 +147,9 @@ class Dispute(models.Model):
 
         super().save(*args, **kwargs) # Call the original save method
 
-        if db: # Only attempt to save to Firestore if Firebase was initialized
-            doc_ref = db.collection('disputes').document(str(self.id))
-            if self.status == 'resolved' and (old_instance and old_instance.status != 'resolved'):
-                # If status changed to resolved, delete from Firestore
-                try:
-                    doc_ref.delete()
-                    print(f"Dispute {self.id} deleted from Firestore successfully due to resolution.")
-                except Exception as e:
-                    print(f"Error deleting dispute {self.id} from Firestore: {e}")
-            else:
-                # Prepare data for Firestore
-                dispute_data = {
-                    'task_id': self.task.id,
-                    'raised_by_user_id': self.raised_by.id,
-                    'raised_by_username': self.raised_by.username,
-                    'reason': self.reason,
-                    'dispute_type': self.dispute_type,
-                    'status': self.status,
-                    'created_at': self.created_at.isoformat(), # Convert datetime to ISO format string
-                    'django_id': self.id, # Store Django's primary key
-                }
-
-                # Save to Firestore
-                try:
-                    doc_ref.set(dispute_data)
-                    print(f"Dispute {self.id} saved/updated to Firestore successfully.")
-                except Exception as e:
-                    print(f"Error saving dispute {self.id} to Firestore: {e}")
-        else:
-            print("Firebase not initialized, skipping Firestore save/delete for dispute.")
+        is_resolved = self.status == 'resolved' and (old_instance and old_instance.status != 'resolved')
+        
+        transaction.on_commit(lambda: sync_dispute_to_firestore(self.id, is_resolved))
 
 
 class FriendRequest(models.Model):
