@@ -160,12 +160,12 @@ Based on an audit of the current codebase (`basic/views/`, `basic/models.py`, `b
 - **Issues:** Firebase Admin is initialized globally in `models.py`. Moving initialization to `apps.py` is cleaner, but it won't determine whether the app succeeds. Treat it as a cleanup task (🟢 Can Wait).
 
 ### Service Layer
-- **Current State:** Mostly absent. While `PhoneVerificationService` exists, business logic like task state transitions, reward ledger deductions, and dispute raising are tightly coupled inside Django views (`basic/views/tasks.py`, `basic/views/chat.py`).
-- **Missing Abstractions:** Moving business logic into `View -> TaskService -> Models` is cleaner and improves maintainability. `TaskService`, `DisputeService`, and `LedgerService` should be implemented.
+- **Current State:** Transitioning. We've introduced `DisputeService` and `ChatService` to handle authorization and complex state changes (like `resolve_dispute()`). However, some basic task transitions are still inside Django views (`basic/views/tasks.py`), which we'll continue refactoring.
+- **Missing Abstractions:** Moving the rest of the business logic into `TaskService` and `LedgerService` remains a priority for better maintainability.
 
 ### Repository Layer
 - **Decision:** The Django ORM natively acts as the repository layer. A dedicated repository layer often becomes a thin wrapper without adding much value. The design should follow: `APIView -> TaskService -> Models / Managers / QuerySets`.
-- **Current State:** Acceptable.
+- **Current State:** Acceptable and well-integrated.
 
 ### Chat Architecture
 - **Decision:** PostgreSQL is the authoritative data store. Firestore is used strictly as a real-time synchronization cache. If Firestore is unavailable, messages must still be safely stored in PostgreSQL.
@@ -176,17 +176,17 @@ Based on an audit of the current codebase (`basic/views/`, `basic/models.py`, `b
 - **Current State:** Synchronous creation inside views. Polled/marked-as-read synchronously on page load. Needs migration to the planned background flow.
 
 ### Task Workflow
-- **Current State:** Managed completely inside views with `transaction.atomic()`. 
+- **Current State:** Managed mostly inside views with `transaction.atomic()`. 
 - **Race Conditions:** 
-  - Checking `status='available'` in memory and saving without database-level locks (`select_for_update()`) can lead to multiple users taking the same task concurrently.
-  - Reward balance updates (`user_profile.rewards += task.reward`) are susceptible to classic lost-update race conditions under concurrency. (Should use Django's `F()` expressions).
+  - **Fixed:** We now use `select_for_update()` when taking tasks to prevent concurrent double-booking. 
+  - **Fixed:** Reward balance updates use `F('rewards')` expressions to safely increment/decrement wallets without lost-update race conditions.
 
 ### Dispute Workflow
 - **Current State:** The `Dispute` model overrides `save()` to make synchronous HTTP calls to Firebase Firestore.
 - **Coupling & Scalability (Critical Issue):** Making network calls inside a synchronous Django ORM `save()` method within a database transaction is a severe anti-pattern. If Firebase is slow or down, the database transaction stays open and locks the rows, which will quickly exhaust the WSGI worker pool and crash the app even at 400 users.
 
 ### Overall Conclusion
-The codebase is currently structured as a monolithic MVC with heavy **Fat Views**, lacking the intended Service/Manager abstractions. To scale reliably to 1000 users without microservices, the project must move business logic to the Service Layer, fix ORM race conditions (`F()` expressions, `select_for_update()`), and immediately decouple external network calls (Firestore) from synchronous model saves.
+We are steadily moving away from the "Fat Views" anti-pattern. By introducing `DisputeService` and fixing critical race conditions in the ORM, the app is much more stable. The next critical step is to decouple external network calls (like Firestore sync) from synchronous database transactions and push notifications to Celery.
 
 ---
 
@@ -390,5 +390,7 @@ GET /api/v1/chats/A7F9K2M8XQ4L1ZPW/
 ```
 
 Users never see the database primary key.
+
+- **Current State:** Fully Implemented. The frontend and backend now exclusively communicate using the 16-character `public_id` for Tasks, Chats, and Disputes, hiding the internal PostgreSQL keys from users entirely.
 
 ---

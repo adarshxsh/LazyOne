@@ -43,22 +43,22 @@
                 </div>
                 <div class="mt-4 flex items-center space-x-3">
                     {% if task.status == 'available' %}
-                        <a href="{% url 'cancel_task' task.id %}" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-500 transition-colors text-sm">Cancel Task</a>
+                        <a href="{% url 'cancel_task' task.public_id %}" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-500 transition-colors text-sm">Cancel Task</a>
                     {% elif task.status == 'in_progress' %}
-                        <a href="{% url 'complete_task' task.id %}" class="inline-block bg-green-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-green-500 transition-colors text-sm">Mark as Complete</a>
+                        <a href="{% url 'complete_task' task.public_id %}" class="inline-block bg-green-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-green-500 transition-colors text-sm">Mark as Complete</a>
                         {% if task.cancellation_requested %}
                             <span class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg text-sm">Cancellation Requested</span>
                         {% else %}
-                            <a href="{% url 'request_cancellation' task.id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-500 transition-colors text-sm">Request Cancellation</a>
+                            <a href="{% url 'request_cancellation' task.public_id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-500 transition-colors text-sm">Request Cancellation</a>
                         {% endif %}
-                        <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-cyan-500/80 text-white font-semibold px-4 py-2 rounded-lg hover:bg-cyan-500 transition-colors text-sm">Go to Chat</a>
+                        <a href="{% url 'chat_view' task.conversation.public_id %}" class="inline-block bg-cyan-500/80 text-white font-semibold px-4 py-2 rounded-lg hover:bg-cyan-500 transition-colors text-sm">Go to Chat</a>
                     {% elif task.status == 'disputed' %}
                         <p class="text-sm text-red-400">This task is in dispute. You can end the dispute by completing the task.</p>
-                        <a href="{% url 'complete_task' task.id %}" class="inline-block bg-green-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-green-500 transition-colors text-sm">Mark as Complete</a>
-                        <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-500/80 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-500 transition-colors text-sm">Go to Chat</a>
-                        <a href="{% url 'dispute_detail' task.dispute.id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-500 transition-colors text-sm">View Dispute</a>
+                        <a href="{% url 'complete_task' task.public_id %}" class="inline-block bg-green-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-green-500 transition-colors text-sm">Mark as Complete</a>
+                        <a href="{% url 'chat_view' task.conversation.public_id %}" class="inline-block bg-red-500/80 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-500 transition-colors text-sm">Go to Chat</a>
+                        <a href="{% url 'dispute_detail' task.dispute.public_id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-500 transition-colors text-sm">View Dispute</a>
                     {% elif task.status == 'completed' and task.conversation %}
-                         <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-500 transition-colors text-sm">View Chat</a>
+                         <a href="{% url 'chat_view' task.conversation.public_id %}" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-500 transition-colors text-sm">View Chat</a>
                     {% endif %}
                 </div>
             </div>
@@ -85,18 +85,18 @@
                 <div class="mt-4 flex items-center space-x-3">
                     {% if task.status == 'in_progress' %}
                         {% if task.cancellation_requested %}
-                            <a href="{% url 'accept_cancellation' task.id %}" class="inline-block bg-green-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-green-500 transition-colors text-sm">Accept Cancellation</a>
+                            <a href="{% url 'accept_cancellation' task.public_id %}" class="inline-block bg-green-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-green-500 transition-colors text-sm">Accept Cancellation</a>
                             <p class="text-sm text-yellow-400">The poster wants to cancel this task.</p>
                         {% else %}
-                            <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-cyan-500/80 text-white font-semibold px-4 py-2 rounded-lg hover:bg-cyan-500 transition-colors text-sm">Go to Chat</a>
-                            <a href="{% url 'abandon_task' task.id %}" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-500 transition-colors text-sm">Abandon Task</a>
-                            <button onclick="openDisputeModal('{{ task.id }}')" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-500 transition-colors text-sm">Raise Dispute</button>
+                            <a href="{% url 'chat_view' task.conversation.public_id %}" class="inline-block bg-cyan-500/80 text-white font-semibold px-4 py-2 rounded-lg hover:bg-cyan-500 transition-colors text-sm">Go to Chat</a>
+                            <a href="{% url 'abandon_task' task.public_id %}" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-500 transition-colors text-sm">Abandon Task</a>
+                            <button onclick="openDisputeModal('{{ task.public_id }}')" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-500 transition-colors text-sm">Raise Dispute</button>
                         {% endif %}
                     {% elif task.status == 'disputed' %}
                         <p class="text-sm text-red-400">You have raised a dispute. The poster can approve payment to resolve it.</p>
-                        <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-500/80 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-500 transition-colors text-sm">Go to Chat</a>
-                        <form action="{% url 'withdraw_dispute' task.dispute.id %}" method="post" class="inline">
-                            <a href="{% url 'dispute_detail' task.dispute.id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-500 transition-colors text-sm">View Dispute</a>
+                        <a href="{% url 'chat_view' task.conversation.public_id %}" class="inline-block bg-red-500/80 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-500 transition-colors text-sm">Go to Chat</a>
+                        <form action="{% url 'withdraw_dispute' task.dispute.public_id %}" method="post" class="inline">
+                            <a href="{% url 'dispute_detail' task.dispute.public_id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-500 transition-colors text-sm">View Dispute</a>
                             {% csrf_token %}
                             <button type="submit" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-500 transition-colors text-sm">Withdraw Dispute</button>
                         </form>
