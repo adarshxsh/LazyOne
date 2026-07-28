@@ -16,12 +16,31 @@ def user_list(request):
     received_request_uids = list(FriendRequest.objects.filter(to_user=request.user).values_list('from_user__userprofile__firebase_uid', flat=True))
 
     # Combine all UIDs to exclude, including the current user's
-    exclude_uids = set(friend_uids) | set(sent_request_uids) | set(received_request_uids)
+    exclude_uids = {uid for uid in (friend_uids + sent_request_uids + received_request_uids) if uid}
     if user_profile.firebase_uid:
         exclude_uids.add(user_profile.firebase_uid)
 
+    # Get local Django user IDs to exclude
+    current_friends = user_profile.friends.all().values_list('user__id', flat=True)
+    sent_requests = FriendRequest.objects.filter(from_user=request.user).values_list('to_user_id', flat=True)
+    received_requests = FriendRequest.objects.filter(to_user=request.user).values_list('from_user_id', flat=True)
+    exclude_ids = set(current_friends) | set(sent_requests) | set(received_requests)
+    exclude_ids.add(request.user.id)
+
+    # Query local user profiles that are not excluded
+    local_profiles = UserProfile.objects.exclude(user__id__in=exclude_ids)
+    local_users_data = []
+    for p in local_profiles:
+        local_users_data.append({
+            'uid': p.firebase_uid or f"local_{p.user.id}",
+            'django_id': p.user.id,
+            'name': f"{p.first_name} {p.last_name}".strip() or p.user.username.split('@')[0],
+            'username': p.user.username,
+        })
+
     context = {
-        'exclude_uids_json': json.dumps(list(exclude_uids))
+        'exclude_uids_json': json.dumps(list(exclude_uids)),
+        'local_users_json': json.dumps(local_users_data),
     }
     return render(request, 'user_list.html', context)
 
