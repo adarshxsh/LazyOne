@@ -24,6 +24,9 @@ class UserProfile(models.Model):
     # Fields for Email OTP Verification
     email_otp = models.CharField(max_length=6, blank=True, null=True)
     email_otp_created_at = models.DateTimeField(blank=True, null=True)
+    
+    # Stripe Connect Connect Account ID
+    stripe_account_id = models.CharField(max_length=100, blank=True, null=True)
 
     def __str__(self):
         return self.user.username
@@ -46,6 +49,11 @@ class Task(models.Model):
     deadline = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='available')
     cancellation_requested = models.BooleanField(default=False)
+    
+    reward_type = models.CharField(max_length=10, choices=(('points', 'Points'), ('usd', 'USD')), default='points')
+    stripe_payment_intent_id = models.CharField(max_length=100, blank=True, null=True)
+    stripe_transfer_id = models.CharField(max_length=100, blank=True, null=True)
+    stripe_refund_id = models.CharField(max_length=100, blank=True, null=True)
 
     def __str__(self):
         return self.title
@@ -64,12 +72,27 @@ class RewardLedger(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
+    currency = models.CharField(max_length=10, choices=(('points', 'Points'), ('usd', 'USD')), default='points')
     transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.user.username}: {self.amount} points for {self.description}"
+        return f"{self.user.username}: {self.amount} {self.currency} for {self.description}"
+
+    @property
+    def formatted_amount(self):
+        if self.currency == 'usd':
+            dollars = abs(self.amount) / 100.0
+            sign = '+' if self.amount > 0 else '-'
+            return f"{sign}${dollars:.2f}"
+        else:
+            sign = '+' if self.amount > 0 else ''
+            return f"{sign}{self.amount}"
+
+    @property
+    def is_positive(self):
+        return self.amount > 0
 
 class Dispute(models.Model):
     STATUS_CHOICES = (

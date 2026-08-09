@@ -9,22 +9,32 @@ def home(request):
 
     # --- Search Logic for Available Tasks ---
     query = request.GET.get('q', '')
+    reward_type_filter = request.GET.get('reward_type', '')
+    
     available_tasks = Task.objects.filter(status='available')
+    recent_tasks = Task.objects.exclude(status__in=['completed', 'cancelled']).order_by('-created_at')
+
     if query:
         available_tasks = available_tasks.filter(
             Q(title__icontains=query) | Q(description__icontains=query)
         )
+        recent_tasks = recent_tasks.filter(
+            Q(title__icontains=query) | Q(description__icontains=query)
+        )
+    
+    if reward_type_filter in ['points', 'usd']:
+        available_tasks = available_tasks.filter(reward_type=reward_type_filter)
+        recent_tasks = recent_tasks.filter(reward_type=reward_type_filter)
+
     available_tasks = available_tasks.order_by('-created_at')[:20]
 
-    # --- All non-completed tasks for the new section ---
-    recent_tasks = Task.objects.exclude(status__in=['completed', 'cancelled']).order_by('-created_at')
-    
     # Initialize context for anonymous users
     context = {
         'disputed_tasks': disputed_tasks,
         'available_tasks': available_tasks,
         'recent_tasks': recent_tasks,
         'search_query': query,
+        'reward_type_filter': reward_type_filter,
         'user_nodes_json': json.dumps([]),
         'recent_conversations': []
     }

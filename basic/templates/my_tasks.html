@@ -38,8 +38,13 @@
                             {% if task.deadline %}<p class="text-xs text-gray-500 mt-1">Deadline: {{ task.deadline|date:"F j, Y, g:i a" }}</p>{% endif %}
                         </div>
                         <div class="text-right flex-shrink-0 ml-4">
-                            <p class="text-xl font-semibold text-cyan-600">{{ task.reward }}</p>
-                            <p class="text-xs text-gray-500">Points</p>
+                            {% if task.reward_type == 'usd' %}
+                                <p class="text-xl font-semibold text-cyan-600">${{ task.reward }}.00</p>
+                                <p class="text-xs text-gray-500">USD</p>
+                            {% else %}
+                                <p class="text-xl font-semibold text-cyan-600">{{ task.reward }}</p>
+                                <p class="text-xs text-gray-500">Points</p>
+                            {% endif %}
                         </div>
                     </div>
                     <div class="mt-4 flex items-center space-x-3">
@@ -83,8 +88,13 @@
                             {% if task.deadline %}<p class="text-xs text-gray-500 mt-1">Deadline: {{ task.deadline|date:"F j, Y, g:i a" }}</p>{% endif %}
                         </div>
                         <div class="text-right flex-shrink-0 ml-4">
-                            <p class="text-xl font-semibold text-cyan-600">{{ task.reward }}</p>
-                            <p class="text-xs text-gray-500">Points</p>
+                            {% if task.reward_type == 'usd' %}
+                                <p class="text-xl font-semibold text-cyan-600">${{ task.reward }}.00</p>
+                                <p class="text-xs text-gray-500">USD</p>
+                            {% else %}
+                                <p class="text-xl font-semibold text-cyan-600">{{ task.reward }}</p>
+                                <p class="text-xs text-gray-500">Points</p>
+                            {% endif %}
                         </div>
                     </div>
                     <div class="mt-4 flex items-center space-x-3">
