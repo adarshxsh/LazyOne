@@ -6,6 +6,7 @@ from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
 from django.db.models import Q
+from django.conf import settings
 from datetime import datetime, timedelta
 
 
@@ -154,17 +155,42 @@ def accept_cancellation(request, task_id):
 
 @login_required(login_url='/login/')
 def abandon_task(request, task_id):
-    task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
+    task = get_object_or_404(Task, id=task_id, taken_by=request.user)
+
+    if task.status == 'disputed' or hasattr(task, 'dispute'):
+        messages.error(request, "Task abandonment is blocked while an active dispute exists on the task.")
+        return redirect('my_tasks')
+
+    if task.status != 'in_progress':
+        messages.error(request, "Only in-progress tasks can be abandoned.")
+        return redirect('my_tasks')
+
+    penalty = getattr(settings, 'ABANDONMENT_PENALTY', 50)
+
     with transaction.atomic():
+        user_profile = request.user.userprofile
+        user_profile.rewards -= penalty
+        user_profile.save()
+
+        RewardLedger.objects.create(
+            user=request.user,
+            task=task,
+            amount=-penalty,
+            transaction_type='task_abandonment',
+            description=f"Abandonment penalty for task: '{task.title}'"
+        )
+
         task.status = 'available'
         task.taken_by = None
+        task.cancellation_requested = False
         task.save()
+
         Notification.objects.create(
             recipient=task.posted_by,
             message=f"{request.user.username} has abandoned your task: '{task.title}'. It is now available again.",
             link=reverse('my_tasks')
         )
-        messages.success(request, "You have abandoned the task. It is now available for others.")
+        messages.success(request, f"You have abandoned the task. A penalty of {penalty} points has been deducted.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
