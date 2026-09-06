@@ -25,9 +25,29 @@
         <!-- Available Tasks Section -->
         <div>
             <h2 class="text-2xl font-bold text-gray-800 dark:text-white mb-4">Available Tasks</h2>
-            <form method="get" action="{% url 'home' %}" class="mb-6">
+            <form method="get" action="{% url 'home' %}" class="mb-4">
                 <input type="text" name="q" value="{{ search_query|default_if_none:'' }}" placeholder="Search for tasks..." class="w-full px-4 py-3 bg-gray-100 border border-gray-300 rounded-lg text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-shadow duration-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:placeholder-gray-400">
+                {% if reward_type_filter %}
+                    <input type="hidden" name="reward_type" value="{{ reward_type_filter }}">
+                {% endif %}
             </form>
+
+            <!-- Reward Type Filters -->
+            <div class="flex items-center space-x-2 mb-6">
+                <span class="text-sm font-semibold text-gray-500 dark:text-gray-400">Filter Reward Type:</span>
+                <a href="?{% if search_query %}q={{ search_query }}&{% endif %}reward_type=" 
+                   class="px-3 py-1 text-sm rounded-lg border {% if not reward_type_filter %}bg-cyan-500 text-white border-cyan-500{% else %}bg-white text-gray-700 border-gray-300 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700 hover:bg-gray-100{% endif %}">
+                    All
+                </a>
+                <a href="?{% if search_query %}q={{ search_query }}&{% endif %}reward_type=points" 
+                   class="px-3 py-1 text-sm rounded-lg border {% if reward_type_filter == 'points' %}bg-cyan-500 text-white border-cyan-500{% else %}bg-white text-gray-700 border-gray-300 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700 hover:bg-gray-100{% endif %}">
+                    Points Only
+                </a>
+                <a href="?{% if search_query %}q={{ search_query }}&{% endif %}reward_type=usd" 
+                   class="px-3 py-1 text-sm rounded-lg border {% if reward_type_filter == 'usd' %}bg-cyan-500 text-white border-cyan-500{% else %}bg-white text-gray-700 border-gray-300 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700 hover:bg-gray-100{% endif %}">
+                    USD Only ($)
+                </a>
+            </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {% for task in available_tasks %}
@@ -36,8 +56,13 @@
                             <div class="flex justify-between items-start">
                                 <h3 class="text-lg font-bold text-gray-800 dark:text-white">{{ task.title }}</h3>
                                 <div class="text-right flex-shrink-0 ml-4">
-                                    <p class="text-xl font-semibold text-cyan-600">{{ task.reward }}</p>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400">Points</p>
+                                    {% if task.reward_type == 'usd' %}
+                                        <p class="text-xl font-semibold text-cyan-600">${{ task.reward }}.00</p>
+                                        <p class="text-xs text-gray-500 dark:text-gray-400">USD (Escrow)</p>
+                                    {% else %}
+                                        <p class="text-xl font-semibold text-cyan-600">{{ task.reward }}</p>
+                                        <p class="text-xs text-gray-500 dark:text-gray-400">Points</p>
+                                    {% endif %}
                                 </div>
                             </div>
                             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Posted by: {{ task.posted_by.username }}</p>
@@ -111,8 +136,13 @@
                     <div class="flex justify-between items-start">
                         <h3 class="text-lg font-bold text-gray-800 dark:text-white">{{ task.title }}</h3>
                         <div class="text-right flex-shrink-0 ml-4">
-                            <p class="text-xl font-semibold text-red-600">{{ task.reward }}</p>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">Points</p>
+                            {% if task.reward_type == 'usd' %}
+                                <p class="text-xl font-semibold text-red-600">${{ task.reward }}.00</p>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">USD</p>
+                            {% else %}
+                                <p class="text-xl font-semibold text-red-600">{{ task.reward }}</p>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">Points</p>
+                            {% endif %}
                         </div>
                     </div>
                     <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">Posted by: {{ task.posted_by.username }} | Taken by: {{ task.taken_by.username }}</p>

@@ -11,6 +11,7 @@ from .views.chat import start_chat, chat_view, send_message
 from .views.friends import friends_view, send_friend_request, accept_friend_request, decline_friend_request, user_list
 from .views.notifications import notifications_view
 from .views.rewards import rewards_view
+from .views.stripe import stripe_connect_view, stripe_callback_view
 
 urlpatterns = [
     path('', home, name='home'),
@@ -21,6 +22,8 @@ urlpatterns = [
     path('profile/', profile_view, name='profile'),
     path('user/<int:user_id>/', user_profile_view, name='user_profile'),
     path('rewards/', rewards_view, name='rewards'),
+    path('stripe/connect/', stripe_connect_view, name='stripe_connect'),
+    path('stripe/callback/', stripe_callback_view, name='stripe_callback'),
 
     # Task Lifecycle URLs
     path('add_task/', add_task, name='add_task'),
