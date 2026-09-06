@@ -64,10 +64,25 @@ def take_task(request, task_id):
     if task.posted_by == request.user:
         messages.error(request, "You cannot take your own task.")
     else:
+        user_profile = request.user.userprofile
+        collateral_needed = task.required_collateral
+        if user_profile.rewards < collateral_needed:
+            messages.error(request, f"Insufficient balance. You need at least {collateral_needed} points collateral to claim this task.")
+            return redirect('home')
         with transaction.atomic():
+            user_profile.rewards -= collateral_needed
+            user_profile.save()
             task.status = 'in_progress'
             task.taken_by = request.user
+            task.locked_collateral = collateral_needed
             task.save()
+            RewardLedger.objects.create(
+                user=request.user,
+                task=task,
+                amount=-collateral_needed,
+                transaction_type='collateral_lock',
+                description=f"Locked collateral for task: '{task.title}'"
+            )
             conversation, created = Conversation.objects.get_or_create(task=task)
             if created:
                 conversation.participants.add(task.posted_by, task.taken_by)
@@ -76,7 +91,7 @@ def take_task(request, task_id):
                 message=f"{request.user.username} has taken your task: {task.title}",
                 link=reverse('my_tasks')
             )
-            messages.success(request, "Task has been assigned to you. A chat has been created.")
+            messages.success(request, f"Task has been assigned to you with {collateral_needed} points collateral locked. A chat has been created.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
@@ -84,9 +99,11 @@ def complete_task(request, task_id):
     task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
-        task_doer_profile.rewards += task.reward
+        collateral = task.locked_collateral
+        task_doer_profile.rewards += (task.reward + collateral)
         task_doer_profile.save()
         task.status = 'completed'
+        task.locked_collateral = 0
         task.save()
 
         if hasattr(task, 'dispute'):
@@ -97,7 +114,12 @@ def complete_task(request, task_id):
             user=task.taken_by, task=task, amount=task.reward,
             transaction_type='task_completion', description=f"Completed task: '{task.title}'"
         )
-        messages.success(request, f"Task marked as complete! {task.reward} points transferred to {task.taken_by.username}.")
+        if collateral > 0:
+            RewardLedger.objects.create(
+                user=task.taken_by, task=task, amount=collateral,
+                transaction_type='collateral_unlock', description=f"Unlocked collateral for completed task: '{task.title}'"
+            )
+        messages.success(request, f"Task marked as complete! {task.reward} points transferred and {collateral} collateral points unlocked for {task.taken_by.username}.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
@@ -111,7 +133,7 @@ def cancel_task(request, task_id):
         user_profile.save()
         RewardLedger.objects.create(
             user=request.user, task=task, amount=task.reward,
-            transaction_type='task_cancellation', description=f"Refund for cancelled task: "
+            transaction_type='task_cancellation', description=f"Refund for cancelled task: '{task.title}'"
         )
         messages.success(request, "You have cancelled the task and your points have been refunded.")
     return redirect('my_tasks')
@@ -140,31 +162,56 @@ def accept_cancellation(request, task_id):
             user=task.posted_by, task=task, amount=task.reward,
             transaction_type='task_cancellation', description=f"Refund for cancelled task: '{task.title}'"
         )
+        
+        # Unlock taker collateral
+        collateral = task.locked_collateral
+        if collateral > 0:
+            taker_profile = request.user.userprofile
+            taker_profile.rewards += collateral
+            taker_profile.save()
+            RewardLedger.objects.create(
+                user=request.user, task=task, amount=collateral,
+                transaction_type='collateral_unlock', description=f"Unlocked collateral for cancelled task: '{task.title}'"
+            )
+
         task.status = 'available'
         task.taken_by = None
         task.cancellation_requested = False
+        task.locked_collateral = 0
         task.save()
         Notification.objects.create(
             recipient=task.posted_by,
             message=f"{request.user.username} accepted your cancellation request for '{task.title}'. The task is now available again.",
             link=reverse('my_tasks')
         )
-        messages.success(request, "You have accepted the cancellation. The task is now available for others.")
+        messages.success(request, "You have accepted the cancellation. Your locked collateral has been unlocked.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
 def abandon_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
     with transaction.atomic():
+        collateral = task.locked_collateral
         task.status = 'available'
         task.taken_by = None
+        task.locked_collateral = 0
         task.save()
+
+        # Log penalty entry in RewardLedger for forfeiture
+        RewardLedger.objects.create(
+            user=request.user,
+            task=task,
+            amount=-collateral,
+            transaction_type='collateral_forfeit',
+            description=f"Forfeited collateral for abandoning task: '{task.title}'"
+        )
+
         Notification.objects.create(
             recipient=task.posted_by,
             message=f"{request.user.username} has abandoned your task: '{task.title}'. It is now available again.",
             link=reverse('my_tasks')
         )
-        messages.success(request, "You have abandoned the task. It is now available for others.")
+        messages.success(request, f"You have abandoned the task. {collateral} points collateral have been forfeited.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')

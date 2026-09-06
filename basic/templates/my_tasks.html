@@ -85,6 +85,11 @@
                         <div class="text-right flex-shrink-0 ml-4">
                             <p class="text-xl font-semibold text-cyan-600">{{ task.reward }}</p>
                             <p class="text-xs text-gray-500">Points</p>
+                            {% if task.status == 'in_progress' %}
+                                <p class="text-xs font-medium text-amber-600 mt-1">Locked Collateral: {{ task.locked_collateral }} pts</p>
+                            {% else %}
+                                <p class="text-xs font-medium text-amber-600 mt-1">Collateral: {{ task.required_collateral }} pts</p>
+                            {% endif %}
                         </div>
                     </div>
                     <div class="mt-4 flex items-center space-x-3">
@@ -94,7 +99,7 @@
                                 <p class="text-sm text-yellow-600">The poster wants to cancel this task.</p>
                             {% else %}
                                 <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-cyan-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-cyan-700 transition-colors text-sm">Go to Chat</a>
-                                <a href="{% url 'abandon_task' task.id %}" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm">Abandon Task</a>
+                                <a href="{% url 'abandon_task' task.id %}" onclick="return confirm('WARNING: Abandoning this task will permanently forfeit your locked point collateral ({{ task.locked_collateral }} points). Are you sure you want to abandon?');" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm">Abandon Task</a>
                                 <button onclick="openDisputeModal('{{ task.id }}')" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm">Raise Dispute</button>
                             {% endif %}
                         {% elif task.status == 'disputed' %}

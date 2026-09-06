@@ -130,4 +130,8 @@ print("MEDIA_FILES: OK")
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 print("DEFAULT_AUTO_FIELD: OK")
 
+# Collateral configuration
+COLLATERAL_PERCENTAGE = int(os.getenv('COLLATERAL_PERCENTAGE', 20))
+print(f"COLLATERAL_PERCENTAGE: {COLLATERAL_PERCENTAGE}%")
+
 print("--- settings.py loaded successfully ---")
