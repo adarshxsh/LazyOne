@@ -2,6 +2,7 @@ from django.shortcuts import render, redirect
 from django.contrib.auth import login, logout, authenticate
 from django.contrib.auth.models import User
 from django.contrib import messages
+from django.db import transaction
 from django.utils import timezone
 from datetime import timedelta
 import random
@@ -14,18 +15,19 @@ def register_view(request):
     if request.method == 'POST':
         form = CustomUserCreationForm(request.POST) # Use the custom form
         if form.is_valid():
-            user = form.save(commit=False)
-            user.is_active = False  # Deactivate account until email is verified
-            user.save()
+            with transaction.atomic():
+                user = form.save(commit=False)
+                user.is_active = False  # Deactivate account until email is verified
+                user.save()
 
-            # Create profile and generate OTP
-            profile = UserProfile.objects.create(user=user)
-            otp = str(random.randint(100000, 999999))
-            profile.email_otp = otp
-            profile.email_otp_created_at = timezone.now()
-            profile.save()
+                # Create profile and generate OTP
+                profile = UserProfile.objects.create(user=user)
+                otp = str(random.randint(100000, 999999))
+                profile.email_otp = otp
+                profile.email_otp_created_at = timezone.now()
+                profile.save()
 
-            # Send OTP email
+            # Send OTP email outside of DB transaction to prevent holding DB locks during SMTP request
             try:
                 subject = 'Your LazyOne Account Verification Code'
                 message = f'Hi {user.username},\n\nYour verification code is: {otp}\n\nThis code will expire in 10 minutes.\n'
@@ -74,24 +76,27 @@ def verify_otp_view(request):
 
     if request.method == 'POST':
         submitted_otp = request.POST.get('otp')
-        profile = user.userprofile
 
-        # Check if OTP is valid and not expired (e.g., within 10 minutes)
-        if profile.email_otp == submitted_otp and (timezone.now() - profile.email_otp_created_at) < timedelta(minutes=10):
-            user.is_active = True
-            user.save()
-            
-            # Clear OTP fields
-            profile.email_otp = None
-            profile.email_otp_created_at = None
-            profile.save()
+        with transaction.atomic():
+            u = User.objects.select_for_update().get(pk=user_pk)
+            profile = UserProfile.objects.select_for_update().get(user=u)
 
-            login(request, user)
-            messages.success(request, "Email verified successfully. You are now logged in.")
-            del request.session['otp_user_pk'] # Clean up session
-            return redirect('home')
-        else:
-            messages.error(request, "Invalid or expired OTP. Please try again.")
+            # Check if OTP is valid and not expired (e.g., within 10 minutes)
+            if profile.email_otp == submitted_otp and profile.email_otp_created_at and (timezone.now() - profile.email_otp_created_at) < timedelta(minutes=10):
+                u.is_active = True
+                u.save()
+                
+                # Clear OTP fields
+                profile.email_otp = None
+                profile.email_otp_created_at = None
+                profile.save()
+
+                login(request, u)
+                messages.success(request, "Email verified successfully. You are now logged in.")
+                del request.session['otp_user_pk'] # Clean up session
+                return redirect('home')
+            else:
+                messages.error(request, "Invalid or expired OTP. Please try again.")
 
     return render(request, 'verify_otp.html')
 
