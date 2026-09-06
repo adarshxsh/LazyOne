@@ -8,7 +8,13 @@
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg font-bold text-white">{{ dispute.task.title }}</p>
+            <p class="text-sm text-gray-400">Posted by: {{ task.posted_by.username }} | Taken by: {{ task.taken_by.username|default:"Unassigned" }} | Reward: {{ task.reward }} points</p>
+            {% if task.conversation %}
+                <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block mt-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+                    View Dispute Chat Log
+                </a>
+            {% endif %}
         </div>
 
         <div>
@@ -22,6 +28,52 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if show_vote_tallies %}
+        <div class="bg-gray-800/80 p-5 rounded-xl border border-gray-700 space-y-3">
+            <h3 class="text-xl font-semibold text-yellow-400">Community Advisory Vote Tallies (Staff View)</h3>
+            <p class="text-sm text-gray-400">These votes are non-binding community feedback to assist in your manual settlement decision.</p>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center mt-3">
+                <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700">
+                    <p class="text-2xl font-bold text-white">{{ total_votes }}</p>
+                    <p class="text-xs text-gray-400 uppercase tracking-wider mt-1">Total Votes</p>
+                </div>
+                <div class="bg-gray-900/60 p-4 rounded-lg border border-cyan-800">
+                    <p class="text-2xl font-bold text-cyan-400">{{ poster_votes }}</p>
+                    <p class="text-xs text-gray-400 uppercase tracking-wider mt-1">Votes for Poster ({{ task.posted_by.username }})</p>
+                </div>
+                <div class="bg-gray-900/60 p-4 rounded-lg border border-purple-800">
+                    <p class="text-2xl font-bold text-purple-400">{{ taker_votes }}</p>
+                    <p class="text-xs text-gray-400 uppercase tracking-wider mt-1">Votes for Taker ({{ task.taken_by.username|default:"N/A" }})</p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if request.user.is_staff and dispute.status == 'open' %}
+        <div class="bg-red-900/20 p-5 rounded-xl border border-red-700/60 space-y-4">
+            <h3 class="text-xl font-semibold text-red-400">Execute Staff Settlement</h3>
+            <p class="text-sm text-gray-300">Select the winning party to finalize the dispute and execute the escrow transfer.</p>
+            <form action="{% url 'settle_dispute' dispute.id %}" method="post" class="space-y-4">
+                {% csrf_token %}
+                <div class="flex flex-wrap gap-4">
+                    <label class="flex items-center space-x-2 bg-gray-800 px-4 py-2 rounded-lg border border-gray-700 cursor-pointer hover:border-cyan-500">
+                        <input type="radio" name="winner" value="poster" required class="text-cyan-500 focus:ring-cyan-500">
+                        <span class="text-white text-sm font-medium">Settle in favor of Poster ({{ task.posted_by.username }} - Refund Points)</span>
+                    </label>
+                    {% if task.taken_by %}
+                    <label class="flex items-center space-x-2 bg-gray-800 px-4 py-2 rounded-lg border border-gray-700 cursor-pointer hover:border-purple-500">
+                        <input type="radio" name="winner" value="taker" required class="text-purple-500 focus:ring-purple-500">
+                        <span class="text-white text-sm font-medium">Settle in favor of Taker ({{ task.taken_by.username }} - Award Points)</span>
+                    </label>
+                    {% endif %}
+                </div>
+                <button type="submit" class="bg-red-600 hover:bg-red-700 text-white font-bold px-5 py-2.5 rounded-lg transition-colors text-sm">
+                    Finalize Dispute Settlement
+                </button>
+            </form>
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}

@@ -1,6 +1,6 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
-from ..models import Conversation, Message, Notification
+from ..models import Conversation, Message, Notification, DisputeVote
 from django.contrib.auth.models import User
 from django.http import HttpResponseForbidden, JsonResponse
 from django.urls import reverse
@@ -23,11 +23,29 @@ def chat_view(request, conversation_id):
         messages.error(request, "Chat not found.")
         return redirect('home')
 
-    if request.user not in conversation.participants.all():
-        logger.warning("Step 2: User is not a participant. Redirecting to home.")
+    is_participant = request.user in conversation.participants.all()
+    is_disputed_task = bool(
+        conversation.task and 
+        conversation.task.status == 'disputed' and 
+        hasattr(conversation.task, 'dispute')
+    )
+
+    if not is_participant and not is_disputed_task:
+        logger.warning("Step 2: User is not a participant and task is not disputed. Redirecting to home.")
         messages.error(request, "You are not authorized to view this chat.")
         return redirect('home') # Redirect to home page
-    logger.info("Step 2: User is a valid participant.")
+    logger.info("Step 2: Access granted.")
+
+    dispute = conversation.task.dispute if is_disputed_task else None
+    user_vote = None
+    can_vote = False
+    is_party = False
+
+    if dispute:
+        task = conversation.task
+        is_party = (request.user == task.posted_by or (task.taken_by and request.user == task.taken_by))
+        user_vote = DisputeVote.objects.filter(dispute=dispute, voter=request.user).first()
+        can_vote = (not is_party) and (dispute.status == 'open')
 
     try:
         # This is for the Django-based message system, which we are bypassing for Firestore.
@@ -49,7 +67,15 @@ def chat_view(request, conversation_id):
     except Exception as e:
         logger.error(f"ERROR at Step 4 (Marking notifications): {e}")
 
-    context = {'conversation': conversation, 'messages': messages_list}
+    context = {
+        'conversation': conversation,
+        'messages': messages_list,
+        'is_read_only': not is_participant,
+        'dispute': dispute,
+        'user_vote': user_vote,
+        'can_vote': can_vote,
+        'is_party': is_party,
+    }
     
     logger.info(f"--- CHAT_VIEW END: Successfully rendering template. ---")
     return render(request, 'chat.html', context)
