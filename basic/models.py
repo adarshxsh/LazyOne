@@ -5,6 +5,7 @@ from django.utils import timezone
 # Create your models here.
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
+    firebase_uid = models.CharField(max_length=255, blank=True, null=True)
     bio = models.CharField(max_length=300,blank=True)
     first_name = models.CharField(max_length=50, blank=True)
     last_name = models.CharField(max_length=50, blank=True)
