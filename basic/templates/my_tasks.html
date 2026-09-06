@@ -52,12 +52,18 @@
                             {% else %}
                                 <a href="{% url 'request_cancellation' task.id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors text-sm">Request Cancellation</a>
                             {% endif %}
-                            <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-cyan-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-cyan-700 transition-colors text-sm">Go to Chat</a>
+                            {% if task.conversation %}
+                                <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-cyan-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-cyan-700 transition-colors text-sm">Go to Chat</a>
+                            {% endif %}
                         {% elif task.status == 'disputed' %}
                             <p class="text-sm text-red-600">This task is in dispute. You can end the dispute by completing the task.</p>
                             <a href="{% url 'complete_task' task.id %}" class="inline-block bg-green-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm">Mark as Complete</a>
-                            <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm">Go to Chat</a>
-                            <a href="{% url 'dispute_detail' task.dispute.id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors text-sm">View Dispute</a>
+                            {% if task.conversation %}
+                                <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm">Go to Chat</a>
+                            {% endif %}
+                            {% if task.dispute %}
+                                <a href="{% url 'dispute_detail' task.dispute.id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors text-sm">View Dispute</a>
+                            {% endif %}
                         {% elif task.status == 'completed' and task.conversation %}
                              <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-gray-400 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-500 transition-colors text-sm">View Chat</a>
                         {% endif %}
@@ -93,18 +99,24 @@
                                 <a href="{% url 'accept_cancellation' task.id %}" class="inline-block bg-green-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm">Accept Cancellation</a>
                                 <p class="text-sm text-yellow-600">The poster wants to cancel this task.</p>
                             {% else %}
-                                <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-cyan-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-cyan-700 transition-colors text-sm">Go to Chat</a>
+                                {% if task.conversation %}
+                                    <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-cyan-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-cyan-700 transition-colors text-sm">Go to Chat</a>
+                                {% endif %}
                                 <a href="{% url 'abandon_task' task.id %}" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm">Abandon Task</a>
                                 <button onclick="openDisputeModal('{{ task.id }}')" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm">Raise Dispute</button>
                             {% endif %}
                         {% elif task.status == 'disputed' %}
                             <p class="text-sm text-red-600">You have raised a dispute.</p>
-                            <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm">Go to Chat</a>
-                            <form action="{% url 'withdraw_dispute' task.dispute.id %}" method="post" class="inline">
-                                <a href="{% url 'dispute_detail' task.dispute.id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors text-sm">View Dispute</a>
-                                {% csrf_token %}
-                                <button type="submit" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm">Withdraw Dispute</button>
-                            </form>
+                            {% if task.conversation %}
+                                <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm">Go to Chat</a>
+                            {% endif %}
+                            {% if task.dispute %}
+                                <form action="{% url 'withdraw_dispute' task.dispute.id %}" method="post" class="inline">
+                                    <a href="{% url 'dispute_detail' task.dispute.id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors text-sm">View Dispute</a>
+                                    {% csrf_token %}
+                                    <button type="submit" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm">Withdraw Dispute</button>
+                                </form>
+                            {% endif %}
                         {% elif task.status == 'completed' %}
                             <p class="text-green-600 font-semibold">Task Completed</p>
                         {% else %}
@@ -126,9 +138,14 @@
     <div class="bg-gray-100 rounded-2xl shadow-2xl p-8 max-w-md w-full border border-gray-300">
         <h3 class="text-2xl font-bold text-gray-800 mb-4">Raise a Dispute</h3>
         <p class="text-gray-600 mb-6">Please explain why you are raising a dispute. This will be visible to the task poster.</p>
-        <form id="dispute-form" method="post">
+        <form id="dispute-form" method="post" enctype="multipart/form-data">
             {% csrf_token %}
+            <label class="block text-sm font-medium text-gray-700 mb-1">Reason for Dispute</label>
             <textarea id="dispute-reason" name="reason" rows="4" required class="w-full px-4 py-3 bg-white border border-gray-300 rounded-lg text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-600"></textarea>
+            <div class="mt-4">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Evidence Files (Optional, max 10MB per file)</label>
+                <input type="file" name="evidence_files" multiple class="w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-cyan-600 file:text-white hover:file:bg-cyan-700 cursor-pointer">
+            </div>
             <div class="mt-6 flex justify-end space-x-4">
                 <button type="button" onclick="closeDisputeModal()" class="px-6 py-2 rounded-lg text-white bg-gray-600 hover:bg-gray-700 transition-colors">Cancel</button>
                 <button type="submit" class="px-6 py-2 rounded-lg text-white font-semibold bg-red-600 hover:bg-red-700 transition-colors">Submit Dispute</button>
