@@ -21,6 +21,9 @@ class UserProfile(models.Model):
     instagram_username = models.CharField(max_length=100, blank=True)
     is_instagram_verified = models.BooleanField(default=False)
     
+    firebase_uid = models.CharField(max_length=128, blank=True, null=True, unique=True)
+    closeness = models.IntegerField(default=50)
+
     # Fields for Email OTP Verification
     email_otp = models.CharField(max_length=6, blank=True, null=True)
     email_otp_created_at = models.DateTimeField(blank=True, null=True)
@@ -88,6 +91,7 @@ class Dispute(models.Model):
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
     to_user = models.ForeignKey(User, related_name='to_user', on_delete=models.CASCADE)
+    closeness = models.IntegerField(default=50)
     is_accepted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
