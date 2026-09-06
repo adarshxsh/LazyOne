@@ -32,15 +32,11 @@ class FirebaseBackend(BaseBackend):
                 defaults={'email': email}
             )
 
-            # Ensure profile exists and firebase_uid is set
+            # Ensure profile exists
             profile, profile_created = UserProfile.objects.get_or_create(user=user)
             if profile_created:
                 logger.info(f"New user profile created for: {email}")
                 profile.rewards = 1500 # Set initial rewards for new profiles
-            
-            if not profile.firebase_uid:
-                profile.firebase_uid = uid
-                profile.save()
             
             return user
 
