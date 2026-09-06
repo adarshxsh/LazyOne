@@ -3,12 +3,21 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
+    <div class="flex justify-between items-center mb-6">
+        <h2 class="text-3xl font-bold text-white">Dispute Details</h2>
+        {% if user.is_staff %}
+            <a href="{% url 'admin_dispute_panel' %}" class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+                &larr; Return to Dispute Panel
+            </a>
+        {% endif %}
+    </div>
 
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg font-bold text-white">{{ dispute.task.title }}</p>
+            <p class="text-sm text-gray-400 mt-1">Reward (Escrow Hold): <strong class="text-cyan-400">{{ dispute.task.reward }} Points</strong></p>
+            <p class="text-sm text-gray-400">Poster: <strong class="text-white">{{ dispute.task.posted_by.username }}</strong> &bull; Taker: <strong class="text-white">{% if dispute.task.taken_by %}{{ dispute.task.taken_by.username }}{% else %}N/A{% endif %}</strong></p>
         </div>
 
         <div>
@@ -22,6 +31,43 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if user.is_staff and dispute.status == 'open' %}
+            <div class="mt-8 p-6 bg-gray-800/90 border border-yellow-500/30 rounded-xl space-y-4">
+                <h3 class="text-xl font-bold text-white">Staff Split Settlement Arbitration</h3>
+                <p class="text-sm text-gray-400">
+                    Assign integer point amounts to taker payout and poster refund. The sum must strictly equal the held escrow of <strong class="text-cyan-400">{{ dispute.task.reward }}</strong> points.
+                </p>
+
+                <form action="{% url 'settle_dispute' dispute.id %}" method="post" class="space-y-4">
+                    {% csrf_token %}
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label for="taker_payout" class="block text-sm font-medium text-gray-300 mb-1">
+                                Taker Payout ({% if dispute.task.taken_by %}{{ dispute.task.taken_by.username }}{% else %}Taker{% endif %})
+                            </label>
+                            <input type="number" id="taker_payout" name="taker_payout" min="0" max="{{ dispute.task.reward }}" step="1" required
+                                class="w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-cyan-500 text-sm"
+                                placeholder="e.g., 50">
+                        </div>
+                        <div>
+                            <label for="poster_refund" class="block text-sm font-medium text-gray-300 mb-1">
+                                Poster Refund ({{ dispute.task.posted_by.username }})
+                            </label>
+                            <input type="number" id="poster_refund" name="poster_refund" min="0" max="{{ dispute.task.reward }}" step="1" required
+                                class="w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-cyan-500 text-sm"
+                                placeholder="e.g., 50">
+                        </div>
+                    </div>
+                    <div class="flex justify-end">
+                        <button type="submit"
+                            class="bg-cyan-600 hover:bg-cyan-500 text-white font-semibold px-5 py-2 rounded-lg transition-colors text-sm shadow">
+                            Execute Split Settlement
+                        </button>
+                    </div>
+                </form>
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}
