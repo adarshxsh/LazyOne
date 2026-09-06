@@ -20,6 +20,7 @@ class UserProfile(models.Model):
     is_phone_verified = models.BooleanField(default=False)
     instagram_username = models.CharField(max_length=100, blank=True)
     is_instagram_verified = models.BooleanField(default=False)
+    firebase_uid = models.CharField(max_length=100, blank=True)
     
     # Fields for Email OTP Verification
     email_otp = models.CharField(max_length=6, blank=True, null=True)

@@ -1,7 +1,7 @@
 from django.urls import path
 from .views.home import home
 from .views.authentication import login_page, logout_view, register_view, verify_otp_view
-from .views.profile import profile_view, user_profile_view, update_closeness
+from .views.profile import profile_view, user_profile_view, update_closeness, verify_phone_token
 from .views.tasks import (
     add_task, take_task, complete_task, my_tasks, cancel_task, 
     request_cancellation, accept_cancellation, abandon_task
@@ -19,6 +19,7 @@ urlpatterns = [
     path('verify-otp/', verify_otp_view, name='verify_otp'), # Add this line
     path('logout/', logout_view, name='logout'),
     path('profile/', profile_view, name='profile'),
+    path('profile/verify-phone/', verify_phone_token, name='verify_phone_token'),
     path('user/<int:user_id>/', user_profile_view, name='user_profile'),
     path('rewards/', rewards_view, name='rewards'),
 
