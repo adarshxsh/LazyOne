@@ -1,7 +1,7 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from ..models import Task, Conversation, Notification, RewardLedger
+from ..models import Task, Conversation, Notification, RewardLedger, UserProfile
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
@@ -24,12 +24,6 @@ def add_task(request):
                 default_deadline = (timezone.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
                 return render(request, 'add_task.html', {'default_deadline': default_deadline})
 
-            user_profile = request.user.userprofile
-            if user_profile.rewards < reward:
-                messages.error(request, f"You only have {user_profile.rewards} points, not enough to offer this reward.")
-                default_deadline = (timezone.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
-                return render(request, 'add_task.html', {'default_deadline': default_deadline})
-
             deadline = timezone.make_aware(datetime.strptime(deadline_str, '%Y-%m-%dT%H:%M'))
             if deadline <= timezone.now():
                 messages.error(request, "Deadline must be in the future.")
@@ -37,6 +31,12 @@ def add_task(request):
                 return render(request, 'add_task.html', {'default_deadline': default_deadline})
 
             with transaction.atomic():
+                user_profile = UserProfile.objects.select_for_update().get(user=request.user)
+                if user_profile.rewards < reward:
+                    messages.error(request, f"You only have {user_profile.rewards} points, not enough to offer this reward.")
+                    default_deadline = (timezone.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+                    return render(request, 'add_task.html', {'default_deadline': default_deadline})
+
                 user_profile.rewards -= reward
                 user_profile.save()
                 new_task = Task.objects.create(
@@ -60,30 +60,42 @@ def add_task(request):
 
 @login_required(login_url='/login/')
 def take_task(request, task_id):
-    task = get_object_or_404(Task, id=task_id, status='available')
-    if task.posted_by == request.user:
-        messages.error(request, "You cannot take your own task.")
-    else:
-        with transaction.atomic():
-            task.status = 'in_progress'
-            task.taken_by = request.user
-            task.save()
-            conversation, created = Conversation.objects.get_or_create(task=task)
-            if created:
-                conversation.participants.add(task.posted_by, task.taken_by)
-            Notification.objects.create(
-                recipient=task.posted_by,
-                message=f"{request.user.username} has taken your task: {task.title}",
-                link=reverse('my_tasks')
-            )
-            messages.success(request, "Task has been assigned to you. A chat has been created.")
+    with transaction.atomic():
+        task = Task.objects.select_for_update().filter(id=task_id, status='available').first()
+        if not task:
+            messages.error(request, "Task is no longer available.")
+            return redirect('my_tasks')
+        if task.posted_by == request.user:
+            messages.error(request, "You cannot take your own task.")
+            return redirect('my_tasks')
+
+        task.status = 'in_progress'
+        task.taken_by = request.user
+        task.save()
+        conversation, created = Conversation.objects.get_or_create(task=task)
+        if created:
+            conversation.participants.add(task.posted_by, task.taken_by)
+        Notification.objects.create(
+            recipient=task.posted_by,
+            message=f"{request.user.username} has taken your task: {task.title}",
+            link=reverse('my_tasks')
+        )
+        messages.success(request, "Task has been assigned to you. A chat has been created.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
 def complete_task(request, task_id):
-    task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
     with transaction.atomic():
-        task_doer_profile = task.taken_by.userprofile
+        task = Task.objects.select_for_update().filter(
+            Q(status='in_progress') | Q(status='disputed'),
+            id=task_id,
+            posted_by=request.user
+        ).first()
+        if not task:
+            messages.error(request, "Task not found or cannot be marked as complete.")
+            return redirect('my_tasks')
+
+        task_doer_profile = UserProfile.objects.select_for_update().get(user=task.taken_by)
         task_doer_profile.rewards += task.reward
         task_doer_profile.save()
         task.status = 'completed'
@@ -102,38 +114,51 @@ def complete_task(request, task_id):
 
 @login_required(login_url='/login/')
 def cancel_task(request, task_id):
-    task = get_object_or_404(Task, id=task_id, posted_by=request.user, status='available')
     with transaction.atomic():
+        task = Task.objects.select_for_update().filter(id=task_id, posted_by=request.user, status='available').first()
+        if not task:
+            messages.error(request, "Task not found or cannot be cancelled.")
+            return redirect('my_tasks')
+
         task.status = 'cancelled'
         task.save()
-        user_profile = request.user.userprofile
+        user_profile = UserProfile.objects.select_for_update().get(user=request.user)
         user_profile.rewards += task.reward
         user_profile.save()
         RewardLedger.objects.create(
             user=request.user, task=task, amount=task.reward,
-            transaction_type='task_cancellation', description=f"Refund for cancelled task: "
+            transaction_type='task_cancellation', description=f"Refund for cancelled task: '{task.title}'"
         )
         messages.success(request, "You have cancelled the task and your points have been refunded.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
 def request_cancellation(request, task_id):
-    task = get_object_or_404(Task, id=task_id, posted_by=request.user, status='in_progress')
-    task.cancellation_requested = True
-    task.save()
-    Notification.objects.create(
-        recipient=task.taken_by,
-        message=f"{request.user.username} has requested to cancel the task: '{task.title}'.",
-        link=reverse('my_tasks')
-    )
-    messages.success(request, "A cancellation request has been sent to the task taker.")
+    with transaction.atomic():
+        task = Task.objects.select_for_update().filter(id=task_id, posted_by=request.user, status='in_progress').first()
+        if not task:
+            messages.error(request, "Task not found or cancellation cannot be requested.")
+            return redirect('my_tasks')
+
+        task.cancellation_requested = True
+        task.save()
+        Notification.objects.create(
+            recipient=task.taken_by,
+            message=f"{request.user.username} has requested to cancel the task: '{task.title}'.",
+            link=reverse('my_tasks')
+        )
+        messages.success(request, "A cancellation request has been sent to the task taker.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
 def accept_cancellation(request, task_id):
-    task = get_object_or_404(Task, id=task_id, taken_by=request.user, cancellation_requested=True)
     with transaction.atomic():
-        poster_profile = task.posted_by.userprofile
+        task = Task.objects.select_for_update().filter(id=task_id, taken_by=request.user, cancellation_requested=True).first()
+        if not task:
+            messages.error(request, "Task or cancellation request not found.")
+            return redirect('my_tasks')
+
+        poster_profile = UserProfile.objects.select_for_update().get(user=task.posted_by)
         poster_profile.rewards += task.reward
         poster_profile.save()
         RewardLedger.objects.create(
@@ -154,8 +179,12 @@ def accept_cancellation(request, task_id):
 
 @login_required(login_url='/login/')
 def abandon_task(request, task_id):
-    task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
     with transaction.atomic():
+        task = Task.objects.select_for_update().filter(id=task_id, taken_by=request.user, status='in_progress').first()
+        if not task:
+            messages.error(request, "Task not found or cannot be abandoned.")
+            return redirect('my_tasks')
+
         task.status = 'available'
         task.taken_by = None
         task.save()
