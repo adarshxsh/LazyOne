@@ -3,25 +3,209 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
+<div class="max-w-4xl mx-auto px-4 py-8 space-y-6 text-gray-200">
+    <div class="flex justify-between items-center border-b border-gray-700 pb-4">
+        <h2 class="text-3xl font-bold text-white">Dispute Details</h2>
+        {% if user.is_staff %}
+            <a href="{% url 'staff_disputes_list' %}" class="text-sm text-cyan-400 hover:underline">&larr; Back to Staff Dashboard</a>
+        {% else %}
+            <a href="{% url 'my_tasks' %}" class="text-sm text-cyan-400 hover:underline">&larr; Back to My Tasks</a>
+        {% endif %}
+    </div>
 
-    <div class="space-y-6 text-gray-300">
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
-        </div>
-
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
-        </div>
-
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
-            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+    <!-- Task Information -->
+    <div class="bg-gray-800/80 p-6 rounded-lg border border-gray-700 space-y-3">
+        <h3 class="text-xl font-semibold text-cyan-400">Task Information</h3>
+        <p class="text-lg font-bold text-white">{{ dispute.task.title }}</p>
+        <p class="text-gray-300">{{ dispute.task.description }}</p>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-400 pt-2">
+            <div>
+                <span class="block text-gray-500">Reward:</span>
+                <span class="font-semibold text-cyan-300">{{ dispute.task.reward }} Points</span>
+            </div>
+            <div>
+                <span class="block text-gray-500">Posted By:</span>
+                <span class="font-semibold text-gray-200">{{ dispute.task.posted_by.username }}</span>
+            </div>
+            <div>
+                <span class="block text-gray-500">Taker:</span>
+                <span class="font-semibold text-gray-200">{{ dispute.task.taken_by.username|default:"Unassigned" }}</span>
+            </div>
+            <div>
+                <span class="block text-gray-500">Task Status:</span>
+                <span class="font-semibold text-gray-200">{{ dispute.task.get_status_display }}</span>
+            </div>
         </div>
     </div>
 
+    <!-- Dispute Overview -->
+    <div class="bg-gray-800/80 p-6 rounded-lg border border-gray-700 space-y-4">
+        <div class="flex justify-between items-start">
+            <h3 class="text-xl font-semibold text-cyan-400">Dispute Overview</h3>
+            <span class="px-3 py-1 text-sm font-semibold rounded-full 
+                {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300 border border-yellow-500/30
+                {% elif dispute.status == 'resolved' %}bg-blue-500/20 text-blue-300 border border-blue-500/30
+                {% elif dispute.status == 'appealed' %}bg-purple-500/20 text-purple-300 border border-purple-500/30
+                {% elif dispute.status == 'finalized' %}bg-green-500/20 text-green-300 border border-green-500/30
+                {% endif %}">
+                {{ dispute.get_status_display }}
+            </span>
+        </div>
+        <div class="text-sm space-y-1">
+            <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
+            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y H:i" }}</p>
+        </div>
+        <div>
+            <p class="font-semibold text-gray-300 mb-1">Reason for Dispute:</p>
+            <p class="bg-gray-900/60 p-4 rounded-lg border border-gray-700 text-gray-200">{{ dispute.reason|linebreaksbr }}</p>
+        </div>
+
+        {% if dispute.status == 'open' and dispute.raised_by == user %}
+            <form action="{% url 'withdraw_dispute' dispute.id %}" method="POST" class="pt-2">
+                {% csrf_token %}
+                <button type="submit" class="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded text-sm font-medium transition">
+                    Withdraw Dispute
+                </button>
+            </form>
+        {% endif %}
+    </div>
+
+    <!-- Staff Arbitration Form (Open Dispute) -->
+    {% if can_arbitrate %}
+        <div class="bg-gray-800/90 p-6 rounded-lg border border-cyan-500/50 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Staff Administrative Arbitration</h3>
+            <p class="text-sm text-gray-300">Assign total escrowed points ({{ dispute.task.reward }} pts) to either the task poster or taker to resolve this dispute.</p>
+            <form action="{% url 'arbitrate_dispute' dispute.id %}" method="POST" class="space-y-4">
+                {% csrf_token %}
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">Select Winner:</label>
+                    <div class="space-y-2">
+                        <label class="inline-flex items-center space-x-2 text-sm text-gray-200 mr-6">
+                            <input type="radio" name="winner" value="poster" required class="text-cyan-500 focus:ring-cyan-400">
+                            <span>Poster: <strong>{{ dispute.task.posted_by.username }}</strong> (Refund points)</span>
+                        </label>
+                        {% if dispute.task.taken_by %}
+                            <label class="inline-flex items-center space-x-2 text-sm text-gray-200">
+                                <input type="radio" name="winner" value="taker" required class="text-cyan-500 focus:ring-cyan-400">
+                                <span>Taker: <strong>{{ dispute.task.taken_by.username }}</strong> (Award points)</span>
+                            </label>
+                        {% endif %}
+                    </div>
+                </div>
+                <div>
+                    <label for="note" class="block text-sm font-medium text-gray-300 mb-1">Arbitration Rationale / Notes (Optional):</label>
+                    <textarea id="note" name="note" rows="3" class="w-full bg-gray-900 border border-gray-700 rounded p-2.5 text-gray-200 focus:outline-none focus:border-cyan-500" placeholder="Provide context for this arbitration decision..."></textarea>
+                </div>
+                <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white px-5 py-2.5 rounded font-medium transition">
+                    Execute Arbitration Decision
+                </button>
+            </form>
+        </div>
+    {% endif %}
+
+    <!-- Initial Arbitration Result -->
+    {% if dispute.status != 'open' %}
+        <div class="bg-gray-800/80 p-6 rounded-lg border border-gray-700 space-y-3">
+            <h3 class="text-xl font-semibold text-cyan-400">Initial Arbitration Decision</h3>
+            <div class="text-sm space-y-1 text-gray-300">
+                <p><strong>Arbitrated By:</strong> {{ dispute.resolved_by.username|default:"Staff" }}</p>
+                <p><strong>Decision Date:</strong> {{ dispute.resolved_at|date:"F d, Y H:i" }}</p>
+                <p><strong>Awarded Winner:</strong> <span class="text-cyan-300 font-semibold">{{ dispute.winner.username|default:"N/A" }}</span></p>
+                {% if dispute.resolution_note %}
+                    <p class="pt-2"><strong>Notes:</strong></p>
+                    <p class="bg-gray-900/60 p-3 rounded border border-gray-700 text-gray-200">{{ dispute.resolution_note|linebreaksbr }}</p>
+                {% endif %}
+            </div>
+        </div>
+    {% endif %}
+
+    <!-- Participant Single-Tier Appeal Request Form -->
+    {% if can_appeal %}
+        <div class="bg-gray-800/90 p-6 rounded-lg border border-purple-500/50 space-y-4">
+            <h3 class="text-xl font-semibold text-purple-400">Lodge Single-Tier Appeal Request</h3>
+            <p class="text-sm text-gray-300">You may lodge a single appeal request to contest the initial arbitration ruling within 48 hours of the decision.</p>
+            <form action="{% url 'submit_appeal' dispute.id %}" method="POST" class="space-y-4">
+                {% csrf_token %}
+                <div>
+                    <label for="reason" class="block text-sm font-medium text-gray-300 mb-1">Appeal Basis / Additional Evidence:</label>
+                    <textarea id="reason" name="reason" rows="3" required class="w-full bg-gray-900 border border-gray-700 rounded p-2.5 text-gray-200 focus:outline-none focus:border-purple-500" placeholder="Explain why this decision should be reviewed..."></textarea>
+                </div>
+                <button type="submit" class="bg-purple-600 hover:bg-purple-500 text-white px-5 py-2.5 rounded font-medium transition">
+                    Submit Appeal Request
+                </button>
+            </form>
+        </div>
+    {% elif user_appealed %}
+        <div class="bg-gray-800/80 p-4 rounded-lg border border-purple-500/30 text-purple-300 text-sm">
+            You have submitted an appeal request for this dispute.
+        </div>
+    {% endif %}
+
+    <!-- Appeal Submissions History -->
+    {% if appeals %}
+        <div class="bg-gray-800/80 p-6 rounded-lg border border-gray-700 space-y-4">
+            <h3 class="text-xl font-semibold text-purple-400">Lodged Appeals</h3>
+            <div class="space-y-3">
+                {% for appeal in appeals %}
+                    <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700 space-y-1">
+                        <div class="flex justify-between text-xs text-gray-400 mb-1">
+                            <span class="font-semibold text-purple-300">Appellant: {{ appeal.appellant.username }}</span>
+                            <span>{{ appeal.created_at|date:"F d, Y H:i" }}</span>
+                        </div>
+                        <p class="text-sm text-gray-200">{{ appeal.reason|linebreaksbr }}</p>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
+
+    <!-- Senior Staff Appeal Review Form -->
+    {% if can_review_appeal %}
+        <div class="bg-gray-800/90 p-6 rounded-lg border border-purple-500/60 space-y-4">
+            <h3 class="text-xl font-semibold text-purple-400">Secondary Staff Appeal Review</h3>
+            <p class="text-sm text-gray-300">As a staff administrator, issue a final verdict to either uphold or reverse the initial ruling. This verdict permanently finalizes the dispute.</p>
+            <form action="{% url 'review_appeal' dispute.id %}" method="POST" class="space-y-4">
+                {% csrf_token %}
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">Final Appeal Verdict:</label>
+                    <div class="space-y-2">
+                        <label class="inline-flex items-center space-x-2 text-sm text-gray-200 mr-6">
+                            <input type="radio" name="verdict" value="uphold" required class="text-purple-500 focus:ring-purple-400">
+                            <span><strong>Uphold</strong> (Keep initial winner: {{ dispute.winner.username }})</span>
+                        </label>
+                        <label class="inline-flex items-center space-x-2 text-sm text-gray-200">
+                            <input type="radio" name="verdict" value="reverse" required class="text-purple-500 focus:ring-purple-400">
+                            <span><strong>Reverse</strong> (Transfer reward points to the other participant)</span>
+                        </label>
+                    </div>
+                </div>
+                <div>
+                    <label for="note" class="block text-sm font-medium text-gray-300 mb-1">Final Verdict Rationale / Notes (Optional):</label>
+                    <textarea id="note" name="note" rows="3" class="w-full bg-gray-900 border border-gray-700 rounded p-2.5 text-gray-200 focus:outline-none focus:border-purple-500" placeholder="Provide notes regarding the appeal verdict..."></textarea>
+                </div>
+                <button type="submit" class="bg-purple-600 hover:bg-purple-500 text-white px-5 py-2.5 rounded font-medium transition">
+                    Finalize Appeal Decision
+                </button>
+            </form>
+        </div>
+    {% endif %}
+
+    <!-- Finalized Appeal Verdict Details -->
+    {% if dispute.status == 'finalized' %}
+        <div class="bg-gray-800/80 p-6 rounded-lg border border-green-500/40 space-y-3">
+            <h3 class="text-xl font-semibold text-green-400">Finalized Appeal Verdict</h3>
+            <div class="text-sm space-y-1 text-gray-300">
+                <p><strong>Verdict:</strong> <span class="font-bold text-green-300 uppercase">{{ dispute.final_verdict }}</span></p>
+                <p><strong>Final Winner:</strong> <span class="text-cyan-300 font-semibold">{{ dispute.winner.username }}</span></p>
+                <p><strong>Reviewed By:</strong> {{ dispute.final_reviewer.username|default:"Staff" }}</p>
+                <p><strong>Finalized Date:</strong> {{ dispute.finalized_at|date:"F d, Y H:i" }}</p>
+                {% if dispute.final_verdict_note %}
+                    <p class="pt-2"><strong>Notes:</strong></p>
+                    <p class="bg-gray-900/60 p-3 rounded border border-gray-700 text-gray-200">{{ dispute.final_verdict_note|linebreaksbr }}</p>
+                {% endif %}
+            </div>
+            <p class="text-xs text-gray-400 pt-2 border-t border-gray-700">This dispute has been permanently finalized. No further modifications or appeals are permitted.</p>
+        </div>
+    {% endif %}
+</div>
 {% endblock %}
