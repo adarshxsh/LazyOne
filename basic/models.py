@@ -35,6 +35,7 @@ class Task(models.Model):
         ('completed', 'Completed'),
         ('disputed', 'Disputed'),
         ('cancelled', 'Cancelled'),
+        ('resolved', 'Resolved'),
     )
 
     title = models.CharField(max_length=200)
@@ -60,6 +61,7 @@ class RewardLedger(models.Model):
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('dispute_resolution', 'Dispute Resolution'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
@@ -75,6 +77,8 @@ class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
         ('resolved', 'Resolved'),
+        ('appealed', 'Appealed'),
+        ('finalized', 'Finalized'),
     )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
@@ -82,8 +86,32 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     created_at = models.DateTimeField(auto_now_add=True)
 
+    # Initial arbitration fields
+    resolved_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='resolved_disputes')
+    winner = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='won_disputes')
+    resolution_note = models.TextField(blank=True, default='')
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    # Secondary appeal review fields
+    final_reviewer = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='finalized_disputes')
+    final_verdict = models.CharField(max_length=20, blank=True, default='')
+    final_verdict_note = models.TextField(blank=True, default='')
+    finalized_at = models.DateTimeField(null=True, blank=True)
+
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+class DisputeAppeal(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='appeals')
+    appellant = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_appeals')
+    reason = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'appellant')
+
+    def __str__(self):
+        return f"Appeal by {self.appellant.username} for dispute #{self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
