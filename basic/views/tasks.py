@@ -89,14 +89,26 @@ def complete_task(request, task_id):
         task.status = 'completed'
         task.save()
 
-        if hasattr(task, 'dispute'):
+        has_dispute = hasattr(task, 'dispute')
+        if has_dispute:
             task.dispute.status = 'resolved'
+            task.dispute.doer_amount = task.reward
+            task.dispute.poster_amount = 0
+            task.dispute.settled_at = timezone.now()
+            task.dispute.resolved_by = request.user
             task.dispute.save()
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,
-            transaction_type='task_completion', description=f"Completed task: '{task.title}'"
+            transaction_type='dispute_settlement_payout' if has_dispute else 'task_completion',
+            description=f"Completed task: '{task.title}'"
         )
+        if has_dispute:
+            RewardLedger.objects.create(
+                user=task.posted_by, task=task, amount=0,
+                transaction_type='dispute_settlement_refund',
+                description=f"Dispute settlement refund for task: '{task.title}'"
+            )
         messages.success(request, f"Task marked as complete! {task.reward} points transferred to {task.taken_by.username}.")
     return redirect('my_tasks')
 
