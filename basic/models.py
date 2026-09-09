@@ -51,6 +51,10 @@ class Task(models.Model):
         return self.title
 
     @property
+    def collateral_amount(self):
+        return self.reward // 2
+
+    @property
     def main_chat(self):
         return self.conversations.first()
 
@@ -60,6 +64,10 @@ class RewardLedger(models.Model):
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('collateral_lock', 'Collateral Lock (Points Locked)'),
+        ('collateral_release', 'Collateral Release (Points Returned)'),
+        ('collateral_refund', 'Collateral Refund (Points Returned)'),
+        ('collateral_slash', 'Collateral Slash (Penalty Deducted)'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
