@@ -1,6 +1,6 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
-from ..models import Conversation, Message, Notification
+from ..models import Conversation, Message, Notification, JuryAssignment
 from django.contrib.auth.models import User
 from django.http import HttpResponseForbidden, JsonResponse
 from django.urls import reverse
@@ -23,11 +23,23 @@ def chat_view(request, conversation_id):
         messages.error(request, "Chat not found.")
         return redirect('home')
 
+    is_read_only = False
     if request.user not in conversation.participants.all():
-        logger.warning("Step 2: User is not a participant. Redirecting to home.")
-        messages.error(request, "You are not authorized to view this chat.")
-        return redirect('home') # Redirect to home page
-    logger.info("Step 2: User is a valid participant.")
+        if conversation.task and hasattr(conversation.task, 'dispute'):
+            dispute = conversation.task.dispute
+            if dispute.status == 'open' and JuryAssignment.objects.filter(dispute=dispute, juror=request.user).exists():
+                is_read_only = True
+                logger.info("Step 2: User is an assigned peer juror for this open dispute. Access granted (read-only).")
+            else:
+                logger.warning("Step 2: Dispute is not open or user is not an assigned juror. Redirecting.")
+                messages.error(request, "You are not authorized to view this chat.")
+                return redirect('home')
+        else:
+            logger.warning("Step 2: User is not a participant. Redirecting to home.")
+            messages.error(request, "You are not authorized to view this chat.")
+            return redirect('home') # Redirect to home page
+    else:
+        logger.info("Step 2: User is a valid participant.")
 
     try:
         # This is for the Django-based message system, which we are bypassing for Firestore.
@@ -49,7 +61,7 @@ def chat_view(request, conversation_id):
     except Exception as e:
         logger.error(f"ERROR at Step 4 (Marking notifications): {e}")
 
-    context = {'conversation': conversation, 'messages': messages_list}
+    context = {'conversation': conversation, 'messages': messages_list, 'is_read_only': is_read_only}
     
     logger.info(f"--- CHAT_VIEW END: Successfully rendering template. ---")
     return render(request, 'chat.html', context)

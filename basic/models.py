@@ -85,6 +85,40 @@ class Dispute(models.Model):
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
 
+class JuryAssignment(models.Model):
+    STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('voted', 'Voted'),
+        ('expired', 'Expired'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='assignments')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jury_assignments')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Juror {self.juror.username} for Dispute {self.dispute.id}"
+
+class DisputeVote(models.Model):
+    VOTE_CHOICES = (
+        ('poster_wins', 'Poster Wins'),
+        ('taker_wins', 'Taker Wins'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    vote = models.CharField(max_length=20, choices=VOTE_CHOICES)
+    rationale = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Vote by {self.juror.username} on Dispute {self.dispute.id}: {self.vote}"
+
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
     to_user = models.ForeignKey(User, related_name='to_user', on_delete=models.CASCADE)
