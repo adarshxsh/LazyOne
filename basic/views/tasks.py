@@ -1,7 +1,7 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from ..models import Task, Conversation, Notification, RewardLedger
+from ..models import Task, Conversation, Notification, RewardLedger, Dispute
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
@@ -131,8 +131,10 @@ def request_cancellation(request, task_id):
 
 @login_required(login_url='/login/')
 def accept_cancellation(request, task_id):
-    task = get_object_or_404(Task, id=task_id, taken_by=request.user, cancellation_requested=True)
+    task = get_object_or_404(Task, id=task_id, taken_by=request.user, cancellation_requested=True, status='in_progress')
     with transaction.atomic():
+        if hasattr(task, 'dispute'):
+            task.dispute.delete()
         poster_profile = task.posted_by.userprofile
         poster_profile.rewards += task.reward
         poster_profile.save()
