@@ -1,6 +1,18 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.core.exceptions import ValidationError
+import os
+
+def validate_evidence_file(file):
+    max_size = 10 * 1024 * 1024
+    if file.size > max_size:
+        raise ValidationError("File size must not exceed 10MB.")
+    
+    ext = os.path.splitext(file.name)[1].lower()
+    allowed_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf']
+    if ext not in allowed_extensions:
+        raise ValidationError(f"File extension '{ext}' is not supported. Allowed extensions: jpg, jpeg, png, gif, webp, pdf.")
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -60,6 +72,7 @@ class RewardLedger(models.Model):
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('dispute_settlement', 'Dispute Settlement'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
@@ -76,14 +89,46 @@ class Dispute(models.Model):
         ('open', 'Open'),
         ('resolved', 'Resolved'),
     )
+    STAGE_CHOICES = (
+        ('initial_proof', 'Initial Proof Submitted'),
+        ('counter_evidence', 'Awaiting Counter-Evidence'),
+        ('under_review', 'Under Review'),
+        ('resolved', 'Resolved'),
+        ('timed_out', 'Timed Out'),
+    )
+
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    dispute_stage = models.CharField(max_length=30, choices=STAGE_CHOICES, default='initial_proof')
+    response_deadline = models.DateTimeField(null=True, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolution_outcome = models.CharField(max_length=50, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+class DisputeEvidence(models.Model):
+    EVIDENCE_TYPE_CHOICES = (
+        ('initial_proof', 'Initial Proof'),
+        ('counter_evidence', 'Counter-Evidence'),
+        ('supplemental', 'Supplemental Evidence'),
+    )
+
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidences')
+    submitter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_evidences')
+    text = models.TextField()
+    file = models.FileField(upload_to='dispute_evidence/', null=True, blank=True, validators=[validate_evidence_file])
+    evidence_type = models.CharField(max_length=30, choices=EVIDENCE_TYPE_CHOICES, default='initial_proof')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"Evidence by {self.submitter.username} for Dispute {self.dispute.id} ({self.evidence_type})"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
