@@ -4,6 +4,13 @@ from django.utils import timezone
 
 # Create your models here.
 class UserProfile(models.Model):
+    RISK_TIER_CHOICES = (
+        ('low', 'Low Risk'),
+        ('medium', 'Medium Risk'),
+        ('high', 'High Risk'),
+        ('critical', 'Critical Risk'),
+    )
+
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     bio = models.CharField(max_length=300,blank=True)
     first_name = models.CharField(max_length=50, blank=True)
@@ -20,6 +27,15 @@ class UserProfile(models.Model):
     is_phone_verified = models.BooleanField(default=False)
     instagram_username = models.CharField(max_length=100, blank=True)
     is_instagram_verified = models.BooleanField(default=False)
+
+    # Reputation Engine & Dynamic Collateral Persistent Fields
+    reputation_score = models.IntegerField(default=75)
+    tasks_completed = models.PositiveIntegerField(default=0)
+    tasks_abandoned = models.PositiveIntegerField(default=0)
+    disputes_raised = models.PositiveIntegerField(default=0)
+    disputes_won = models.PositiveIntegerField(default=0)
+    disputes_lost = models.PositiveIntegerField(default=0)
+    risk_tier = models.CharField(max_length=20, choices=RISK_TIER_CHOICES, default='low')
     
     # Fields for Email OTP Verification
     email_otp = models.CharField(max_length=6, blank=True, null=True)
@@ -27,6 +43,20 @@ class UserProfile(models.Model):
 
     def __str__(self):
         return self.user.username
+
+    @property
+    def completion_rate(self):
+        total = self.tasks_completed + self.tasks_abandoned
+        if total == 0:
+            return 100.0
+        return round((self.tasks_completed / total) * 100, 1)
+
+    @property
+    def dispute_win_rate(self):
+        total = self.disputes_won + self.disputes_lost
+        if total == 0:
+            return 100.0
+        return round((self.disputes_won / total) * 100, 1)
 
 class Task(models.Model):
     STATUS_CHOICES = (
@@ -46,6 +76,8 @@ class Task(models.Model):
     deadline = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='available')
     cancellation_requested = models.BooleanField(default=False)
+    poster_collateral = models.PositiveIntegerField(default=0)
+    taker_collateral = models.PositiveIntegerField(default=0)
 
     def __str__(self):
         return self.title
@@ -60,16 +92,31 @@ class RewardLedger(models.Model):
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('collateral_lock', 'Collateral Locked'),
+        ('collateral_refund', 'Collateral Refunded'),
+        ('collateral_forfeit', 'Collateral Forfeited'),
+        ('reputation_adjustment', 'Reputation Adjustment'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=30, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.user.username}: {self.amount} points for {self.description}"
+
+class ReputationLog(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reputation_logs')
+    change = models.IntegerField()
+    new_score = models.IntegerField()
+    reason = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='moderated_reputation_logs')
+
+    def __str__(self):
+        return f"{self.user.username}: {self.change:+} (Score: {self.new_score}) - {self.reason}"
 
 class Dispute(models.Model):
     STATUS_CHOICES = (
