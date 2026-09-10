@@ -66,8 +66,9 @@ class RewardLedger(models.Model):
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
-        ('dispute_refund', 'Dispute Deposit Bond Refunded'),
+        ('dispute_refund', 'Dispute Deposit Bond Refunded / Poster Refund'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('dispute_payout', 'Dispute Settlement (Doer Payout)'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
@@ -96,6 +97,11 @@ class Dispute(models.Model):
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
+    doer_payout = models.PositiveIntegerField(null=True, blank=True)
+    poster_refund = models.PositiveIntegerField(null=True, blank=True)
+    resolution_notes = models.TextField(blank=True, null=True)
+    resolved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='resolved_disputes')
+    resolved_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
