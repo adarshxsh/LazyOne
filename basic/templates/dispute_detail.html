@@ -9,6 +9,8 @@
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
             <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-sm text-gray-400">Total Escrow Reward: <span class="font-bold text-cyan-300">{{ dispute.task.reward }} points</span></p>
+            <p class="text-sm text-gray-400">Posted By: {{ dispute.task.posted_by.username }} | Taken By: {{ dispute.task.taken_by.username|default:"N/A" }}</p>
         </div>
 
         <div>
@@ -22,6 +24,50 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if dispute.status == 'resolved' %}
+        <div class="bg-gray-800/80 p-6 rounded-xl border border-green-500/30 space-y-3">
+            <h3 class="text-xl font-semibold text-green-400">Resolution Details</h3>
+            <p><strong>Doer Payout:</strong> {{ dispute.doer_payout|default:0 }} points</p>
+            <p><strong>Poster Refund:</strong> {{ dispute.poster_refund|default:0 }} points</p>
+            {% if dispute.resolved_by %}
+            <p><strong>Resolved By:</strong> {{ dispute.resolved_by.username }}</p>
+            {% endif %}
+            {% if dispute.resolved_at %}
+            <p><strong>Resolved At:</strong> {{ dispute.resolved_at|date:"F d, Y H:i" }}</p>
+            {% endif %}
+            {% if dispute.resolution_notes %}
+            <div>
+                <strong>Resolution Notes:</strong>
+                <p class="bg-gray-900/50 p-3 rounded-lg border border-gray-700 mt-1">{{ dispute.resolution_notes|linebreaksbr }}</p>
+            </div>
+            {% endif %}
+        </div>
+        {% elif user.is_staff and dispute.status == 'open' %}
+        <div class="bg-gray-800/80 p-6 rounded-xl border border-cyan-500/30 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Staff Dispute Settlement</h3>
+            <form method="POST" action="{% url 'resolve_dispute' dispute.id %}" class="space-y-4">
+                {% csrf_token %}
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-1">Doer Payout (Points to {{ dispute.task.taken_by.username }})</label>
+                        <input type="number" name="doer_payout" min="0" max="{{ dispute.task.reward }}" required class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-1">Poster Refund (Points to {{ dispute.task.posted_by.username }})</label>
+                        <input type="number" name="poster_refund" min="0" max="{{ dispute.task.reward }}" required class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-1">Resolution Notes</label>
+                    <textarea name="resolution_notes" rows="3" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500" placeholder="Explain the reasoning for this settlement decision..."></textarea>
+                </div>
+                <button type="submit" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors">
+                    Settle Dispute
+                </button>
+            </form>
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}
