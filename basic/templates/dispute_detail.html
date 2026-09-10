@@ -3,25 +3,89 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
-
-    <div class="space-y-6 text-gray-300">
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+    <div class="max-w-4xl mx-auto space-y-8">
+        <div class="flex justify-between items-center">
+            <h2 class="text-3xl font-bold text-white">Dispute Details</h2>
+            {% if dispute.task.conversation %}
+                <a href="{% url 'chat_view' dispute.task.conversation.id %}" class="bg-red-600 hover:bg-red-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors text-sm">
+                    View Dispute Chat
+                </a>
+            {% endif %}
         </div>
 
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Task Info -->
+            <div class="bg-gray-800/50 border border-gray-700 rounded-xl p-6 space-y-3 text-gray-300">
+                <h3 class="text-xl font-semibold text-cyan-400">Task Information</h3>
+                <p><strong>Title:</strong> {{ dispute.task.title }}</p>
+                <p><strong>Poster:</strong> {{ dispute.task.posted_by.username }}</p>
+                <p><strong>Taker:</strong> {{ dispute.task.taken_by.username }}</p>
+                <p><strong>Reward:</strong> <span class="text-cyan-400 font-bold">{{ dispute.task.reward }} points</span></p>
+                <p><strong>Task Status:</strong> <span class="capitalize text-gray-200">{{ dispute.task.get_status_display }}</span></p>
+            </div>
+
+            <!-- Dispute Info -->
+            <div class="bg-gray-800/50 border border-gray-700 rounded-xl p-6 space-y-3 text-gray-300">
+                <h3 class="text-xl font-semibold text-cyan-400">Dispute Status</h3>
+                <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+                <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
+                <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y H:i" }}</p>
+                {% if dispute.status == 'resolved' %}
+                    <p><strong>Resolution Verdict:</strong> <span class="text-green-400 font-bold capitalize">{{ dispute.get_resolution_verdict_display }}</span></p>
+                {% endif %}
+            </div>
         </div>
 
-        <div>
+        <!-- Reason -->
+        <div class="bg-gray-800/50 border border-gray-700 rounded-xl p-6 text-gray-300 space-y-2">
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
-            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+            <p class="bg-gray-900/60 p-4 rounded-lg border border-gray-700/60">{{ dispute.reason|linebreaksbr }}</p>
+        </div>
+
+        <!-- Community Jury Voting Panel -->
+        <div class="bg-gray-800/50 border border-gray-700 rounded-xl p-6 text-gray-300 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Community Jury Tally</h3>
+            <div class="grid grid-cols-3 gap-4 text-center">
+                <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+                    <p class="text-sm text-gray-400">Votes for Poster ({{ dispute.task.posted_by.username }})</p>
+                    <p class="text-2xl font-bold text-cyan-400 mt-1">{{ dispute.poster_votes }}</p>
+                </div>
+                <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+                    <p class="text-sm text-gray-400">Votes for Taker ({{ dispute.task.taken_by.username }})</p>
+                    <p class="text-2xl font-bold text-cyan-400 mt-1">{{ dispute.taker_votes }}</p>
+                </div>
+                <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+                    <p class="text-sm text-gray-400">Quorum Required</p>
+                    <p class="text-2xl font-bold text-gray-300 mt-1">{{ dispute.required_votes }}</p>
+                </div>
+            </div>
+
+            {% if dispute.status == 'open' %}
+                <div class="border-t border-gray-700 pt-4">
+                    {% if is_participant %}
+                        <p class="text-sm text-amber-400 bg-amber-500/10 p-3 rounded-lg border border-amber-500/20 text-center">
+                            As a party involved in this dispute, you are ineligible to cast a community vote.
+                        </p>
+                    {% elif user_vote %}
+                        <p class="text-sm text-green-400 bg-green-500/10 p-3 rounded-lg border border-green-500/20 text-center">
+                            You have cast your vote for: <strong class="capitalize">{{ user_vote.get_verdict_display }}</strong>.
+                        </p>
+                    {% else %}
+                        <p class="text-sm text-gray-300 mb-3">
+                            Review the dispute chat and cast your vote to help settle this dispute:
+                        </p>
+                        <form method="post" action="{% url 'cast_dispute_vote' dispute.id %}" class="flex flex-col sm:flex-row gap-4 justify-center">
+                            {% csrf_token %}
+                            <button type="submit" name="verdict" value="poster" class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 px-6 rounded-lg transition-colors">
+                                Vote for Poster ({{ dispute.task.posted_by.username }})
+                            </button>
+                            <button type="submit" name="verdict" value="taker" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition-colors">
+                                Vote for Taker ({{ dispute.task.taken_by.username }})
+                            </button>
+                        </form>
+                    {% endif %}
+                </div>
+            {% endif %}
         </div>
     </div>
-
 {% endblock %}

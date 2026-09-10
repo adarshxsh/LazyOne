@@ -81,9 +81,34 @@ class Dispute(models.Model):
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     created_at = models.DateTimeField(auto_now_add=True)
+    poster_votes = models.PositiveIntegerField(default=0)
+    taker_votes = models.PositiveIntegerField(default=0)
+    required_votes = models.PositiveIntegerField(default=3)
+    resolution_verdict = models.CharField(
+        max_length=10,
+        choices=(('poster', 'Poster'), ('taker', 'Taker')),
+        null=True,
+        blank=True
+    )
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+class DisputeVote(models.Model):
+    VERDICT_CHOICES = (
+        ('poster', 'Poster'),
+        ('taker', 'Taker'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    verdict = models.CharField(max_length=10, choices=VERDICT_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'voter')
+
+    def __str__(self):
+        return f"Vote by {self.voter.username} on dispute {self.dispute.id}: {self.verdict}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
