@@ -1,6 +1,20 @@
+import os
+from datetime import timedelta
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.core.exceptions import ValidationError
+
+ALLOWED_EVIDENCE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.pdf', '.zip', '.txt']
+MAX_EVIDENCE_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+
+def validate_evidence_file(file):
+    if file:
+        ext = os.path.splitext(file.name)[1].lower()
+        if ext not in ALLOWED_EVIDENCE_EXTENSIONS:
+            raise ValidationError(f"File extension '{ext}' is not allowed. Allowed extensions: {', '.join(ALLOWED_EVIDENCE_EXTENSIONS)}")
+        if file.size > MAX_EVIDENCE_FILE_SIZE:
+            raise ValidationError("File size exceeds maximum limit of 5MB.")
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -60,11 +74,14 @@ class RewardLedger(models.Model):
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('dispute_refund', 'Dispute Refund'),
+        ('dispute_payout', 'Dispute Payout'),
+        ('dispute_settlement', 'Dispute Settlement'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -76,14 +93,52 @@ class Dispute(models.Model):
         ('open', 'Open'),
         ('resolved', 'Resolved'),
     )
+    EXPIRATION_HANDLER_CHOICES = (
+        ('refund_poster', 'Refund Poster'),
+        ('award_taker', 'Award Taker'),
+    )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    deadline = models.DateTimeField(blank=True, null=True)
+    expiration_handler = models.CharField(max_length=50, choices=EXPIRATION_HANDLER_CHOICES, default='refund_poster')
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if not self.deadline:
+            base_time = self.created_at if self.created_at else timezone.now()
+            self.deadline = base_time + timedelta(days=3)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidences')
+    submitted_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_evidences')
+    comment = models.TextField(blank=True)
+    file = models.FileField(upload_to='dispute_evidence/', validators=[validate_evidence_file], blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    @property
+    def is_image(self):
+        if self.file:
+            ext = os.path.splitext(self.file.name)[1].lower()
+            return ext in ['.png', '.jpg', '.jpeg']
+        return False
+
+    @property
+    def filename(self):
+        if self.file:
+            return os.path.basename(self.file.name)
+        return ''
+
+    def __str__(self):
+        return f"Evidence by {self.submitted_by.username} for dispute {self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
