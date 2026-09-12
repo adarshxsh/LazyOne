@@ -1,6 +1,16 @@
-from django.db import models
+from django.db import models, transaction
 from django.contrib.auth.models import User
 from django.utils import timezone
+
+def calculate_deposit_bond(reward_amount):
+    """
+    Calculates the required deposit bond for a dispute based on task reward amount.
+    Returns a positive integer (e.g. 20% of reward amount, minimum 1 point).
+    """
+    if reward_amount is None or reward_amount < 0:
+        return 1
+    bond = int(reward_amount * 0.20)
+    return max(1, bond)
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -54,17 +64,23 @@ class Task(models.Model):
     def main_chat(self):
         return self.conversations.first()
 
+    def get_deposit_bond(self):
+        return calculate_deposit_bond(self.reward)
+
 class RewardLedger(models.Model):
     TRANSACTION_TYPES = (
         ('task_creation', 'Task Creation (Points Reserved)'),
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('dispute_deposit_hold', 'Dispute Deposit Hold'),
+        ('dispute_deposit_refund', 'Dispute Deposit Refund'),
+        ('dispute_bond_forfeiture', 'Dispute Bond Forfeiture'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -76,14 +92,56 @@ class Dispute(models.Model):
         ('open', 'Open'),
         ('resolved', 'Resolved'),
     )
+    DEPOSIT_STATUS_CHOICES = (
+        ('held', 'Held'),
+        ('refunded', 'Refunded'),
+        ('forfeited', 'Forfeited'),
+    )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    deposit_amount = models.PositiveIntegerField(default=0)
+    deposit_status = models.CharField(max_length=20, choices=DEPOSIT_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def resolve_deposit(self, outcome):
+        """
+        Processes deposit bond refund or forfeiture atomically.
+        outcome: 'refund' (returns points to raiser) or 'forfeit' (forfeits points)
+        """
+        if self.deposit_status != 'held':
+            return
+
+        with transaction.atomic():
+            if outcome == 'refund':
+                self.deposit_status = 'refunded'
+                self.save()
+                raiser_profile = self.raised_by.userprofile
+                raiser_profile.rewards += self.deposit_amount
+                raiser_profile.save()
+
+                RewardLedger.objects.create(
+                    user=self.raised_by,
+                    task=self.task,
+                    amount=self.deposit_amount,
+                    transaction_type='dispute_deposit_refund',
+                    description=f"Dispute deposit refund for task: '{self.task.title}'"
+                )
+            elif outcome == 'forfeit':
+                self.deposit_status = 'forfeited'
+                self.save()
+
+                RewardLedger.objects.create(
+                    user=self.raised_by,
+                    task=self.task,
+                    amount=-self.deposit_amount,
+                    transaction_type='dispute_bond_forfeiture',
+                    description=f"Dispute bond forfeited for task: '{self.task.title}'"
+                )
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)

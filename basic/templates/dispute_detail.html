@@ -16,12 +16,36 @@
             <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            <p><strong>Escrowed Deposit Bond:</strong> {{ dispute.deposit_amount }} points</p>
+            <p><strong>Deposit Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.deposit_status == 'held' %}bg-yellow-500/20 text-yellow-300{% elif dispute.deposit_status == 'refunded' %}bg-green-500/20 text-green-300{% else %}bg-red-500/20 text-red-300{% endif %}">{{ dispute.get_deposit_status_display }}</span></p>
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if dispute.status == 'open' and request.user == task.posted_by or request.user.is_staff %}
+        <div class="pt-4 border-t border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-3">Resolve Dispute</h3>
+            <div class="flex space-x-4">
+                <form action="{% url 'resolve_dispute' dispute.id %}" method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="outcome" value="refund">
+                    <button type="submit" class="bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors text-sm">
+                        Resolve & Refund Bond
+                    </button>
+                </form>
+                <form action="{% url 'resolve_dispute' dispute.id %}" method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="outcome" value="forfeit">
+                    <button type="submit" class="bg-red-600 hover:bg-red-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors text-sm">
+                        Resolve & Forfeit Bond
+                    </button>
+                </form>
+            </div>
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}
