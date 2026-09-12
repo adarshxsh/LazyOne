@@ -6,7 +6,10 @@ from .views.tasks import (
     add_task, take_task, complete_task, my_tasks, cancel_task, 
     request_cancellation, accept_cancellation, abandon_task
 )
-from .views.dispute import dispute_detail_view, withdraw_dispute, raise_dispute
+from .views.dispute import (
+    dispute_detail_view, withdraw_dispute, raise_dispute,
+    submit_evidence_view, start_voting_view, cast_vote_view, finalize_resolution_view
+)
 from .views.chat import start_chat, chat_view, send_message
 from .views.friends import friends_view, send_friend_request, accept_friend_request, decline_friend_request, user_list
 from .views.notifications import notifications_view
@@ -36,6 +39,10 @@ urlpatterns = [
     path('task/dispute/<int:task_id>/', raise_dispute, name='raise_dispute'),
     path('dispute/<int:dispute_id>/', dispute_detail_view, name='dispute_detail'),
     path('dispute/withdraw/<int:dispute_id>/', withdraw_dispute, name='withdraw_dispute'),
+    path('dispute/<int:dispute_id>/evidence/', submit_evidence_view, name='submit_evidence'),
+    path('dispute/<int:dispute_id>/start_voting/', start_voting_view, name='start_voting'),
+    path('dispute/<int:dispute_id>/vote/', cast_vote_view, name='cast_vote'),
+    path('dispute/<int:dispute_id>/finalize/', finalize_resolution_view, name='finalize_resolution'),
 
     # Chat URLs
     path('chat/start/<int:user_id>/', start_chat, name='start_chat'),
