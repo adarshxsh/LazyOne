@@ -8,7 +8,7 @@
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a> <span class="text-sm text-gray-400">(Escrow Reward: {{ dispute.task.reward }} points)</span></p>
         </div>
 
         <div>
@@ -16,12 +16,42 @@
             <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            {% if dispute.status == 'resolved' %}
+                <p><strong>Doer Payout:</strong> {{ dispute.doer_payout }} points</p>
+                <p><strong>Poster Refund:</strong> {{ dispute.poster_refund }} points</p>
+            {% endif %}
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if can_resolve or dispute.status == 'open' and user == task.posted_by or dispute.status == 'open' and user.is_staff %}
+        <div class="bg-gray-800 p-6 rounded-lg border border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Resolve Dispute - Custom Split Disbursement</h3>
+            <p class="text-sm text-gray-400 mb-4">Specify custom point payouts for the doer and poster. The sum of doer payout and poster refund must exactly equal total task escrow ({{ task.reward }} points).</p>
+            
+            <form action="{% url 'resolve_dispute' dispute.id %}" method="POST" class="space-y-4">
+                {% csrf_token %}
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="doer_payout" class="block text-sm font-medium text-gray-300">Doer Payout Amount (Points)</label>
+                        <input type="number" name="doer_payout" id="doer_payout" min="0" max="{{ task.reward }}" required
+                               class="mt-1 block w-full rounded-md bg-gray-900 border-gray-700 text-white shadow-sm focus:border-cyan-500 focus:ring-cyan-500 px-3 py-2 border">
+                    </div>
+                    <div>
+                        <label for="poster_refund" class="block text-sm font-medium text-gray-300">Poster Refund Amount (Points)</label>
+                        <input type="number" name="poster_refund" id="poster_refund" min="0" max="{{ task.reward }}" required
+                               class="mt-1 block w-full rounded-md bg-gray-900 border-gray-700 text-white shadow-sm focus:border-cyan-500 focus:ring-cyan-500 px-3 py-2 border">
+                    </div>
+                </div>
+                <button type="submit" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors">
+                    Execute Split Settlement
+                </button>
+            </form>
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}
