@@ -22,6 +22,67 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <!-- Voting Tallies -->
+        <div class="bg-gray-800/60 p-4 rounded-lg border border-gray-700 space-y-2">
+            <h3 class="text-xl font-semibold text-cyan-400">Community Jury Votes</h3>
+            <p><strong>Total Votes:</strong> {{ total_votes }}</p>
+            <p><strong>Votes for Poster ({{ task.posted_by.username }}):</strong> {{ poster_votes }}</p>
+            <p><strong>Votes for Taker ({{ task.taken_by.username }}):</strong> {{ taker_votes }}</p>
+            {% if dispute.status == 'resolved' and dispute.winner %}
+                <p class="text-green-400 font-bold mt-2">Resolved Winner: {{ dispute.winner.username }}</p>
+            {% endif %}
+        </div>
+
+        <!-- Chat Evidence -->
+        {% if chat_messages %}
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Chat Evidence</h3>
+            <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-3 max-h-60 overflow-y-auto">
+                {% for msg in chat_messages %}
+                    <div>
+                        <span class="font-bold text-cyan-300">{{ msg.sender.username }}:</span>
+                        <span class="text-gray-200">{{ msg.content }}</span>
+                        <span class="text-xs text-gray-500 ml-2">{{ msg.timestamp|date:"M d, H:i" }}</span>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Community Jury Voting Form -->
+        <div class="bg-gray-800/80 p-6 rounded-lg border border-gray-700">
+            <h3 class="text-2xl font-bold text-white mb-3">Community Jury Voting</h3>
+            {% if dispute.status == 'resolved' %}
+                <p class="text-gray-400">This dispute has been resolved.</p>
+            {% elif is_party %}
+                <p class="text-yellow-400">Parties involved in this dispute cannot cast a juror vote.</p>
+            {% elif user_vote %}
+                <p class="text-green-400">You voted for <strong>{{ user_vote.voted_for.username }}</strong> with a stake of <strong>{{ user_vote.stake_amount }}</strong> points.</p>
+            {% else %}
+                <form action="{% url 'cast_vote' dispute.id %}" method="post" class="space-y-4">
+                    {% csrf_token %}
+                    <p class="text-gray-300">Select which party is in the right based on task details and chat evidence:</p>
+                    <div class="space-y-2">
+                        <label class="flex items-center space-x-3 text-white">
+                            <input type="radio" name="voted_for" value="poster" required class="text-cyan-600 focus:ring-cyan-500">
+                            <span>Poster: <strong>{{ task.posted_by.username }}</strong></span>
+                        </label>
+                        <label class="flex items-center space-x-3 text-white">
+                            <input type="radio" name="voted_for" value="taker" required class="text-cyan-600 focus:ring-cyan-500">
+                            <span>Taker: <strong>{{ task.taken_by.username }}</strong></span>
+                        </label>
+                    </div>
+                    <div>
+                        <label for="stake_amount" class="block text-sm font-medium text-gray-300">Stake Amount (Points):</label>
+                        <input type="number" id="stake_amount" name="stake_amount" value="50" min="1" required class="mt-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white w-32 focus:outline-none focus:ring-2 focus:ring-cyan-600">
+                    </div>
+                    <button type="submit" class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-6 rounded-lg transition-colors">
+                        Cast Juror Vote & Stake Points
+                    </button>
+                </form>
+            {% endif %}
+        </div>
     </div>
 
 {% endblock %}

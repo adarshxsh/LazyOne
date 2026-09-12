@@ -81,17 +81,20 @@ def take_task(request, task_id):
 
 @login_required(login_url='/login/')
 def complete_task(request, task_id):
-    task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
+    task = get_object_or_404(Task, id=task_id, posted_by=request.user)
+    if task.status == 'disputed':
+        messages.error(request, "Cannot complete a task that is currently in dispute.")
+        return redirect('my_tasks')
+    if task.status != 'in_progress':
+        messages.error(request, "Task cannot be completed because it is not in progress.")
+        return redirect('my_tasks')
+
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
         task_doer_profile.rewards += task.reward
         task_doer_profile.save()
         task.status = 'completed'
         task.save()
-
-        if hasattr(task, 'dispute'):
-            task.dispute.status = 'resolved'
-            task.dispute.save()
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,
@@ -102,7 +105,14 @@ def complete_task(request, task_id):
 
 @login_required(login_url='/login/')
 def cancel_task(request, task_id):
-    task = get_object_or_404(Task, id=task_id, posted_by=request.user, status='available')
+    task = get_object_or_404(Task, id=task_id, posted_by=request.user)
+    if task.status == 'disputed':
+        messages.error(request, "Cannot cancel a task that is currently in dispute.")
+        return redirect('my_tasks')
+    if task.status != 'available':
+        messages.error(request, "Only available tasks can be cancelled.")
+        return redirect('my_tasks')
+
     with transaction.atomic():
         task.status = 'cancelled'
         task.save()
@@ -111,14 +121,21 @@ def cancel_task(request, task_id):
         user_profile.save()
         RewardLedger.objects.create(
             user=request.user, task=task, amount=task.reward,
-            transaction_type='task_cancellation', description=f"Refund for cancelled task: "
+            transaction_type='task_cancellation', description=f"Refund for cancelled task: '{task.title}'"
         )
         messages.success(request, "You have cancelled the task and your points have been refunded.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
 def request_cancellation(request, task_id):
-    task = get_object_or_404(Task, id=task_id, posted_by=request.user, status='in_progress')
+    task = get_object_or_404(Task, id=task_id, posted_by=request.user)
+    if task.status == 'disputed':
+        messages.error(request, "Cannot request cancellation for a task that is currently in dispute.")
+        return redirect('my_tasks')
+    if task.status != 'in_progress':
+        messages.error(request, "Cancellation can only be requested for tasks in progress.")
+        return redirect('my_tasks')
+
     task.cancellation_requested = True
     task.save()
     Notification.objects.create(
