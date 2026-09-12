@@ -21,28 +21,47 @@
 </style>
 
 <div class="chat-container">
-    <div class="border-b border-gray-700/50 pb-4 mb-4">
-        <h2 class="text-xl font-bold text-white">Chat for: {{ conversation.task.title|default:"Direct Message" }}</h2>
-        <p class="text-sm text-gray-400">
-            With:
-            {% for participant in conversation.participants.all %}
-                {% if participant.id != request.user.id %}
-                    {{ participant.username }}
-                {% endif %}
-            {% endfor %}
-        </p>
+    <div class="border-b border-gray-700/50 pb-4 mb-4 flex justify-between items-center">
+        <div>
+            <h2 class="text-xl font-bold text-white">Chat for: {{ conversation.task.title|default:"Direct Message" }}</h2>
+            <p class="text-sm text-gray-400">
+                With:
+                {% for participant in conversation.participants.all %}
+                    {% if participant.id != request.user.id %}
+                        {{ participant.username }}
+                    {% endif %}
+                {% endfor %}
+            </p>
+        </div>
+        {% if conversation.task.dispute %}
+            <a href="{% url 'dispute_detail' conversation.task.dispute.id %}" class="bg-cyan-600 hover:bg-cyan-500 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-colors">
+                View Dispute & Vote
+            </a>
+        {% endif %}
     </div>
+
+    {% if is_read_only %}
+        <div class="bg-amber-500/20 border border-amber-500/50 text-amber-200 p-3 rounded-lg mb-4 text-sm font-medium">
+            You are viewing this dispute chat in read-only mode as a community juror.
+        </div>
+    {% endif %}
 
     <div class="message-list" id="message-list">
         <p id="loading-messages" class="text-center text-gray-400">Loading chat...</p>
     </div>
 
+    {% if not is_read_only %}
     <form class="mt-4 flex items-center space-x-3" id="message-form">
         <input type="text" id="message-input" placeholder="Type your message..." autocomplete="off" required class="flex-grow w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-full text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
         <button type="submit" id="message-submit" title="Send Message" class="flex-shrink-0 bg-cyan-500 hover:bg-cyan-600 text-white font-bold rounded-full h-12 w-12 flex items-center justify-center transition-colors">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
         </button>
     </form>
+    {% else %}
+    <div class="mt-4 text-center p-3 bg-gray-800/50 border border-gray-700 rounded-full text-gray-400 text-sm">
+        Messaging is disabled in read-only juror view.
+    </div>
+    {% endif %}
 </div>
 
 <!-- Firebase SDKs -->
