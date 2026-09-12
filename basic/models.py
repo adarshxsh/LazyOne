@@ -25,6 +25,27 @@ class UserProfile(models.Model):
     email_otp = models.CharField(max_length=6, blank=True, null=True)
     email_otp_created_at = models.DateTimeField(blank=True, null=True)
 
+    # Reputation & Risk Metrics
+    total_tasks_taken = models.IntegerField(default=0)
+    tasks_completed = models.IntegerField(default=0)
+    tasks_abandoned = models.IntegerField(default=0)
+    disputes_raised = models.IntegerField(default=0)
+    disputes_won = models.IntegerField(default=0)
+    disputes_lost = models.IntegerField(default=0)
+    reputation_score = models.IntegerField(default=100)
+    dispute_fraud_risk_index = models.FloatField(default=0.0)
+
+    def recalculate_reputation_and_risk(self):
+        score = 100 + (self.tasks_completed * 10) - (self.tasks_abandoned * 20) + (self.disputes_won * 5) - (self.disputes_lost * 25)
+        self.reputation_score = max(0, score)
+
+        total_activity = self.total_tasks_taken + self.disputes_raised
+        if total_activity == 0:
+            self.dispute_fraud_risk_index = 0.0
+        else:
+            raw_risk = (self.disputes_lost * 40.0 + max(0, self.disputes_raised - self.disputes_won) * 20.0) / max(1, total_activity) * 100.0
+            self.dispute_fraud_risk_index = round(min(100.0, max(0.0, raw_risk)), 2)
+
     def __str__(self):
         return self.user.username
 

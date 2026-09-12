@@ -64,10 +64,24 @@ def take_task(request, task_id):
     if task.posted_by == request.user:
         messages.error(request, "You cannot take your own task.")
     else:
+        user_profile = request.user.userprofile
+        HIGH_VALUE_THRESHOLD = 500
+        if task.reward >= HIGH_VALUE_THRESHOLD:
+            if user_profile.reputation_score < 50 or user_profile.dispute_fraud_risk_index > 50.0:
+                messages.error(request, "Your reputation score is too low or dispute fraud risk index is too high to take high-value tasks.")
+                return redirect('my_tasks')
+        elif user_profile.reputation_score < 10:
+            messages.error(request, "Your reputation score is too low to take tasks.")
+            return redirect('my_tasks')
+
         with transaction.atomic():
             task.status = 'in_progress'
             task.taken_by = request.user
             task.save()
+            user_profile.total_tasks_taken += 1
+            user_profile.recalculate_reputation_and_risk()
+            user_profile.save()
+
             conversation, created = Conversation.objects.get_or_create(task=task)
             if created:
                 conversation.participants.add(task.posted_by, task.taken_by)
@@ -85,13 +99,22 @@ def complete_task(request, task_id):
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
         task_doer_profile.rewards += task.reward
-        task_doer_profile.save()
-        task.status = 'completed'
-        task.save()
+        task_doer_profile.tasks_completed += 1
 
         if hasattr(task, 'dispute'):
             task.dispute.status = 'resolved'
             task.dispute.save()
+            task_doer_profile.disputes_won += 1
+            poster_profile = task.posted_by.userprofile
+            poster_profile.disputes_lost += 1
+            poster_profile.recalculate_reputation_and_risk()
+            poster_profile.save()
+
+        task_doer_profile.recalculate_reputation_and_risk()
+        task_doer_profile.save()
+
+        task.status = 'completed'
+        task.save()
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,
@@ -159,6 +182,12 @@ def abandon_task(request, task_id):
         task.status = 'available'
         task.taken_by = None
         task.save()
+
+        user_profile = request.user.userprofile
+        user_profile.tasks_abandoned += 1
+        user_profile.recalculate_reputation_and_risk()
+        user_profile.save()
+
         Notification.objects.create(
             recipient=task.posted_by,
             message=f"{request.user.username} has abandoned your task: '{task.title}'. It is now available again.",

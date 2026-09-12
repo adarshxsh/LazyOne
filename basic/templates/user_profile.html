@@ -19,6 +19,29 @@
             </div>
         </div>
 
+        <!-- Reputation & Reliability Metrics Section -->
+        <div>
+            <h2 class="text-2xl font-bold text-gray-800 dark:text-white mb-4">Reputation & Reliability</h2>
+            <div class="bg-white/50 border border-gray-200 rounded-xl p-6 dark:bg-gray-800/50 dark:border-gray-700/50 grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div class="text-center p-3 bg-cyan-500/10 rounded-lg border border-cyan-500/20">
+                    <p class="text-xs font-semibold text-cyan-600 dark:text-cyan-400 uppercase tracking-wider">Reputation Score</p>
+                    <p class="text-2xl font-bold text-gray-800 dark:text-white mt-1">{{ viewed_profile.reputation_score }}</p>
+                </div>
+                <div class="text-center p-3 bg-red-500/10 rounded-lg border border-red-500/20">
+                    <p class="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wider">Fraud Risk Index</p>
+                    <p class="text-2xl font-bold text-gray-800 dark:text-white mt-1">{{ viewed_profile.dispute_fraud_risk_index }}%</p>
+                </div>
+                <div class="text-center p-3 bg-green-500/10 rounded-lg border border-green-500/20">
+                    <p class="text-xs font-semibold text-green-600 dark:text-green-400 uppercase tracking-wider">Completed / Taken</p>
+                    <p class="text-2xl font-bold text-gray-800 dark:text-white mt-1">{{ viewed_profile.tasks_completed }} / {{ viewed_profile.total_tasks_taken }}</p>
+                </div>
+                <div class="text-center p-3 bg-yellow-500/10 rounded-lg border border-yellow-500/20">
+                    <p class="text-xs font-semibold text-yellow-600 dark:text-yellow-400 uppercase tracking-wider">Abandoned / Disputes</p>
+                    <p class="text-2xl font-bold text-gray-800 dark:text-white mt-1">{{ viewed_profile.tasks_abandoned }} / {{ viewed_profile.disputes_raised }}</p>
+                </div>
+            </div>
+        </div>
+
         <!-- Friendship Settings Section (Visible only if friends) -->
         {% if is_friend and friendship %}
         <div>
