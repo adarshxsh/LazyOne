@@ -4,6 +4,13 @@ from django.utils import timezone
 
 # Create your models here.
 class UserProfile(models.Model):
+    RISK_TIER_CHOICES = (
+        ('LOW', 'Low Risk'),
+        ('MEDIUM', 'Medium Risk'),
+        ('HIGH', 'High Risk'),
+        ('CRITICAL', 'Critical Risk'),
+    )
+
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     bio = models.CharField(max_length=300,blank=True)
     first_name = models.CharField(max_length=50, blank=True)
@@ -21,12 +28,97 @@ class UserProfile(models.Model):
     instagram_username = models.CharField(max_length=100, blank=True)
     is_instagram_verified = models.BooleanField(default=False)
     
+    # Reputation Engine & Dynamic Governance Fields
+    reputation_score = models.IntegerField(default=100)
+    completed_tasks_count = models.PositiveIntegerField(default=0)
+    abandoned_tasks_count = models.PositiveIntegerField(default=0)
+    disputes_raised_count = models.PositiveIntegerField(default=0)
+    disputes_won_count = models.PositiveIntegerField(default=0)
+    disputes_lost_count = models.PositiveIntegerField(default=0)
+    risk_tier = models.CharField(max_length=20, choices=RISK_TIER_CHOICES, default='LOW')
+
     # Fields for Email OTP Verification
     email_otp = models.CharField(max_length=6, blank=True, null=True)
     email_otp_created_at = models.DateTimeField(blank=True, null=True)
 
     def __str__(self):
         return self.user.username
+
+    @property
+    def tasks_completed(self):
+        return self.completed_tasks_count
+
+    @tasks_completed.setter
+    def tasks_completed(self, value):
+        self.completed_tasks_count = value
+
+    @property
+    def tasks_abandoned(self):
+        return self.abandoned_tasks_count
+
+    @tasks_abandoned.setter
+    def tasks_abandoned(self, value):
+        self.abandoned_tasks_count = value
+
+    @property
+    def disputes_raised(self):
+        return self.disputes_raised_count
+
+    @disputes_raised.setter
+    def disputes_raised(self, value):
+        self.disputes_raised_count = value
+
+    @property
+    def disputes_won(self):
+        return self.disputes_won_count
+
+    @disputes_won.setter
+    def disputes_won(self, value):
+        self.disputes_won_count = value
+
+    @property
+    def disputes_lost(self):
+        return self.disputes_lost_count
+
+    @disputes_lost.setter
+    def disputes_lost(self, value):
+        self.disputes_lost_count = value
+
+    @property
+    def fraud_risk_tier(self):
+        return self.risk_tier
+
+    @property
+    def completion_percentage(self):
+        total = self.completed_tasks_count + self.abandoned_tasks_count
+        if total == 0:
+            return 100.0
+        return round((self.completed_tasks_count / total) * 100, 1)
+
+    @property
+    def completion_rate(self):
+        return self.completion_percentage
+
+    @property
+    def dispute_win_rate(self):
+        total = self.disputes_won_count + self.disputes_lost_count
+        if total == 0:
+            return 100.0
+        return round((self.disputes_won_count / total) * 100, 1)
+
+    @property
+    def trust_badge(self):
+        tier = self.risk_tier.upper() if self.risk_tier else 'LOW'
+        if tier == 'LOW' and self.reputation_score >= 150:
+            return 'Trusted Pro'
+        elif tier == 'LOW':
+            return 'Trusted'
+        elif tier == 'MEDIUM':
+            return 'Standard'
+        elif tier == 'HIGH':
+            return 'High Risk'
+        else:
+            return 'Critical Risk'
 
 class Task(models.Model):
     STATUS_CHOICES = (
@@ -46,6 +138,8 @@ class Task(models.Model):
     deadline = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='available')
     cancellation_requested = models.BooleanField(default=False)
+    poster_collateral = models.PositiveIntegerField(default=0)
+    taker_collateral = models.PositiveIntegerField(default=0)
 
     def __str__(self):
         return self.title
@@ -60,16 +154,31 @@ class RewardLedger(models.Model):
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('collateral_lock', 'Collateral Locked'),
+        ('collateral_refund', 'Collateral Refunded'),
+        ('collateral_forfeit', 'Collateral Forfeited'),
+        ('reputation_adjustment', 'Reputation Adjustment'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=30, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.user.username}: {self.amount} points for {self.description}"
+
+class ReputationLog(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reputation_logs')
+    change = models.IntegerField()
+    new_score = models.IntegerField()
+    reason = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='moderated_reputation_logs')
+
+    def __str__(self):
+        return f"{self.user.username}: {self.change:+} (Score: {self.new_score}) - {self.reason}"
 
 class Dispute(models.Model):
     STATUS_CHOICES = (
