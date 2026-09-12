@@ -9,6 +9,7 @@
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
             <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-sm text-gray-400 mt-1"><strong>Escrow Balance Reserved:</strong> <span class="font-bold text-cyan-300">{{ task.reward }} points</span></p>
         </div>
 
         <div>
@@ -22,6 +23,89 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if dispute.status == 'open' %}
+            <div class="bg-gray-800/60 p-6 rounded-lg border border-gray-700 space-y-4">
+                <h3 class="text-xl font-semibold text-cyan-400">Settlement Negotiation</h3>
+
+                {% if dispute.offered_doer_amount is not None %}
+                    <div class="bg-gray-900/80 p-4 rounded-md border border-cyan-500/30 space-y-2">
+                        <p class="font-medium text-white">Active Settlement Proposal</p>
+                        <p><strong>Proposed Doer Payout:</strong> <span class="text-green-400 font-bold">{{ dispute.offered_doer_amount }} points</span></p>
+                        <p><strong>Implied Poster Refund:</strong> <span class="text-blue-400 font-bold">{{ dispute.offered_poster_amount }} points</span></p>
+                        <p><strong>Proposed By:</strong> {{ dispute.offered_by.username }}</p>
+
+                        {% if request.user != dispute.offered_by and request.user == task.posted_by or request.user == task.taken_by and request.user != dispute.offered_by %}
+                            <div class="flex gap-4 pt-2">
+                                <form method="POST" action="{% url 'accept_settlement' dispute.id %}">
+                                    {% csrf_token %}
+                                    <button type="submit" class="bg-green-600 hover:bg-green-500 text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                                        Accept Proposal
+                                    </button>
+                                </form>
+
+                                <form method="POST" action="{% url 'reject_settlement' dispute.id %}">
+                                    {% csrf_token %}
+                                    <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                                        Reject Proposal
+                                    </button>
+                                </form>
+                            </div>
+                        {% elif request.user == dispute.offered_by %}
+                            <p class="text-sm text-yellow-400 italic">You submitted this proposal. Awaiting response or counter-offer from the counterparty.</p>
+                        {% endif %}
+                    </div>
+                {% else %}
+                    <p class="text-gray-400">No active settlement proposal pending.</p>
+                {% endif %}
+
+                {% if request.user == task.posted_by or request.user == task.taken_by %}
+                    <div class="pt-4 border-t border-gray-700">
+                        <h4 class="text-lg font-medium text-white mb-2">
+                            {% if dispute.offered_doer_amount is not None %}
+                                Submit Counter-Proposal
+                            {% else %}
+                                Propose Settlement Split
+                            {% endif %}
+                        </h4>
+                        <form method="POST" action="{% url 'propose_settlement' dispute.id %}" class="flex flex-col sm:flex-row gap-3 items-end">
+                            {% csrf_token %}
+                            <div class="w-full sm:w-auto flex-1">
+                                <label for="offered_doer_amount" class="block text-sm font-medium text-gray-300 mb-1">
+                                    Proposed Doer Payout (0 to {{ task.reward }} points):
+                                </label>
+                                <input type="number" id="offered_doer_amount" name="offered_doer_amount" min="0" max="{{ task.reward }}" step="1" required
+                                       class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500"
+                                       placeholder="e.g. 60">
+                            </div>
+                            <button type="submit" class="w-full sm:w-auto bg-cyan-600 hover:bg-cyan-500 text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                                {% if dispute.offered_doer_amount is not None %}Submit Counter-Offer{% else %}Submit Proposal{% endif %}
+                            </button>
+                        </form>
+                    </div>
+                {% endif %}
+
+                {% if request.user == dispute.raised_by %}
+                    <div class="pt-4 border-t border-gray-700">
+                        <form method="POST" action="{% url 'withdraw_dispute' dispute.id %}">
+                            {% csrf_token %}
+                            <button type="submit" class="text-sm text-gray-400 hover:text-white underline">
+                                Withdraw Dispute
+                            </button>
+                        </form>
+                    </div>
+                {% endif %}
+            </div>
+        {% else %}
+            <div class="bg-gray-800/60 p-6 rounded-lg border border-gray-700 space-y-3">
+                <h3 class="text-xl font-semibold text-cyan-400">Resolution Summary</h3>
+                {% if dispute.resolution_type %}
+                    <p><strong>Resolution Type:</strong> {{ dispute.get_resolution_type_display }}</p>
+                {% endif %}
+                <p><strong>Resolved Doer Payout:</strong> <span class="text-green-400 font-bold">{{ dispute.resolved_doer_amount|default:"0" }} points</span></p>
+                <p><strong>Resolved Poster Refund:</strong> <span class="text-blue-400 font-bold">{{ dispute.resolved_poster_amount|default:"0" }} points</span></p>
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}
