@@ -1,6 +1,10 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from datetime import timedelta
+
+def default_dispute_expiration():
+    return timezone.now() + timedelta(days=7)
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -81,9 +85,26 @@ class Dispute(models.Model):
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(default=default_dispute_expiration)
+
+    def save(self, *args, **kwargs):
+        if not self.expires_at:
+            self.expires_at = default_dispute_expiration()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidence_items')
+    uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_evidences')
+    file = models.FileField(upload_to='dispute_evidence/', null=True, blank=True)
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Evidence by {self.uploaded_by.username} for Dispute #{self.dispute.id}"
+
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
