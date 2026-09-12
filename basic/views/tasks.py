@@ -1,6 +1,7 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.conf import settings
 from ..models import Task, Conversation, Notification, RewardLedger
 from django.db import transaction
 from django.urls import reverse
@@ -155,16 +156,34 @@ def accept_cancellation(request, task_id):
 @login_required(login_url='/login/')
 def abandon_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
+    penalty_percentage = getattr(settings, 'TASK_ABANDONMENT_PENALTY_PERCENTAGE', 20)
+    penalty = int(round(task.reward * (penalty_percentage / 100.0)))
     with transaction.atomic():
+        taker_profile = request.user.userprofile
+        taker_profile.rewards -= penalty
+        taker_profile.save()
+
+        RewardLedger.objects.create(
+            user=request.user,
+            task=task,
+            amount=-penalty,
+            transaction_type='task_abandonment',
+            description=f"Penalty for abandoned task: '{task.title}'"
+        )
+
+        if hasattr(task, 'dispute'):
+            task.dispute.delete()
+
         task.status = 'available'
         task.taken_by = None
         task.save()
+
         Notification.objects.create(
             recipient=task.posted_by,
             message=f"{request.user.username} has abandoned your task: '{task.title}'. It is now available again.",
             link=reverse('my_tasks')
         )
-        messages.success(request, "You have abandoned the task. It is now available for others.")
+        messages.success(request, f"You have abandoned the task. It is now available for others.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
