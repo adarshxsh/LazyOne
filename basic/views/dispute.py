@@ -4,6 +4,8 @@ from django.contrib import messages
 from ..models import Dispute, Task, Notification
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
@@ -34,11 +36,38 @@ def raise_dispute(request, task_id):
         dispute = Dispute.objects.create(task=task, raised_by=request.user, reason=reason)
         task.status = 'disputed'
         task.save()
-        Notification.objects.create(
+        notification = Notification.objects.create(
             recipient=task.posted_by,
             message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
             link=reverse('dispute_detail', args=[dispute.id])
         )
+
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            async_to_sync(channel_layer.group_send)(
+                f"dispute_{dispute.id}",
+                {
+                    "type": "dispute_message",
+                    "event_type": "dispute_updated",
+                    "dispute_id": dispute.id,
+                    "status": dispute.status,
+                    "status_display": dispute.get_status_display(),
+                    "raised_by": dispute.raised_by.username,
+                    "reason": dispute.reason,
+                    "message": f"Dispute raised for task: '{task.title}'."
+                }
+            )
+            async_to_sync(channel_layer.group_send)(
+                f"user_{task.posted_by.id}",
+                {
+                    "type": "notification_message",
+                    "event_type": "notification_event",
+                    "message": notification.message,
+                    "link": notification.link,
+                    "unread_count": Notification.objects.filter(recipient=task.posted_by, is_read=False).count()
+                }
+            )
+
         messages.success(request, "Dispute raised successfully.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
@@ -50,11 +79,37 @@ def withdraw_dispute(request, dispute_id):
     task = dispute.task
     task.status = 'in_progress'
     task.save()
+    dispute_id_val = dispute.id
     dispute.delete()
-    Notification.objects.create(
+    notification = Notification.objects.create(
         recipient=task.posted_by,
         message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
         link=reverse('my_tasks')
     )
+
+    channel_layer = get_channel_layer()
+    if channel_layer:
+        async_to_sync(channel_layer.group_send)(
+            f"dispute_{dispute_id_val}",
+            {
+                "type": "dispute_message",
+                "event_type": "dispute_updated",
+                "dispute_id": dispute_id_val,
+                "status": "withdrawn",
+                "status_display": "Withdrawn",
+                "message": f"{request.user.username} has withdrawn the dispute for '{task.title}'."
+            }
+        )
+        async_to_sync(channel_layer.group_send)(
+            f"user_{task.posted_by.id}",
+            {
+                "type": "notification_message",
+                "event_type": "notification_event",
+                "message": notification.message,
+                "link": notification.link,
+                "unread_count": Notification.objects.filter(recipient=task.posted_by, is_read=False).count()
+            }
+        )
+
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'.")
     return redirect('my_tasks')
