@@ -60,11 +60,17 @@ class RewardLedger(models.Model):
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('dispute_payout', 'Dispute Settlement Payout'),
+        ('dispute_refund', 'Dispute Settlement Refund'),
+        ('dispute_settlement', 'Dispute Settlement'),
+        ('dispute_settlement_poster', 'Dispute Settlement (Poster)'),
+        ('dispute_settlement_taker', 'Dispute Settlement (Taker)'),
+        ('juror_reward', 'Juror Voting Reward'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -80,10 +86,62 @@ class Dispute(models.Model):
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    quorum_threshold = models.PositiveIntegerField(default=3)
+    winner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='won_disputes')
+    resolved_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def get_required_quorum(self):
+        non_participants_count = User.objects.exclude(
+            id__in=[self.task.posted_by_id, self.task.taken_by_id if self.task.taken_by_id else -1]
+        ).count()
+        if non_participants_count > 0:
+            return min(self.quorum_threshold, non_participants_count)
+        return self.quorum_threshold
+
+    @property
+    def total_votes(self):
+        return self.votes.count()
+
+    @property
+    def poster_votes(self):
+        return self.votes.filter(models.Q(vote_choice='poster') | models.Q(voted_for=self.task.posted_by)).count()
+
+    @property
+    def taker_votes(self):
+        return self.votes.filter(models.Q(vote_choice='taker') | models.Q(voted_for=self.task.taken_by)).count()
+
+class JuryAssignment(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='jury_assignments')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jury_assignments')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Juror {self.juror.username} assigned to Dispute #{self.dispute.id}"
+
+class DisputeVote(models.Model):
+    VOTE_CHOICES = (
+        ('poster', 'In Favor of Task Poster'),
+        ('taker', 'In Favor of Task Taker'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    voted_for = models.ForeignKey(User, on_delete=models.CASCADE, related_name='votes_received', null=True, blank=True)
+    vote_choice = models.CharField(max_length=10, choices=VOTE_CHOICES, blank=True, null=True)
+    reason = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Vote by {self.juror.username} on Dispute #{self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
