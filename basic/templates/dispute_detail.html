@@ -13,7 +13,7 @@
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% elif dispute.status == 'resolved' %}bg-green-500/20 text-green-300{% else %}bg-purple-500/20 text-purple-300{% endif %}">{{ dispute.get_status_display }}</span></p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
         </div>
@@ -22,6 +22,95 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if dispute.resolution_ruling or dispute.resolved_by %}
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400">Administrative Ruling</h3>
+            <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-1">
+                <p><strong>Ruling:</strong> {{ dispute.resolution_ruling }}</p>
+                {% if dispute.resolved_by %}<p><strong>Adjudicated By:</strong> {{ dispute.resolved_by.username }}</p>{% endif %}
+                {% if dispute.resolved_at %}<p><strong>Adjudicated At:</strong> {{ dispute.resolved_at|date:"F d, Y H:i" }}</p>{% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if can_resolve %}
+        <div class="bg-gray-800 p-6 rounded-lg border border-cyan-500/30">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-3">Admin Adjudication</h3>
+            <form action="{% url 'resolve_dispute' dispute.id %}" method="post" class="space-y-4">
+                {% csrf_token %}
+                <div>
+                    <label class="block text-sm font-medium mb-1">Select Adjudication Ruling:</label>
+                    <select name="ruling" required class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white">
+                        <option value="payout_taker">Payout Taker (Complete Task)</option>
+                        <option value="refund_poster">Refund Poster (Cancel Task)</option>
+                        <option value="split">Split Points</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Resolution Notes (Optional):</label>
+                    <textarea name="resolution_notes" rows="3" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white"></textarea>
+                </div>
+                <button type="submit" class="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors">Submit Ruling</button>
+            </form>
+        </div>
+        {% endif %}
+
+        {% if dispute.appeal_status and dispute.appeal_status != 'none' %}
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400">Appeal Details</h3>
+            <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-1">
+                <p><strong>Appeal Status:</strong> <span class="font-semibold text-yellow-400">{{ dispute.get_appeal_status_display }}</span></p>
+                {% if dispute.appeal_filed_by %}<p><strong>Filed By:</strong> {{ dispute.appeal_filed_by.username }}</p>{% endif %}
+                {% if dispute.appeal_filed_at %}<p><strong>Filed At:</strong> {{ dispute.appeal_filed_at|date:"F d, Y H:i" }}</p>{% endif %}
+                {% if dispute.appeal_reason %}<p><strong>Reason:</strong> {{ dispute.appeal_reason }}</p>{% endif %}
+                {% if dispute.appeal_resolution_notes %}<p><strong>Review Notes:</strong> {{ dispute.appeal_resolution_notes }}</p>{% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if can_appeal %}
+        <div class="bg-gray-800 p-6 rounded-lg border border-yellow-500/30">
+            <h3 class="text-xl font-semibold text-yellow-400 mb-3">File an Appeal</h3>
+            <form action="{% url 'appeal_dispute' dispute.id %}" method="post" class="space-y-4">
+                {% csrf_token %}
+                <div>
+                    <label class="block text-sm font-medium mb-1">Reason for Appeal:</label>
+                    <textarea name="appeal_reason" rows="4" required class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white" placeholder="Explain why this dispute ruling should be reviewed..."></textarea>
+                </div>
+                <button type="submit" class="bg-yellow-600 hover:bg-yellow-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors">Submit Appeal</button>
+            </form>
+        </div>
+        {% endif %}
+
+        {% if can_review_appeal %}
+        <div class="bg-gray-800 p-6 rounded-lg border border-purple-500/30">
+            <h3 class="text-xl font-semibold text-purple-400 mb-3">Admin Appeal Review</h3>
+            <form action="{% url 'review_appeal' dispute.id %}" method="post" class="space-y-4">
+                {% csrf_token %}
+                <div>
+                    <label class="block text-sm font-medium mb-1">Action:</label>
+                    <select name="action" required class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white">
+                        <option value="reject">Reject Appeal (Confirm Original Decision)</option>
+                        <option value="approve">Approve Appeal (Overturn Decision)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Corrective Action (If Overturning):</label>
+                    <select name="corrective_action" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white">
+                        <option value="">None (Keep existing)</option>
+                        <option value="refund_poster">Refund Poster</option>
+                        <option value="payout_taker">Payout Taker</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Resolution Notes:</label>
+                    <textarea name="notes" rows="3" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white"></textarea>
+                </div>
+                <button type="submit" class="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors">Finalize Appeal Decision</button>
+            </form>
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}
