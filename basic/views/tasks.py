@@ -140,16 +140,15 @@ def accept_cancellation(request, task_id):
             user=task.posted_by, task=task, amount=task.reward,
             transaction_type='task_cancellation', description=f"Refund for cancelled task: '{task.title}'"
         )
-        task.status = 'available'
-        task.taken_by = None
+        task.status = 'cancelled'
         task.cancellation_requested = False
         task.save()
         Notification.objects.create(
             recipient=task.posted_by,
-            message=f"{request.user.username} accepted your cancellation request for '{task.title}'. The task is now available again.",
+            message=f"{request.user.username} accepted your cancellation request for '{task.title}'. The task is now cancelled.",
             link=reverse('my_tasks')
         )
-        messages.success(request, "You have accepted the cancellation. The task is now available for others.")
+        messages.success(request, "You have accepted the cancellation. The task is now cancelled.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
