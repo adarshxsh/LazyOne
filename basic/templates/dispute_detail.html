@@ -8,20 +8,145 @@
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a> (Reward: {{ dispute.task.reward }} pts)</p>
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Status:</strong> 
+                <span class="px-2 py-1 text-sm rounded-full 
+                    {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300
+                    {% elif dispute.status == 'appealed' %}bg-purple-500/20 text-purple-300
+                    {% else %}bg-green-500/20 text-green-300{% endif %}">
+                    {{ dispute.get_status_display }}
+                </span>
+            </p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y H:i" }}</p>
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if dispute.resolution_type %}
+        <div class="border-t border-gray-700 pt-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Arbitration Ruling</h3>
+            <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-2 mt-2">
+                <p><strong>Decision:</strong> {{ dispute.get_resolution_type_display }}</p>
+                <p><strong>Resolved By:</strong> {{ dispute.resolved_by.username }}</p>
+                <p><strong>Resolved At:</strong> {{ dispute.resolved_at|date:"F d, Y H:i" }}</p>
+                {% if dispute.resolution_notes %}
+                <p><strong>Arbitrator Notes:</strong> {{ dispute.resolution_notes|linebreaksbr }}</p>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if request.user.is_staff and dispute.status == 'open' %}
+        <div class="border-t border-gray-700 pt-4">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-3">Staff Arbitration Controls</h3>
+            <form action="{% url 'resolve_dispute' dispute.id %}" method="POST" class="bg-gray-800 p-4 rounded-lg border border-gray-700 space-y-4">
+                {% csrf_token %}
+                <div>
+                    <label class="block font-semibold mb-1">Select Resolution Outcome:</label>
+                    <select name="resolution_type" required class="bg-gray-900 border border-gray-700 text-white rounded px-3 py-2 w-full">
+                        <option value="">-- Select Outcome --</option>
+                        <option value="poster_wins">Poster Wins (Refund 100%)</option>
+                        <option value="taker_wins">Taker Wins (Payout 100%)</option>
+                        <option value="split">Split Decision (50 / 50 Split)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-semibold mb-1">Arbitration Notes:</label>
+                    <textarea name="resolution_notes" rows="3" class="bg-gray-900 border border-gray-700 text-white rounded p-3 w-full" placeholder="Explain the rationale for this decision..."></textarea>
+                </div>
+                <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white font-semibold px-4 py-2 rounded">
+                    Submit Arbitration Ruling
+                </button>
+            </form>
+        </div>
+        {% endif %}
+
+        {% if dispute.appeal_status != 'none' %}
+        <div class="border-t border-gray-700 pt-4">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Appeal Information</h3>
+            <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-2">
+                <p><strong>Appeal Status:</strong> 
+                    <span class="px-2 py-1 text-sm rounded-full 
+                        {% if dispute.appeal_status == 'appealed' %}bg-yellow-500/20 text-yellow-300
+                        {% elif dispute.appeal_status == 'upheld' %}bg-blue-500/20 text-blue-300
+                        {% elif dispute.appeal_status == 'overturned' %}bg-green-500/20 text-green-300{% endif %}">
+                        {{ dispute.get_appeal_status_display }}
+                    </span>
+                </p>
+                <p><strong>Appealed By:</strong> {{ dispute.appealed_by.username }}</p>
+                <p><strong>Appealed At:</strong> {{ dispute.appealed_at|date:"F d, Y H:i" }}</p>
+                <p><strong>Appeal Reason:</strong> {{ dispute.appeal_reason|linebreaksbr }}</p>
+
+                {% if dispute.appeal_reviewed_by %}
+                <div class="border-t border-gray-700 pt-2 mt-2">
+                    <p><strong>Reviewed By:</strong> {{ dispute.appeal_reviewed_by.username }}</p>
+                    {% if dispute.appeal_notes %}
+                    <p><strong>Appellate Review Notes:</strong> {{ dispute.appeal_notes|linebreaksbr }}</p>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if request.user == task.posted_by or request.user == task.taken_by %}
+            {% if dispute.status == 'resolved' and dispute.appeal_status == 'none' and is_appeal_window_active %}
+            <div class="border-t border-gray-700 pt-4">
+                <h3 class="text-xl font-semibold text-cyan-400 mb-3">Submit Appeal</h3>
+                <form action="{% url 'submit_appeal' dispute.id %}" method="POST" class="bg-gray-800 p-4 rounded-lg border border-gray-700 space-y-4">
+                    {% csrf_token %}
+                    <div>
+                        <label class="block font-semibold mb-1">Reason for Appeal:</label>
+                        <textarea name="appeal_reason" rows="3" required class="bg-gray-900 border border-gray-700 text-white rounded p-3 w-full" placeholder="Provide clear reasoning for appealing this ruling..."></textarea>
+                    </div>
+                    <button type="submit" class="bg-purple-600 hover:bg-purple-500 text-white font-semibold px-4 py-2 rounded">
+                        File Appeal
+                    </button>
+                </form>
+            </div>
+            {% endif %}
+        {% endif %}
+
+        {% if request.user.is_staff and dispute.appeal_status == 'appealed' %}
+        <div class="border-t border-gray-700 pt-4">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-3">Senior Staff Appeal Review</h3>
+            <form action="{% url 'review_appeal' dispute.id %}" method="POST" class="bg-gray-800 p-4 rounded-lg border border-gray-700 space-y-4">
+                {% csrf_token %}
+                <div>
+                    <label class="block font-semibold mb-1">Action:</label>
+                    <select name="action" required class="bg-gray-900 border border-gray-700 text-white rounded px-3 py-2 w-full">
+                        <option value="">-- Select Review Action --</option>
+                        <option value="uphold">Uphold Original Decision</option>
+                        <option value="overturn">Overturn Decision</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-semibold mb-1">New Resolution Outcome (Required if Overturning):</label>
+                    <select name="new_resolution_type" class="bg-gray-900 border border-gray-700 text-white rounded px-3 py-2 w-full">
+                        <option value="">-- Select New Outcome (Default reverse) --</option>
+                        <option value="poster_wins">Poster Wins</option>
+                        <option value="taker_wins">Taker Wins</option>
+                        <option value="split">Split Decision</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-semibold mb-1">Appellate Notes:</label>
+                    <textarea name="appeal_notes" rows="3" class="bg-gray-900 border border-gray-700 text-white rounded p-3 w-full" placeholder="Explain appeal review conclusion..."></textarea>
+                </div>
+                <button type="submit" class="bg-green-600 hover:bg-green-500 text-white font-semibold px-4 py-2 rounded">
+                    Submit Appeal Decision
+                </button>
+            </form>
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}
