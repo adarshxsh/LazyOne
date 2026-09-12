@@ -150,6 +150,72 @@
         </div>
     </main>
 
+    {% if user.is_authenticated %}
+    <div id="ws-dispute-toast" class="hidden fixed bottom-6 right-6 z-50 p-4 max-w-md rounded-xl shadow-2xl bg-cyan-600 text-white border border-cyan-400 font-medium transition-all duration-300 flex justify-between items-start space-x-3">
+        <div id="ws-dispute-toast-content"></div>
+        <button onclick="document.getElementById('ws-dispute-toast').classList.add('hidden')" class="text-white hover:text-gray-200 font-bold text-lg leading-none">&times;</button>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+        const wsUrl = wsProtocol + window.location.host + '/ws/user/';
+        let userSocket = null;
+        let reconnectCount = 0;
+
+        function showToast(data) {
+            const toast = document.getElementById('ws-dispute-toast');
+            const toastContent = document.getElementById('ws-dispute-toast-content');
+            if (toast && toastContent && data.message) {
+                let html = `<p class="font-bold">${data.event === 'dispute_created' ? 'Dispute Raised!' : 'Dispute Update'}</p><p class="text-sm mt-1">${data.message}</p>`;
+                if (data.link) {
+                    html += `<a href="${data.link}" class="inline-block mt-2 text-xs bg-white text-cyan-700 font-semibold px-3 py-1 rounded hover:bg-cyan-50">View Details</a>`;
+                }
+                toastContent.innerHTML = html;
+                toast.classList.remove('hidden');
+            }
+        }
+
+        function connectUserWs() {
+            try {
+                userSocket = new WebSocket(wsUrl);
+
+                userSocket.onopen = function() {
+                    reconnectCount = 0;
+                };
+
+                userSocket.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        showToast(data);
+                        if (typeof window.onDisputeWebSocketEvent === 'function') {
+                            window.onDisputeWebSocketEvent(data);
+                        }
+                    } catch (e) {
+                        console.error("Error handling user WS message", e);
+                    }
+                };
+
+                userSocket.onclose = function() {
+                    if (reconnectCount < 5) {
+                        reconnectCount++;
+                        setTimeout(connectUserWs, 1000 * Math.pow(2, reconnectCount));
+                    }
+                };
+
+                userSocket.onerror = function() {
+                    if (userSocket) userSocket.close();
+                };
+            } catch (e) {
+                console.error("User WS connection error", e);
+            }
+        }
+
+        connectUserWs();
+    });
+    </script>
+    {% endif %}
+
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             // Mobile menu toggle
