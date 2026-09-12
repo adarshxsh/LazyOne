@@ -22,6 +22,15 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if dispute.status == 'open' and dispute.raised_by == request.user %}
+        <div class="pt-4">
+            <form action="{% url 'withdraw_dispute' dispute.id %}" method="post" class="inline">
+                {% csrf_token %}
+                <button type="submit" class="bg-gray-600 hover:bg-gray-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors text-sm">Withdraw Dispute</button>
+            </form>
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}
