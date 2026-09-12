@@ -155,16 +155,30 @@ def accept_cancellation(request, task_id):
 @login_required(login_url='/login/')
 def abandon_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
+    penalty = max(0, max(int(task.reward * 0.20), 10))
     with transaction.atomic():
+        user_profile = request.user.userprofile
+        user_profile.rewards -= penalty
+        user_profile.save()
+
+        RewardLedger.objects.create(
+            user=request.user,
+            task=task,
+            amount=-penalty,
+            transaction_type='task_abandonment',
+            description=f"Penalty for abandoning task: '{task.title}'"
+        )
+
         task.status = 'available'
         task.taken_by = None
         task.save()
+
         Notification.objects.create(
             recipient=task.posted_by,
             message=f"{request.user.username} has abandoned your task: '{task.title}'. It is now available again.",
             link=reverse('my_tasks')
         )
-        messages.success(request, "You have abandoned the task. It is now available for others.")
+        messages.success(request, f"You have abandoned the task. A penalty of {penalty} points has been deducted.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
