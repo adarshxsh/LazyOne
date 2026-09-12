@@ -23,11 +23,20 @@ def chat_view(request, conversation_id):
         messages.error(request, "Chat not found.")
         return redirect('home')
 
-    if request.user not in conversation.participants.all():
-        logger.warning("Step 2: User is not a participant. Redirecting to home.")
+    is_participant = conversation.participants.filter(id=request.user.id).exists()
+    is_juror = False
+
+    if not is_participant:
+        if conversation.task and hasattr(conversation.task, 'dispute') and conversation.task.dispute.status == 'open':
+            dispute = conversation.task.dispute
+            if hasattr(dispute, 'jury_pool') and dispute.jury_pool.jurors.filter(id=request.user.id).exists():
+                is_juror = True
+
+    if not is_participant and not is_juror and not request.user.is_staff:
+        logger.warning("Step 2: User is not authorized. Redirecting to home.")
         messages.error(request, "You are not authorized to view this chat.")
         return redirect('home') # Redirect to home page
-    logger.info("Step 2: User is a valid participant.")
+    logger.info("Step 2: User authorized (Participant or Assigned Juror).")
 
     try:
         # This is for the Django-based message system, which we are bypassing for Firestore.
@@ -49,7 +58,8 @@ def chat_view(request, conversation_id):
     except Exception as e:
         logger.error(f"ERROR at Step 4 (Marking notifications): {e}")
 
-    context = {'conversation': conversation, 'messages': messages_list}
+    is_read_only = is_juror or not is_participant
+    context = {'conversation': conversation, 'messages': messages_list, 'is_read_only': is_read_only, 'is_juror': is_juror}
     
     logger.info(f"--- CHAT_VIEW END: Successfully rendering template. ---")
     return render(request, 'chat.html', context)
@@ -59,7 +69,7 @@ def chat_view(request, conversation_id):
 def send_message(request, conversation_id):
     if request.method == 'POST':
         conversation = get_object_or_404(Conversation, id=conversation_id)
-        if request.user not in conversation.participants.all():
+        if not conversation.participants.filter(id=request.user.id).exists():
             return HttpResponseForbidden("You are not authorized to send messages in this chat.")
         
         content = request.POST.get('content')
