@@ -50,6 +50,10 @@ class Task(models.Model):
     def __str__(self):
         return self.title
 
+    def calculate_deposit_bond(self):
+        import math
+        return max(10, int(math.ceil(self.reward * 0.20)))
+
     @property
     def main_chat(self):
         return self.conversations.first()
@@ -60,11 +64,13 @@ class RewardLedger(models.Model):
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('dispute_deposit_hold', 'Dispute Deposit Hold'),
+        ('dispute_deposit_refund', 'Dispute Deposit Refund'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -76,14 +82,26 @@ class Dispute(models.Model):
         ('open', 'Open'),
         ('resolved', 'Resolved'),
     )
+    BOND_STATUS_CHOICES = (
+        ('held', 'Held'),
+        ('refunded', 'Refunded'),
+        ('forfeited', 'Forfeited'),
+    )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    deposit_amount = models.PositiveIntegerField(default=0)
+    bond_status = models.CharField(max_length=20, choices=BOND_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    @staticmethod
+    def calculate_deposit_bond(reward_amount):
+        import math
+        return max(10, int(math.ceil(reward_amount * 0.20)))
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
