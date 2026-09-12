@@ -60,11 +60,19 @@ class RewardLedger(models.Model):
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('dispute_settlement', 'Dispute Settlement'),
+        ('dispute_payout', 'Dispute Payout'),
+        ('dispute_refund', 'Dispute Refund'),
+        ('dispute_split', 'Dispute Split'),
+        ('appeal_payout', 'Appeal Payout'),
+        ('appeal_refund', 'Appeal Refund'),
+        ('dispute_settlement_poster', 'Dispute Settlement Poster'),
+        ('dispute_settlement_taker', 'Dispute Settlement Taker'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -75,6 +83,15 @@ class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
         ('resolved', 'Resolved'),
+        ('under_appeal', 'Under Appeal'),
+        ('appeal_closed', 'Appeal Closed'),
+    )
+    APPEAL_STATUS_CHOICES = (
+        ('none', 'None'),
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+        ('overturned', 'Overturned'),
     )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
@@ -82,8 +99,30 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     created_at = models.DateTimeField(auto_now_add=True)
 
+    # Arbitration details
+    resolution_ruling = models.CharField(max_length=100, blank=True, null=True)
+    resolved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='resolved_disputes')
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    # Appeal tracking details
+    appeal_status = models.CharField(max_length=20, choices=APPEAL_STATUS_CHOICES, default='none', blank=True, null=True)
+    appeal_reason = models.TextField(blank=True, null=True)
+    appeal_filed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='filed_appeals')
+    appeal_filed_at = models.DateTimeField(null=True, blank=True)
+    appeal_resolution_notes = models.TextField(blank=True, null=True)
+
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    @property
+    def is_appealable(self):
+        if self.status != 'resolved':
+            return False
+        if self.appeal_status and self.appeal_status != 'none':
+            return False
+        if not self.resolved_at:
+            return False
+        return timezone.now() <= self.resolved_at + timezone.timedelta(days=7)
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
