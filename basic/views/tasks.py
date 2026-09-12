@@ -132,6 +132,9 @@ def request_cancellation(request, task_id):
 @login_required(login_url='/login/')
 def accept_cancellation(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, cancellation_requested=True)
+    if task.status != 'in_progress':
+        messages.error(request, "Cannot accept cancellation for a task that is not in progress.")
+        return redirect('my_tasks')
     with transaction.atomic():
         poster_profile = task.posted_by.userprofile
         poster_profile.rewards += task.reward
@@ -144,6 +147,8 @@ def accept_cancellation(request, task_id):
         task.taken_by = None
         task.cancellation_requested = False
         task.save()
+        if hasattr(task, 'dispute'):
+            task.dispute.delete()
         Notification.objects.create(
             recipient=task.posted_by,
             message=f"{request.user.username} accepted your cancellation request for '{task.title}'. The task is now available again.",
@@ -159,6 +164,8 @@ def abandon_task(request, task_id):
         task.status = 'available'
         task.taken_by = None
         task.save()
+        if hasattr(task, 'dispute'):
+            task.dispute.delete()
         Notification.objects.create(
             recipient=task.posted_by,
             message=f"{request.user.username} has abandoned your task: '{task.title}'. It is now available again.",
