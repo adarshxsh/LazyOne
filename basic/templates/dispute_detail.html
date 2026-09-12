@@ -13,7 +13,7 @@
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Status:</strong> <span id="dispute-status-badge" class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
         </div>
@@ -23,5 +23,54 @@
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
     </div>
+
+    <div id="dispute-alert-banner" class="hidden mt-4 p-4 rounded-lg font-medium text-sm"></div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const disputeId = "{{ dispute.id }}";
+            const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+            const wsUrl = protocol + window.location.host + '/ws/dispute/' + disputeId + '/';
+
+            function connectDisputeSocket() {
+                const disputeSocket = new WebSocket(wsUrl);
+
+                disputeSocket.onmessage = function(e) {
+                    try {
+                        const data = JSON.parse(e.data);
+                        if (data.event_type === 'dispute_updated' || data.type === 'dispute_message') {
+                            const badge = document.getElementById('dispute-status-badge');
+                            if (badge && data.status_display) {
+                                badge.textContent = data.status_display;
+                                if (data.status === 'open') {
+                                    badge.className = 'px-2 py-1 text-sm rounded-full bg-yellow-500/20 text-yellow-300';
+                                } else {
+                                    badge.className = 'px-2 py-1 text-sm rounded-full bg-green-500/20 text-green-300';
+                                }
+                            }
+                            const alertBanner = document.getElementById('dispute-alert-banner');
+                            if (alertBanner) {
+                                alertBanner.textContent = data.message || `Dispute status updated to ${data.status_display || data.status}`;
+                                alertBanner.className = 'mt-4 p-4 rounded-lg font-medium text-sm bg-blue-100 text-blue-700 border border-blue-200 dark:bg-blue-800/50 dark:text-blue-200 dark:border-blue-700/50';
+                                alertBanner.classList.remove('hidden');
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Error handling dispute websocket message:', err);
+                    }
+                };
+
+                disputeSocket.onclose = function(e) {
+                    setTimeout(connectDisputeSocket, 5000);
+                };
+
+                disputeSocket.onerror = function(err) {
+                    disputeSocket.close();
+                };
+            }
+
+            connectDisputeSocket();
+        });
+    </script>
 
 {% endblock %}

@@ -235,5 +235,70 @@
             });
         });
     </script>
+
+    {% if user.is_authenticated %}
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+            const wsUrl = protocol + window.location.host + '/ws/notifications/';
+
+            function connectNotificationSocket() {
+                const notifSocket = new WebSocket(wsUrl);
+
+                notifSocket.onmessage = function(e) {
+                    try {
+                        const data = JSON.parse(e.data);
+                        if (data.event_type === 'notification_event' || data.type === 'notification_message') {
+                            const navNotificationLinks = document.querySelectorAll('a[href="{% url 'notifications' %}"]');
+                            navNotificationLinks.forEach(link => {
+                                let badge = link.querySelector('.bg-red-500');
+                                if (!badge) {
+                                    badge = document.createElement('span');
+                                    badge.className = 'ml-2 h-2.5 w-2.5 rounded-full bg-red-500';
+                                    link.appendChild(badge);
+                                }
+                            });
+
+                            if (data.message) {
+                                showNotificationBanner(data.message);
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Error handling notification websocket message:', err);
+                    }
+                };
+
+                notifSocket.onclose = function(e) {
+                    setTimeout(connectNotificationSocket, 5000);
+                };
+
+                notifSocket.onerror = function(err) {
+                    notifSocket.close();
+                };
+            }
+
+            function showNotificationBanner(msg) {
+                let container = document.getElementById('notification-toast-container');
+                if (!container) {
+                    container = document.createElement('div');
+                    container.id = 'notification-toast-container';
+                    container.className = 'fixed bottom-4 right-4 z-50 space-y-2';
+                    document.body.appendChild(container);
+                }
+                const toast = document.createElement('div');
+                toast.className = 'bg-cyan-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center justify-between transition-all duration-300';
+                toast.innerHTML = `<span>${msg}</span><button onclick="this.parentElement.remove()" class="ml-4 font-bold">&times;</button>`;
+                container.appendChild(toast);
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.remove();
+                    }
+                }, 6000);
+            }
+
+            connectNotificationSocket();
+        });
+    </script>
+    {% endif %}
 </body>
 </html>
