@@ -8,19 +8,105 @@
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg font-medium text-white">{{ dispute.task.title }}</p>
+            {% if task.conversation %}
+                <div class="mt-2">
+                    <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-cyan-600 hover:bg-cyan-700 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-colors">View Chat Transcript (Read-Only)</a>
+                </div>
+            {% endif %}
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
             <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
+            <p><strong>Poster:</strong> {{ task.posted_by.username }} | <strong>Taker:</strong> {{ task.taken_by.username|default:"N/A" }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+        </div>
+
+        <!-- Community Jury Arbitration Panel -->
+        <div class="bg-gray-800/60 border border-gray-700 rounded-xl p-6 space-y-4">
+            <h3 class="text-xl font-bold text-cyan-400 flex items-center justify-between">
+                <span>Community Jury Arbitration</span>
+                <span class="text-sm font-normal text-gray-400">Votes Cast: {{ votes_cast }} / {{ total_jurors }}</span>
+            </h3>
+
+            {% if total_jurors > 0 %}
+                <div class="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
+                    {% widthratio votes_cast total_jurors 100 as progress_percent %}
+                    <div class="bg-cyan-500 h-3 rounded-full transition-all duration-300" style="width: {{ progress_percent }}%;"></div>
+                </div>
+                <div class="flex justify-between text-xs text-gray-400">
+                    <span>In favor of Poster ({{ task.posted_by.username }}): {{ poster_votes }}</span>
+                    <span>In favor of Taker ({{ task.taken_by.username }}): {{ taker_votes }}</span>
+                </div>
+            {% else %}
+                <p class="text-sm text-gray-400 italic">No jury pool assigned.</p>
+            {% endif %}
+
+            <!-- Juror Voting Section -->
+            {% if is_juror %}
+                <div class="mt-4 pt-4 border-t border-gray-700">
+                    <h4 class="text-lg font-semibold text-white mb-2">Juror Voting Panel</h4>
+                    {% if dispute.status == 'open' %}
+                        {% if user_vote %}
+                            <div class="bg-cyan-950/50 border border-cyan-800 text-cyan-300 p-4 rounded-lg text-sm">
+                                <strong>You have cast your vote:</strong> In favor of {{ user_vote.get_vote_display }}.
+                                {% if user_vote.rationale %}
+                                    <p class="mt-1 text-gray-300"><em>Rationale:</em> "{{ user_vote.rationale }}"</p>
+                                {% endif %}
+                            </div>
+                        {% else %}
+                            <form method="post" action="{% url 'cast_dispute_vote' dispute.id %}" class="space-y-4">
+                                {% csrf_token %}
+                                <div class="space-y-2">
+                                    <label class="block text-sm font-medium text-gray-300">Select Decision:</label>
+                                    <div class="flex flex-col space-y-2">
+                                        <label class="inline-flex items-center space-x-2 text-sm text-gray-200 cursor-pointer">
+                                            <input type="radio" name="vote" value="poster" required class="text-cyan-500 focus:ring-cyan-400">
+                                            <span>In favor of Poster (<strong>{{ task.posted_by.username }}</strong>) - Refund poster</span>
+                                        </label>
+                                        <label class="inline-flex items-center space-x-2 text-sm text-gray-200 cursor-pointer">
+                                            <input type="radio" name="vote" value="taker" required class="text-cyan-500 focus:ring-cyan-400">
+                                            <span>In favor of Taker (<strong>{{ task.taken_by.username }}</strong>) - Award points to taker</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label for="rationale" class="block text-sm font-medium text-gray-300 mb-1">Optional Rationale:</label>
+                                    <textarea name="rationale" id="rationale" rows="3" placeholder="Explain your decision..." class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-400 text-sm"></textarea>
+                                </div>
+                                <button type="submit" class="bg-cyan-500 hover:bg-cyan-600 text-white font-bold px-5 py-2 rounded-lg text-sm transition-colors">Submit Jury Vote</button>
+                            </form>
+                        {% endif %}
+                    {% else %}
+                        <p class="text-sm text-gray-400">Dispute is resolved. Voting is closed.</p>
+                    {% endif %}
+                </div>
+            {% endif %}
+
+            <!-- Vote History / Rationales -->
+            {% if votes %}
+                <div class="mt-4 pt-4 border-t border-gray-700 space-y-3">
+                    <h4 class="text-md font-semibold text-gray-300">Jury Votes & Rationales</h4>
+                    {% for vote in votes %}
+                        <div class="bg-gray-900/40 p-3 rounded-lg border border-gray-700/60 text-sm">
+                            <div class="flex justify-between items-center text-xs text-gray-400">
+                                <span class="font-medium text-gray-300">{{ vote.juror.username }}</span>
+                                <span class="px-2 py-0.5 rounded text-xs font-semibold {% if vote.vote == 'poster' %}bg-blue-500/20 text-blue-300{% else %}bg-purple-500/20 text-purple-300{% endif %}">{{ vote.get_vote_display }}</span>
+                            </div>
+                            {% if vote.rationale %}
+                                <p class="mt-2 text-gray-300 text-xs">"{{ vote.rationale }}"</p>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
         </div>
     </div>
 

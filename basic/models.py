@@ -135,3 +135,79 @@ class Notification(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+class JuryPool(models.Model):
+    dispute = models.OneToOneField(Dispute, on_delete=models.CASCADE, related_name='jury_pool')
+    jurors = models.ManyToManyField(User, related_name='jury_pools')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Jury Pool for {self.dispute}"
+
+    @classmethod
+    def create_for_dispute(cls, dispute, pool_size=5):
+        import random
+        from django.urls import reverse
+
+        excluded_ids = set()
+
+        # Exclude task participants and their friends
+        if dispute.task.posted_by:
+            excluded_ids.add(dispute.task.posted_by.id)
+            if hasattr(dispute.task.posted_by, 'userprofile'):
+                poster_p = dispute.task.posted_by.userprofile
+                excluded_ids.update(poster_p.friends.values_list('user__id', flat=True))
+                excluded_ids.update(Friendship.objects.filter(from_user=poster_p).values_list('to_user__user__id', flat=True))
+                excluded_ids.update(Friendship.objects.filter(to_user=poster_p).values_list('from_user__user__id', flat=True))
+
+        if dispute.task.taken_by:
+            excluded_ids.add(dispute.task.taken_by.id)
+            if hasattr(dispute.task.taken_by, 'userprofile'):
+                taker_p = dispute.task.taken_by.userprofile
+                excluded_ids.update(taker_p.friends.values_list('user__id', flat=True))
+                excluded_ids.update(Friendship.objects.filter(from_user=taker_p).values_list('to_user__user__id', flat=True))
+                excluded_ids.update(Friendship.objects.filter(to_user=taker_p).values_list('from_user__user__id', flat=True))
+
+        candidate_users = User.objects.exclude(id__in=excluded_ids).filter(is_active=True)
+        candidate_ids = list(candidate_users.values_list('id', flat=True))
+
+        selected_count = min(pool_size, len(candidate_ids))
+        if selected_count > 0:
+            selected_ids = random.sample(candidate_ids, selected_count)
+            selected_users = list(User.objects.filter(id__in=selected_ids))
+        else:
+            selected_users = []
+
+        jury_pool = cls.objects.create(dispute=dispute)
+        jury_pool.jurors.set(selected_users)
+
+        for juror in selected_users:
+            Notification.objects.create(
+                recipient=juror,
+                message=f"You have been selected as a juror for dispute on task: '{dispute.task.title}'.",
+                link=reverse('dispute_detail', args=[dispute.id])
+            )
+
+        return jury_pool
+
+
+class DisputeVote(models.Model):
+    VOTE_CHOICES = (
+        ('poster', 'In favor of Poster'),
+        ('taker', 'In favor of Taker'),
+    )
+
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    vote = models.CharField(max_length=10, choices=VOTE_CHOICES)
+    rationale = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Vote by {self.juror.username} on {self.dispute}: {self.vote}"
+
+
+RewardTransaction = RewardLedger
