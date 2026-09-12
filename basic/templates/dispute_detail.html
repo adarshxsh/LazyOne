@@ -13,7 +13,10 @@
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full bg-cyan-500/20 text-cyan-300">{{ dispute.get_status_display }}</span></p>
+            {% if dispute.resolution_outcome %}
+                <p><strong>Resolution Outcome:</strong> <span class="text-green-400 font-bold">{{ dispute.get_resolution_outcome_display }}</span></p>
+            {% endif %}
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
         </div>
@@ -22,6 +25,93 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
-    </div>
 
+        <!-- Evidence Section -->
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Submitted Evidence</h3>
+            {% if evidence_list %}
+                <div class="space-y-3 mb-4">
+                    {% for item in evidence_list %}
+                        <div class="bg-gray-800/80 p-4 rounded-lg border border-gray-700">
+                            <div class="text-sm text-cyan-300 mb-1 font-semibold">{{ item.submitted_by.username }} &bull; {{ item.created_at|date:"M d, Y H:i" }}</div>
+                            <p class="text-gray-200">{{ item.evidence_text }}</p>
+                            {% if item.evidence_url %}
+                                <p class="mt-2 text-sm"><a href="{{ item.evidence_url }}" target="_blank" class="text-cyan-400 hover:underline">Reference Link</a></p>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-gray-400 italic mb-4">No evidence has been submitted yet.</p>
+            {% endif %}
+
+            {% if is_participant and dispute.status == 'open' or dispute.status == 'evidence_submission' %}
+                <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700 mt-4">
+                    <h4 class="text-lg font-medium text-white mb-2">Submit Evidence</h4>
+                    <form action="{% url 'submit_evidence' dispute.id %}" method="post" class="space-y-3">
+                        {% csrf_token %}
+                        <div>
+                            <textarea name="evidence_text" rows="3" required placeholder="Describe your evidence..." class="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500"></textarea>
+                        </div>
+                        <div>
+                            <input type="url" name="evidence_url" placeholder="Reference URL (optional)" class="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+                        </div>
+                        <button type="submit" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded">Submit Evidence</button>
+                    </form>
+                </div>
+            {% endif %}
+
+            {% if is_participant and dispute.status == 'evidence_submission' %}
+                <div class="mt-4">
+                    <form action="{% url 'start_voting' dispute.id %}" method="post">
+                        {% csrf_token %}
+                        <button type="submit" class="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded">Advance to Voting Phase</button>
+                    </form>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Voting Section -->
+        {% if dispute.status == 'voting' or dispute.status == 'resolved' %}
+            <div>
+                <h3 class="text-xl font-semibold text-cyan-400 mb-2">Community Voting</h3>
+                <p class="text-sm text-gray-400 mb-3">Poster votes: {{ poster_votes }} | Taker votes: {{ taker_votes }}</p>
+
+                {% if dispute.status == 'voting' %}
+                    {% if not is_participant %}
+                        {% if has_voted %}
+                            <p class="text-green-400 font-medium">You have cast your vote for this dispute.</p>
+                        {% else %}
+                            <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700 space-y-3">
+                                <p class="text-sm text-gray-300">Cast your neutral jury vote on who should win this dispute:</p>
+                                <form action="{% url 'cast_vote' dispute.id %}" method="post" class="flex space-x-4">
+                                    {% csrf_token %}
+                                    <button type="submit" name="voted_for" value="{{ dispute.task.posted_by.id }}" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded">Vote for Poster ({{ dispute.task.posted_by.username }})</button>
+                                    <button type="submit" name="voted_for" value="{{ dispute.task.taken_by.id }}" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded">Vote for Taker ({{ dispute.task.taken_by.username }})</button>
+                                </form>
+                            </div>
+                        {% endif %}
+                    {% else %}
+                        <p class="text-gray-400 italic">Task participants cannot vote on their own dispute.</p>
+                    {% endif %}
+
+                    <div class="mt-4">
+                        <form action="{% url 'finalize_resolution' dispute.id %}" method="post">
+                            {% csrf_token %}
+                            <button type="submit" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded">Finalize Resolution</button>
+                        </form>
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        {% if dispute.raised_by == request.user and dispute.status != 'resolved' and dispute.status != 'withdrawn' %}
+            <div class="pt-4 border-t border-gray-800">
+                <form action="{% url 'withdraw_dispute' dispute.id %}" method="post">
+                    {% csrf_token %}
+                    <button type="submit" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded">Withdraw Dispute</button>
+                </form>
+            </div>
+        {% endif %}
+    </div>
 {% endblock %}
