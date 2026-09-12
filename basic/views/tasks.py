@@ -91,6 +91,7 @@ def complete_task(request, task_id):
 
         if hasattr(task, 'dispute'):
             task.dispute.status = 'resolved'
+            task.dispute.resolve_deposit('refund')
             task.dispute.save()
 
         RewardLedger.objects.create(
