@@ -46,9 +46,14 @@ class Task(models.Model):
     deadline = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='available')
     cancellation_requested = models.BooleanField(default=False)
+    collateral_amount = models.PositiveIntegerField(default=0)
 
     def __str__(self):
         return self.title
+
+    @property
+    def required_collateral(self):
+        return int(self.reward * 0.20)
 
     @property
     def main_chat(self):
@@ -60,6 +65,9 @@ class RewardLedger(models.Model):
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('collateral_lock', 'Collateral Lock'),
+        ('collateral_refund', 'Collateral Refund'),
+        ('collateral_slash', 'Collateral Slash'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
