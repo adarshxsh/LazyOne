@@ -59,6 +59,7 @@ class RewardLedger(models.Model):
         ('task_creation', 'Task Creation (Points Reserved)'),
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
+        ('task_abandonment', 'Task Abandonment Penalty'),
         ('initial_points', 'Initial Points'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
