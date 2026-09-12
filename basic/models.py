@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from datetime import timedelta
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -60,6 +61,7 @@ class RewardLedger(models.Model):
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('jury_reward', 'Jury Duty Bonus'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
@@ -75,15 +77,48 @@ class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
         ('resolved', 'Resolved'),
+        ('escalated', 'Escalated'),
+    )
+    WINNING_PARTY_CHOICES = (
+        ('poster', 'Poster Wins'),
+        ('taker', 'Taker Wins'),
     )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    winning_party = models.CharField(max_length=10, choices=WINNING_PARTY_CHOICES, null=True, blank=True)
+    winner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='won_disputes')
+    resolved_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def check_and_escalate(self):
+        if self.status == 'open' and timezone.now() >= self.created_at + timedelta(hours=48):
+            self.status = 'escalated'
+            self.save()
+            return True
+        return False
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+class JuryMember(models.Model):
+    VOTE_CHOICES = (
+        ('poster', 'Poster Wins'),
+        ('taker', 'Taker Wins'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='jurors')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jury_assignments')
+    vote = models.CharField(max_length=10, choices=VOTE_CHOICES, null=True, blank=True)
+    voted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'user')
+
+    def __str__(self):
+        return f"Juror {self.user.username} for dispute {self.dispute.id}"
+
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)

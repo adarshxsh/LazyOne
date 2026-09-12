@@ -3,25 +3,68 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
+<div class="max-w-3xl mx-auto space-y-6 text-gray-300">
     <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
 
-    <div class="space-y-6 text-gray-300">
+    <div class="bg-gray-800/80 p-6 rounded-xl border border-gray-700 space-y-4">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg font-medium text-white mt-1">{{ task.title }}</p>
+            <p class="text-sm text-gray-400 mt-1"><strong>Task Poster:</strong> {{ task.posted_by.username }} | <strong>Task Taker:</strong> {{ task.taken_by.username|default:"N/A" }} | <strong>Reward:</strong> {{ task.reward }} Points</p>
+            <p class="text-sm text-gray-400 mt-1"><strong>Task Description:</strong> {{ task.description }}</p>
         </div>
 
-        <div>
+        <div class="border-t border-gray-700 pt-4">
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            <p class="mt-2"><strong>Status:</strong> 
+                <span class="px-3 py-1 text-sm font-semibold rounded-full 
+                    {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300
+                    {% elif dispute.status == 'resolved' %}bg-green-500/20 text-green-300
+                    {% else %}bg-red-500/20 text-red-300{% endif %}">
+                    {{ dispute.get_status_display }}
+                </span>
+            </p>
+            <p class="mt-1"><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
+            <p class="mt-1"><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y, g:i a" }}</p>
+            {% if dispute.status == 'resolved' %}
+                <p class="mt-1 text-green-400 font-semibold"><strong>Resolution:</strong> Won by {{ dispute.get_winning_party_display }} ({{ dispute.winner.username }})</p>
+            {% elif dispute.status == 'escalated' %}
+                <p class="mt-1 text-red-400 font-semibold"><strong>Escalation:</strong> Unresolved after 48 hours. Escalated to Staff Administration.</p>
+            {% endif %}
         </div>
 
-        <div>
+        <div class="border-t border-gray-700 pt-4">
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
-            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 mt-2 text-white">{{ dispute.reason|linebreaksbr }}</p>
+        </div>
+
+        <!-- Jury Section -->
+        <div class="border-t border-gray-700 pt-4">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Peer Jury Arbitration</h3>
+            <p class="text-sm text-gray-400">Jury Status: {{ votes_submitted }} of {{ total_jurors }} votes recorded.</p>
+
+            {% if is_juror %}
+                <div class="mt-4 p-4 bg-cyan-900/30 border border-cyan-500/30 rounded-lg">
+                    <h4 class="text-lg font-bold text-cyan-300 mb-2">Jury Duty Voting</h4>
+                    {% if juror_assignment.vote %}
+                        <p class="text-green-300 font-medium">You cast your vote for: <span class="font-bold uppercase">{{ juror_assignment.get_vote_display }}</span></p>
+                    {% elif dispute.status == 'open' %}
+                        <p class="text-sm text-gray-300 mb-4">Evaluate the task details and dispute statement above, then cast your confidential vote below.</p>
+                        <form action="{% url 'submit_jury_vote' dispute.id %}" method="post" class="flex flex-wrap gap-4">
+                            {% csrf_token %}
+                            <button type="submit" name="vote" value="poster" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg transition-colors">
+                                Poster Wins ({{ task.posted_by.username }})
+                            </button>
+                            <button type="submit" name="vote" value="taker" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg transition-colors">
+                                Taker Wins ({{ task.taken_by.username }})
+                            </button>
+                        </form>
+                    {% else %}
+                        <p class="text-gray-400">Voting is closed for this dispute.</p>
+                    {% endif %}
+                </div>
+            {% endif %}
         </div>
     </div>
-
+</div>
 {% endblock %}
