@@ -18,11 +18,17 @@ def rewards_view(request):
     pending_tasks = Task.objects.filter(posted_by=user, status='in_progress')
     pending_points = pending_tasks.aggregate(Sum('reward'))['reward__sum'] or 0
 
+    # Calculate escrowed dispute balance for tasks in 'disputed' status
+    disputed_tasks = Task.objects.filter(Q(posted_by=user) | Q(taken_by=user), status='disputed')
+    escrowed_dispute_balance = disputed_tasks.aggregate(Sum('reward'))['reward__sum'] or 0
+
     context = {
         'all_transactions': all_transactions,
         'rewards_earned': rewards_earned,
         'rewards_given': rewards_given,
         'pending_points': pending_points,
+        'escrowed_dispute_balance': escrowed_dispute_balance,
+        'dispute_escrow_balance': escrowed_dispute_balance,
         'current_balance': user.userprofile.rewards
     }
     return render(request, 'rewards.html', context)
