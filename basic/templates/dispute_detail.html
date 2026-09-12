@@ -3,25 +3,132 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
+<div class="max-w-4xl mx-auto space-y-8">
+    <div class="flex items-center justify-between border-b border-gray-700 pb-4">
+        <h2 class="text-3xl font-bold text-white">Dispute Details</h2>
+        <span class="px-3 py-1 text-sm font-semibold rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300 border border-yellow-500/30{% else %}bg-green-500/20 text-green-300 border border-green-500/30{% endif %}">
+            {{ dispute.get_status_display }}
+        </span>
+    </div>
 
-    <div class="space-y-6 text-gray-300">
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+    <!-- Dispute Overview Card -->
+    <div class="bg-gray-800/80 rounded-xl border border-gray-700 p-6 space-y-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+                <h3 class="text-sm font-medium text-gray-400 uppercase tracking-wider mb-1">Task in Question</h3>
+                <p class="text-xl font-bold text-cyan-400">{{ dispute.task.title }}</p>
+                <p class="text-sm text-gray-400 mt-1">Reward: <span class="font-semibold text-yellow-400">{{ dispute.task.reward }} points</span></p>
+            </div>
+            <div>
+                <h3 class="text-sm font-medium text-gray-400 uppercase tracking-wider mb-1">Dispute Status & Deadline</h3>
+                <p class="text-sm text-gray-300"><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
+                <p class="text-sm text-gray-300"><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y H:i" }}</p>
+                {% if dispute.deadline %}
+                <p class="text-sm text-gray-300"><strong>Expiration Deadline:</strong> <span class="text-yellow-400 font-semibold">{{ dispute.deadline|date:"F d, Y H:i" }} UTC</span></p>
+                {% endif %}
+                <p class="text-sm text-gray-300"><strong>Resolution Strategy:</strong> {{ dispute.get_expiration_handler_display }}</p>
+            </div>
         </div>
 
         <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
-        </div>
-
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
-            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+            <h3 class="text-sm font-medium text-gray-400 uppercase tracking-wider mb-2">Initial Dispute Reason</h3>
+            <div class="bg-gray-900/70 p-4 rounded-lg border border-gray-700 text-gray-200">
+                {{ dispute.reason|linebreaksbr }}
+            </div>
         </div>
     </div>
 
+    <!-- Evidence & Counter-Evidence List -->
+    <div class="space-y-4">
+        <h3 class="text-2xl font-bold text-white flex items-center gap-2">
+            <span>Evidence & Counter-Evidence Thread</span>
+            <span class="text-sm font-normal text-gray-400">({{ evidences.count }} submission{% if evidences.count != 1 %}s{% endif %})</span>
+        </h3>
+
+        {% if evidences %}
+            <div class="space-y-4">
+                {% for evidence in evidences %}
+                    <div class="bg-gray-800/60 rounded-lg border border-gray-700 p-4 space-y-3">
+                        <div class="flex items-center justify-between border-b border-gray-700/60 pb-2">
+                            <div class="flex items-center space-x-2">
+                                <span class="font-semibold text-cyan-300">{{ evidence.submitted_by.username }}</span>
+                                {% if evidence.submitted_by == task.posted_by %}
+                                    <span class="bg-purple-900/60 text-purple-300 text-xs px-2 py-0.5 rounded-full border border-purple-700">Poster</span>
+                                {% elif evidence.submitted_by == task.taken_by %}
+                                    <span class="bg-blue-900/60 text-blue-300 text-xs px-2 py-0.5 rounded-full border border-blue-700">Taker</span>
+                                {% elif evidence.submitted_by.is_staff %}
+                                    <span class="bg-red-900/60 text-red-300 text-xs px-2 py-0.5 rounded-full border border-red-700">Admin</span>
+                                {% endif %}
+                            </div>
+                            <span class="text-xs text-gray-400">{{ evidence.created_at|date:"F d, Y H:i" }} UTC</span>
+                        </div>
+
+                        {% if evidence.comment %}
+                            <p class="text-gray-200 whitespace-pre-line">{{ evidence.comment }}</p>
+                        {% endif %}
+
+                        {% if evidence.file %}
+                            <div class="pt-2">
+                                {% if evidence.is_image %}
+                                    <div class="mb-2">
+                                        <img src="{{ evidence.file.url }}" alt="Evidence Image" class="max-w-md max-h-64 rounded-lg border border-gray-700 object-cover" />
+                                    </div>
+                                {% endif %}
+                                <a href="{{ evidence.file.url }}" target="_blank" download class="inline-flex items-center gap-2 px-3 py-1.5 bg-cyan-900/40 hover:bg-cyan-900/70 text-cyan-300 border border-cyan-700 rounded-md text-sm transition-colors">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                    </svg>
+                                    <span>Download Attachment: {{ evidence.filename }}</span>
+                                </a>
+                            </div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="text-gray-400 bg-gray-900/40 p-4 rounded-lg border border-gray-800 italic">
+                No additional evidence or counter-evidence has been submitted yet.
+            </p>
+        {% endif %}
+    </div>
+
+    <!-- Submission Form -->
+    {% if dispute.status == 'open' %}
+        <div class="bg-gray-800/80 rounded-xl border border-gray-700 p-6 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Submit Supporting Evidence / Counter-Evidence</h3>
+            
+            <form method="POST" enctype="multipart/form-data" action="{% url 'dispute_detail' dispute.id %}" class="space-y-4">
+                {% csrf_token %}
+                
+                <div>
+                    <label for="{{ form.comment.id_for_label }}" class="block text-sm font-medium text-gray-300 mb-1">
+                        Comments / Explanation
+                    </label>
+                    {{ form.comment }}
+                </div>
+
+                <div>
+                    <label for="{{ form.file.id_for_label }}" class="block text-sm font-medium text-gray-300 mb-1">
+                        Attachment (File / Screenshot)
+                    </label>
+                    {{ form.file }}
+                    <p class="text-xs text-gray-400 mt-1">
+                        Allowed file types: .png, .jpg, .jpeg, .pdf, .zip, .txt (Max size: 5MB)
+                    </p>
+                </div>
+
+                <button type="submit" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-semibold py-2.5 px-4 rounded-lg transition-colors flex items-center justify-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                    </svg>
+                    <span>Submit Evidence</span>
+                </button>
+            </form>
+        </div>
+    {% else %}
+        <div class="bg-gray-800/50 rounded-xl border border-gray-700 p-4 text-center text-gray-400">
+            This dispute is marked as <strong class="text-green-400">Resolved</strong>. Evidence submissions are closed.
+        </div>
+    {% endif %}
+</div>
 {% endblock %}

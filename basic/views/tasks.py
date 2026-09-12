@@ -1,7 +1,8 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from ..models import Task, Conversation, Notification, RewardLedger
+from ..models import Task, Conversation, Notification, RewardLedger, Dispute
+from .dispute import check_and_expire_dispute
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
@@ -169,6 +170,10 @@ def abandon_task(request, task_id):
 
 @login_required(login_url='/login/')
 def my_tasks(request):
+    open_disputes = Dispute.objects.filter(status='open')
+    for dispute in open_disputes:
+        check_and_expire_dispute(dispute)
+
     posted_tasks = Task.objects.filter(posted_by=request.user).order_by('-created_at')
     taken_tasks = Task.objects.filter(taken_by=request.user).order_by('-created_at')
     context = {'posted_tasks': posted_tasks, 'taken_tasks': taken_tasks}
