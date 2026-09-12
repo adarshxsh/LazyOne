@@ -7,6 +7,8 @@ from django.urls import reverse
 from django.utils import timezone
 from django.db.models import Q
 from datetime import datetime, timedelta
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 
 
 @login_required(login_url='/login/')
@@ -92,6 +94,31 @@ def complete_task(request, task_id):
         if hasattr(task, 'dispute'):
             task.dispute.status = 'resolved'
             task.dispute.save()
+            try:
+                channel_layer = get_channel_layer()
+                if channel_layer:
+                    payload = {
+                        'type': 'dispute_resolved',
+                        'event': 'dispute_resolved',
+                        'dispute_id': task.dispute.id,
+                        'task_id': task.id,
+                        'task_title': task.title,
+                        'status': 'resolved',
+                        'status_display': 'Resolved',
+                        'message': f"Dispute for task '{task.title}' has been resolved.",
+                        'link': reverse('my_tasks')
+                    }
+                    async_to_sync(channel_layer.group_send)(
+                        f"dispute_{task.dispute.id}",
+                        {'type': 'dispute_update', 'data': payload}
+                    )
+                    if task.taken_by:
+                        async_to_sync(channel_layer.group_send)(
+                            f"user_{task.taken_by.id}",
+                            {'type': 'dispute_notification', 'data': payload}
+                        )
+            except Exception:
+                pass
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,

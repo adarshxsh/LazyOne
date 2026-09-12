@@ -38,6 +38,7 @@ print(f"ALLOWED_HOSTS: {ALLOWED_HOSTS}")
 
 # Application definition
 INSTALLED_APPS = [
+    'channels',
     'basic.apps.BasicConfig',
     'django.contrib.admin',
     'django.contrib.auth',
@@ -84,6 +85,14 @@ print("TEMPLATES: OK")
 
 WSGI_APPLICATION = 'LazyOne.wsgi.application'
 print("WSGI_APPLICATION: OK")
+
+ASGI_APPLICATION = 'LazyOne.asgi.application'
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
+print("ASGI_APPLICATION & CHANNEL_LAYERS: OK")
 
 # Database
 DATABASE_URL = os.getenv('DATABASE_URL')
