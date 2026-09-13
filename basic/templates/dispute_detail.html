@@ -22,6 +22,39 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if user.is_staff %}
+            <div class="mt-8 p-6 bg-gray-900/70 border border-cyan-500/30 rounded-xl space-y-4">
+                <h3 class="text-xl font-bold text-cyan-400">Staff Moderation Ruling</h3>
+                <p class="text-sm text-gray-300">As a platform moderator, issue an official resolution ruling for this dispute.</p>
+                {% if dispute.status == 'open' %}
+                    <div class="flex flex-wrap gap-4 pt-2">
+                        <form method="POST" action="{% url 'resolve_dispute' dispute.id %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="ruling" value="poster">
+                            <input type="hidden" name="next" value="{% url 'dispute_detail' dispute.id %}">
+                            <button type="submit" onclick="return confirm('Rule in favor of task poster? Task will be cancelled and points refunded.')"
+                                    class="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-medium text-sm rounded-lg transition">
+                                Rule for Task Poster (Refund Poster)
+                            </button>
+                        </form>
+                        <form method="POST" action="{% url 'resolve_dispute' dispute.id %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="ruling" value="taker">
+                            <input type="hidden" name="next" value="{% url 'dispute_detail' dispute.id %}">
+                            <button type="submit" onclick="return confirm('Rule in favor of task taker? Task will be marked completed and reward points awarded.')"
+                                    class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm rounded-lg transition">
+                                Rule for Task Taker (Award Taker)
+                            </button>
+                        </form>
+                    </div>
+                {% else %}
+                    <div class="p-3 bg-green-900/30 border border-green-500/30 rounded-lg text-green-300 text-sm font-medium">
+                        This dispute has been resolved.
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}

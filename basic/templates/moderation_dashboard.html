@@ -1,0 +1,156 @@
+{% extends 'base.html' %}
+
+{% block title %}Staff Moderation Dashboard - {{ block.super }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-900 dark:text-white">Moderation Dashboard</h1>
+            <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">Review, filter, and resolve user dispute escalations across the platform.</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300">
+                Staff Moderation Active
+            </span>
+        </div>
+    </div>
+
+    <!-- Summary Statistics -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="bg-gray-50/80 dark:bg-gray-700/50 p-4 rounded-xl border border-gray-200 dark:border-gray-600">
+            <p class="text-xs uppercase font-semibold text-gray-500 dark:text-gray-400">Total Disputes</p>
+            <p class="text-2xl font-bold text-gray-800 dark:text-gray-100 mt-1">{{ total_disputes }}</p>
+        </div>
+        <div class="bg-yellow-50/80 dark:bg-yellow-900/20 p-4 rounded-xl border border-yellow-200 dark:border-yellow-700/50">
+            <p class="text-xs uppercase font-semibold text-yellow-600 dark:text-yellow-400">Open Disputes</p>
+            <p class="text-2xl font-bold text-yellow-700 dark:text-yellow-300 mt-1">{{ open_disputes }}</p>
+        </div>
+        <div class="bg-green-50/80 dark:bg-green-900/20 p-4 rounded-xl border border-green-200 dark:border-green-700/50">
+            <p class="text-xs uppercase font-semibold text-green-600 dark:text-green-400">Resolved Disputes</p>
+            <p class="text-2xl font-bold text-green-700 dark:text-green-300 mt-1">{{ resolved_disputes }}</p>
+        </div>
+    </div>
+
+    <!-- Filter & Search Bar -->
+    <form method="GET" action="{% url 'staff_dispute_dashboard' %}" class="bg-gray-50/80 dark:bg-gray-700/30 p-4 rounded-xl border border-gray-200 dark:border-gray-600 space-y-4 md:space-y-0 md:flex md:items-center md:gap-4">
+        <div class="flex-1">
+            <label for="q" class="sr-only">Search</label>
+            <input type="text" name="q" id="q" value="{{ query }}" placeholder="Search by task title, description, reason, or user..." 
+                   class="w-full px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500">
+        </div>
+
+        <div class="w-full md:w-44">
+            <label for="status" class="sr-only">Status</label>
+            <select name="status" id="status" class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All Statuses</option>
+                <option value="open" {% if status_filter == 'open' %}selected{% endif %}>Open</option>
+                <option value="resolved" {% if status_filter == 'resolved' %}selected{% endif %}>Resolved</option>
+            </select>
+        </div>
+
+        <div class="flex items-center gap-2">
+            <input type="date" name="date_from" value="{{ date_from }}" title="From Date" 
+                   class="px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500">
+            <span class="text-gray-400 text-xs">to</span>
+            <input type="date" name="date_to" value="{{ date_to }}" title="To Date" 
+                   class="px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500">
+        </div>
+
+        <div class="flex items-center gap-2">
+            <button type="submit" class="px-4 py-2 text-sm font-medium bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition duration-150">
+                Filter
+            </button>
+            <a href="{% url 'staff_dispute_dashboard' %}" class="px-3 py-2 text-sm font-medium bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 rounded-lg transition duration-150">
+                Reset
+            </a>
+        </div>
+    </form>
+
+    <!-- Dispute List Table -->
+    {% if disputes %}
+    <div class="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700">
+        <table class="w-full text-left text-sm text-gray-700 dark:text-gray-300">
+            <thead class="bg-gray-100 dark:bg-gray-700/80 text-xs uppercase font-semibold text-gray-600 dark:text-gray-300">
+                <tr>
+                    <th scope="col" class="px-4 py-3">Task Title</th>
+                    <th scope="col" class="px-4 py-3">Raised By</th>
+                    <th scope="col" class="px-4 py-3">Poster / Taker</th>
+                    <th scope="col" class="px-4 py-3">Reward</th>
+                    <th scope="col" class="px-4 py-3">Status</th>
+                    <th scope="col" class="px-4 py-3">Date Raised</th>
+                    <th scope="col" class="px-4 py-3 text-right">Moderation Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200 dark:divide-gray-700 bg-white/50 dark:bg-gray-800/50">
+                {% for dispute in disputes %}
+                <tr class="hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition">
+                    <td class="px-4 py-3 font-semibold text-gray-900 dark:text-white">
+                        <a href="{% url 'dispute_detail' dispute.id %}" class="hover:text-cyan-500 underline">
+                            {{ dispute.task.title }}
+                        </a>
+                        <p class="text-xs font-normal text-gray-500 dark:text-gray-400 truncate max-w-xs mt-0.5">
+                            {{ dispute.reason|truncatewords:10 }}
+                        </p>
+                    </td>
+                    <td class="px-4 py-3">
+                        <span class="font-medium text-gray-800 dark:text-gray-200">{{ dispute.raised_by.username }}</span>
+                    </td>
+                    <td class="px-4 py-3 text-xs">
+                        <div><strong class="text-gray-500">Poster:</strong> {{ dispute.task.posted_by.username }}</div>
+                        <div><strong class="text-gray-500">Taker:</strong> {% if dispute.task.taken_by %}{{ dispute.task.taken_by.username }}{% else %}N/A{% endif %}</div>
+                    </td>
+                    <td class="px-4 py-3 font-semibold text-cyan-600 dark:text-cyan-400">
+                        {{ dispute.task.reward }} pts
+                    </td>
+                    <td class="px-4 py-3">
+                        {% if dispute.status == 'open' %}
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300">
+                                Open
+                            </span>
+                        {% else %}
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">
+                                Resolved
+                            </span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                        {{ dispute.created_at|date:"M d, Y H:i" }}
+                    </td>
+                    <td class="px-4 py-3 text-right whitespace-nowrap">
+                        <div class="flex items-center justify-end gap-2">
+                            <a href="{% url 'dispute_detail' dispute.id %}" class="px-2.5 py-1 text-xs font-medium bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded transition">
+                                Details
+                            </a>
+                            {% if dispute.status == 'open' %}
+                                <form method="POST" action="{% url 'resolve_dispute' dispute.id %}" class="inline">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="ruling" value="poster">
+                                    <button type="submit" onclick="return confirm('Rule in favor of poster? Task will be cancelled and points refunded to poster.')" 
+                                            class="px-2.5 py-1 text-xs font-medium bg-amber-600 hover:bg-amber-700 text-white rounded transition">
+                                        Rule Poster
+                                    </button>
+                                </form>
+                                <form method="POST" action="{% url 'resolve_dispute' dispute.id %}" class="inline">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="ruling" value="taker">
+                                    <button type="submit" onclick="return confirm('Rule in favor of taker? Task will be completed and reward points awarded to taker.')" 
+                                            class="px-2.5 py-1 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white rounded transition">
+                                        Rule Taker
+                                    </button>
+                                </form>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="text-center py-12 bg-gray-50/50 dark:bg-gray-800/40 rounded-xl border border-dashed border-gray-300 dark:border-gray-700">
+        <p class="text-gray-500 dark:text-gray-400 text-base">No disputes found matching your criteria.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
