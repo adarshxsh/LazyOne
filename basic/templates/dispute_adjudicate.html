@@ -1,0 +1,113 @@
+{% extends 'base.html' %}
+
+{% block title %}Peer Jury Adjudication - {{ block.super }}{% endblock %}
+
+{% block content %}
+    <div class="mb-6">
+        <h2 class="text-3xl font-bold text-gray-900 dark:text-white">Peer Jury Adjudication Panel</h2>
+        <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+            You have been selected as an impartial community juror. Your vote is strictly confidential and anonymized.
+        </p>
+    </div>
+
+    <div class="space-y-6 text-gray-800 dark:text-gray-300">
+        <!-- Task Details -->
+        <div class="bg-gray-50 dark:bg-gray-800/60 p-6 rounded-xl border border-gray-200 dark:border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-600 dark:text-cyan-400 mb-2">Task Scope</h3>
+            <p class="text-lg font-semibold text-gray-900 dark:text-white">{{ task.title }}</p>
+            <p class="text-sm text-cyan-600 dark:text-cyan-400 font-medium mb-3">Reward: {{ task.reward }} Points</p>
+            <p class="text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                {{ task.description|linebreaksbr }}
+            </p>
+        </div>
+
+        <!-- Dispute Rationale -->
+        <div class="bg-gray-50 dark:bg-gray-800/60 p-6 rounded-xl border border-gray-200 dark:border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-600 dark:text-cyan-400 mb-2">Dispute Rationale</h3>
+            <p class="text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                {{ dispute.reason|linebreaksbr }}
+            </p>
+        </div>
+
+        <!-- Anonymized Communication Logs -->
+        <div class="bg-gray-50 dark:bg-gray-800/60 p-6 rounded-xl border border-gray-200 dark:border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-600 dark:text-cyan-400 mb-3">Communication Logs (Anonymized)</h3>
+            {% if chat_messages %}
+                <div class="space-y-3 max-h-80 overflow-y-auto pr-2">
+                    {% for msg in chat_messages %}
+                        <div class="p-3.5 rounded-lg border {% if msg.sender_label == 'Task Poster' %}bg-blue-50/80 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800/50{% else %}bg-purple-50/80 dark:bg-purple-950/40 border-purple-200 dark:border-purple-800/50{% endif %}">
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="text-xs font-bold uppercase tracking-wide {% if msg.sender_label == 'Task Poster' %}text-blue-700 dark:text-blue-300{% else %}text-purple-700 dark:text-purple-300{% endif %}">
+                                    {{ msg.sender_label }}
+                                </span>
+                                <span class="text-xs text-gray-500 dark:text-gray-400">{{ msg.timestamp|date:"M d, H:i" }}</span>
+                            </div>
+                            <p class="text-sm text-gray-800 dark:text-gray-200">{{ msg.content|linebreaksbr }}</p>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-sm text-gray-500 dark:text-gray-400 italic bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                    No communication history available between task counterparties.
+                </p>
+            {% endif %}
+        </div>
+
+        <!-- Juror Voting Section -->
+        <div class="bg-gray-50 dark:bg-gray-800/60 p-6 rounded-xl border border-gray-200 dark:border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-600 dark:text-cyan-400 mb-3">Cast Your Adjudication Vote</h3>
+
+            {% if dispute.status != 'open' %}
+                <div class="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg text-gray-800 dark:text-gray-200 border border-gray-300 dark:border-gray-600">
+                    <p class="font-bold">Voting for this dispute is closed.</p>
+                    <p class="text-sm mt-1">Status: {{ dispute.get_status_display }}
+                        {% if dispute.resolution %}
+                            - Outcome: 
+                            {% if dispute.resolution == 'poster_wins' %}Poster Wins
+                            {% elif dispute.resolution == 'worker_wins' %}Worker Wins
+                            {% else %}{{ dispute.resolution }}{% endif %}
+                        {% endif %}
+                    </p>
+                </div>
+            {% elif has_voted %}
+                <div class="p-4 bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300 rounded-lg border border-green-300 dark:border-green-700">
+                    <p class="font-semibold">✓ Your confidential vote has been recorded.</p>
+                    <p class="text-sm mt-1">
+                        Choice recorded: <strong>{% if existing_vote.vote == 'poster_wins' %}Task Poster Wins{% else %}Task Worker Wins{% endif %}</strong>
+                    </p>
+                    <p class="text-xs mt-2 text-green-700 dark:text-green-400">
+                        Once simple majority consensus is reached, you will receive your juror reward points in your ledger.
+                    </p>
+                </div>
+            {% else %}
+                <form action="{% url 'submit_jury_vote' dispute.id %}" method="post" class="space-y-4">
+                    {% csrf_token %}
+                    <p class="text-sm text-gray-600 dark:text-gray-400">
+                        Select which party should win the dispute based on the evidence provided above:
+                    </p>
+                    <div class="space-y-3">
+                        <label class="flex items-center p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:border-cyan-500 transition-colors">
+                            <input type="radio" name="vote" value="poster_wins" class="h-4 w-4 text-cyan-600 focus:ring-cyan-500 border-gray-300" required>
+                            <div class="ml-3">
+                                <span class="font-semibold text-gray-900 dark:text-white">In favor of Task Poster</span>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">Task poster receives a refund of the reserved reward points.</p>
+                            </div>
+                        </label>
+
+                        <label class="flex items-center p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:border-cyan-500 transition-colors">
+                            <input type="radio" name="vote" value="worker_wins" class="h-4 w-4 text-cyan-600 focus:ring-cyan-500 border-gray-300" required>
+                            <div class="ml-3">
+                                <span class="font-semibold text-gray-900 dark:text-white">In favor of Task Worker</span>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">Task worker receives the full task reward points.</p>
+                            </div>
+                        </label>
+                    </div>
+
+                    <button type="submit" class="w-full sm:w-auto bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 px-6 rounded-lg shadow-md transition-colors">
+                        Submit Confidential Vote
+                    </button>
+                </form>
+            {% endif %}
+        </div>
+    </div>
+{% endblock %}

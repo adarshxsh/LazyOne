@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+
+{% block title %}My Jury Cases - {{ block.super }}{% endblock %}
+
+{% block content %}
+    <h2 class="text-3xl font-bold text-gray-900 dark:text-white mb-6">My Jury Adjudication Cases</h2>
+
+    {% if assignments %}
+        <div class="space-y-4">
+            {% for assignment in assignments %}
+                <div class="bg-gray-50 dark:bg-gray-800/60 p-5 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
+                            {{ assignment.dispute.task.title }}
+                        </h3>
+                        <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                            Dispute Status: 
+                            <span class="font-semibold text-cyan-600 dark:text-cyan-400">{{ assignment.dispute.get_status_display }}</span> |
+                            Your Vote: 
+                            {% if assignment.has_voted %}
+                                <span class="text-green-600 dark:text-green-400 font-semibold">Submitted ✓</span>
+                            {% else %}
+                                <span class="text-yellow-600 dark:text-yellow-400 font-semibold">Pending Vote</span>
+                            {% endif %}
+                        </p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Assigned: {{ assignment.assigned_at|date:"F d, Y H:i" }}
+                        </p>
+                    </div>
+
+                    <a href="{% url 'dispute_adjudicate' assignment.dispute.id %}" class="inline-block bg-cyan-600 hover:bg-cyan-700 text-white font-medium px-4 py-2 rounded-lg text-sm text-center transition-colors shadow">
+                        {% if assignment.has_voted %}View Adjudication{% else %}Review & Vote{% endif %}
+                    </a>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="p-8 text-center bg-gray-50 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700">
+            <p class="text-gray-600 dark:text-gray-400 text-lg">You have no active or past jury duty assignments.</p>
+        </div>
+    {% endif %}
+{% endblock %}
