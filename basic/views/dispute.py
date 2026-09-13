@@ -1,7 +1,9 @@
+import math
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from ..models import Dispute, Task, Notification
+from django.db import transaction
+from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -12,11 +14,137 @@ def dispute_detail_view(request, dispute_id):
     if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+
+    proposed_doer_points = None
+    proposed_poster_points = None
+    proposed_poster_pct = None
+    if dispute.proposed_taker_pct is not None:
+        proposed_doer_points = math.floor(task.reward * dispute.proposed_taker_pct / 100)
+        proposed_poster_points = task.reward - proposed_doer_points
+        proposed_poster_pct = 100 - dispute.proposed_taker_pct
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'proposed_doer_points': proposed_doer_points,
+        'proposed_poster_points': proposed_poster_points,
+        'proposed_poster_pct': proposed_poster_pct,
     }
     return render(request, 'dispute_detail.html', context)
+
+@login_required(login_url='/login/')
+@require_POST
+def propose_settlement(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+    if request.user != task.posted_by and request.user != task.taken_by:
+        messages.error(request, "You are not authorized to propose a settlement for this dispute.")
+        return redirect('home')
+
+    if dispute.status != 'open':
+        messages.error(request, "This dispute is no longer open.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    pct_str = request.POST.get('proposed_taker_pct')
+    try:
+        pct = int(pct_str)
+        if pct < 1 or pct > 99:
+            messages.error(request, "Proposed percentage must be between 1 and 99.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+    except (ValueError, TypeError):
+        messages.error(request, "Invalid percentage format. Please enter a whole number between 1 and 99.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    dispute.proposed_taker_pct = pct
+    dispute.proposed_by = request.user
+    dispute.proposal_status = 'pending'
+    dispute.save()
+
+    counterparty = task.posted_by if request.user == task.taken_by else task.taken_by
+    Notification.objects.create(
+        recipient=counterparty,
+        message=f"{request.user.username} proposed a partial settlement ({pct}% to taker) for task: '{task.title}'.",
+        link=reverse('dispute_detail', args=[dispute.id])
+    )
+    messages.success(request, f"Settlement proposal of {pct}% to taker submitted successfully.")
+    return redirect('dispute_detail', dispute_id=dispute.id)
+
+@login_required(login_url='/login/')
+@require_POST
+def respond_settlement(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+    if request.user != task.posted_by and request.user != task.taken_by:
+        messages.error(request, "You are not authorized to respond to this settlement.")
+        return redirect('home')
+
+    if request.user == dispute.proposed_by:
+        messages.error(request, "You cannot respond to your own settlement proposal.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if dispute.status != 'open' or dispute.proposal_status != 'pending':
+        messages.error(request, "There is no pending settlement proposal to respond to.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    action = request.POST.get('action')
+    if action == 'accept':
+        with transaction.atomic():
+            pct = dispute.proposed_taker_pct
+            doer_points = math.floor(task.reward * pct / 100)
+            poster_points = task.reward - doer_points
+
+            taker_profile = task.taken_by.userprofile
+            taker_profile.rewards += doer_points
+            taker_profile.save()
+
+            poster_profile = task.posted_by.userprofile
+            poster_profile.rewards += poster_points
+            poster_profile.save()
+
+            RewardLedger.objects.create(
+                user=task.taken_by,
+                task=task,
+                amount=doer_points,
+                transaction_type='dispute_partial_payout',
+                description=f"Partial dispute payout ({pct}%) for task: '{task.title}'"
+            )
+            RewardLedger.objects.create(
+                user=task.posted_by,
+                task=task,
+                amount=poster_points,
+                transaction_type='dispute_partial_refund',
+                description=f"Partial dispute refund ({100 - pct}%) for task: '{task.title}'"
+            )
+
+            task.status = 'completed'
+            task.save()
+
+            dispute.status = 'resolved'
+            dispute.proposal_status = 'accepted'
+            dispute.save()
+
+            Notification.objects.create(
+                recipient=dispute.proposed_by,
+                message=f"{request.user.username} accepted the partial settlement offer for '{task.title}'.",
+                link=reverse('dispute_detail', args=[dispute.id])
+            )
+            messages.success(request, f"Settlement accepted! {doer_points} points awarded to taker and {poster_points} points refunded to poster.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+    elif action == 'decline':
+        dispute.proposal_status = 'declined'
+        dispute.save()
+
+        Notification.objects.create(
+            recipient=dispute.proposed_by,
+            message=f"{request.user.username} declined the partial settlement offer for '{task.title}'.",
+            link=reverse('dispute_detail', args=[dispute.id])
+        )
+        messages.info(request, "Settlement proposal declined.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    messages.error(request, "Invalid response action.")
+    return redirect('dispute_detail', dispute_id=dispute.id)
 
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
