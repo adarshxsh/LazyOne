@@ -60,11 +60,15 @@ class RewardLedger(models.Model):
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('appeal_bond_escrow', 'Appeal Bond Escrow'),
+        ('appeal_bond_refund', 'Appeal Bond Refund'),
+        ('juror_slashing', 'Juror Slashing Penalty'),
+        ('appellant_slashing', 'Appellant Slashing Penalty'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=30, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -74,16 +78,65 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('appealed', 'Appealed'),
+        ('under_review', 'Under Review'),
         ('resolved', 'Resolved'),
     )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    primary_winner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='primary_dispute_wins')
+    primary_verdict_at = models.DateTimeField(null=True, blank=True)
+    primary_consensus = models.FloatField(default=0.0)
+    final_winner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='final_dispute_wins')
+    resolved_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def is_appeal_window_active(self):
+        if not self.primary_verdict_at or self.status not in ['open', 'appealed', 'under_review']:
+            return False
+        if hasattr(self, 'appeal'):
+            return False
+        return timezone.now() <= self.primary_verdict_at + timezone.timedelta(hours=48)
+
+    def appeal_window_expires_at(self):
+        if self.primary_verdict_at:
+            return self.primary_verdict_at + timezone.timedelta(hours=48)
+        return None
+
+class DisputeVote(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    voted_for = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes_received')
+    tier = models.IntegerField(default=1)  # 1 for Primary Jury, 2 for Appeal Council
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'voter', 'tier')
+
+    def __str__(self):
+        return f"Vote by {self.voter.username} for {self.voted_for.username} (Tier {self.tier})"
+
+class DisputeAppeal(models.Model):
+    STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('upheld', 'Upheld'),
+        ('reversed', 'Reversed'),
+    )
+    dispute = models.OneToOneField(Dispute, on_delete=models.CASCADE, related_name='appeal')
+    appellant = models.ForeignKey(User, on_delete=models.CASCADE, related_name='appeals')
+    bond_amount = models.PositiveIntegerField(default=100)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    reason = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Appeal for dispute #{self.dispute.id} by {self.appellant.username}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
