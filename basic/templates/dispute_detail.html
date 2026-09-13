@@ -3,25 +3,176 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
-
-    <div class="space-y-6 text-gray-300">
+<div class="max-w-4xl mx-auto space-y-8 text-gray-300">
+    <div class="flex justify-between items-center border-b border-gray-700 pb-4">
         <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <h2 class="text-3xl font-bold text-white">Dispute Details</h2>
+            <p class="text-gray-400 text-sm mt-1">Dispute ID: #{{ dispute.id }}</p>
+        </div>
+        <a href="{% url 'my_tasks' %}" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm transition-colors">
+            Back to My Tasks
+        </a>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-900/50 p-6 rounded-xl border border-gray-700">
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Task Information</h3>
+            <p class="text-lg text-white font-medium mb-1">{{ dispute.task.title }}</p>
+            <p class="text-sm text-gray-400"><strong>Posted By:</strong> {{ dispute.task.posted_by.username }}</p>
+            <p class="text-sm text-gray-400"><strong>Taken By:</strong> {{ dispute.task.taken_by.username|default:"N/A" }}</p>
+            <p class="text-sm text-gray-400"><strong>Reward:</strong> {{ dispute.task.reward }} Points</p>
         </div>
 
         <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
-        </div>
-
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
-            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Dispute Status</h3>
+            <p class="mb-2"><strong>Status:</strong> <span class="px-3 py-1 text-sm font-semibold rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300 border border-yellow-500/30{% else %}bg-green-500/20 text-green-300 border border-green-500/30{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p class="text-sm text-gray-400"><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
+            <p class="text-sm text-gray-400"><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y, g:i a" }}</p>
         </div>
     </div>
 
+    <div class="bg-gray-900/50 p-6 rounded-xl border border-gray-700">
+        <h3 class="text-xl font-semibold text-cyan-400 mb-3">Reason for Dispute</h3>
+        <p class="text-gray-200 bg-gray-800/60 p-4 rounded-lg border border-gray-700 whitespace-pre-line">{{ dispute.reason }}</p>
+    </div>
+
+    <!-- Evidence Gallery Section -->
+    <div class="bg-gray-900/50 p-6 rounded-xl border border-gray-700 space-y-6">
+        <div class="flex justify-between items-center border-b border-gray-700 pb-4">
+            <h3 class="text-2xl font-bold text-white flex items-center gap-2">
+                Documentary Evidence Gallery
+                <span class="text-sm font-normal text-gray-400">({{ evidence_list|length }} items)</span>
+            </h3>
+        </div>
+
+        {% if evidence_list %}
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {% for item in evidence_list %}
+                    <div class="bg-gray-800/80 rounded-xl border border-gray-700 p-4 space-y-3 flex flex-col justify-between hover:border-cyan-500/50 transition-all shadow-md">
+                        <div>
+                            <div class="flex justify-between items-start gap-2 mb-2">
+                                <span class="px-2.5 py-1 text-xs font-semibold rounded-md bg-cyan-900/60 text-cyan-300 border border-cyan-700/50 uppercase tracking-wider">
+                                    {{ item.get_evidence_type_display }}
+                                </span>
+                                <span class="text-xs text-gray-400">
+                                    by <strong class="text-gray-200">{{ item.submitted_by.username }}</strong>
+                                    {% if item.submitted_by == dispute.task.posted_by %}
+                                        <span class="text-xs px-1.5 py-0.5 rounded bg-purple-900/60 text-purple-300 border border-purple-700/50">(Poster)</span>
+                                    {% elif item.submitted_by == dispute.task.taken_by %}
+                                        <span class="text-xs px-1.5 py-0.5 rounded bg-blue-900/60 text-blue-300 border border-blue-700/50">(Taker)</span>
+                                    {% endif %}
+                                </span>
+                            </div>
+
+                            <h4 class="text-lg font-bold text-white truncate">{{ item.title|default:item.file.name }}</h4>
+                            {% if item.description %}
+                                <p class="text-sm text-gray-300 mt-1 bg-gray-900/40 p-2 rounded border border-gray-800/60">{{ item.description }}</p>
+                            {% endif %}
+                        </div>
+
+                        <!-- Media Preview / File Display -->
+                        <div class="my-3">
+                            {% if item.is_image %}
+                                <div class="relative group overflow-hidden rounded-lg border border-gray-700 bg-gray-900">
+                                    <img src="{{ item.file.url }}" alt="{{ item.title }}" class="w-full h-48 object-cover rounded-lg cursor-pointer hover:scale-105 transition-transform duration-300" onclick="openLightbox('{{ item.file.url }}', '{{ item.title|escapejs }}')">
+                                    <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                                        <span class="text-xs bg-gray-900/80 text-white px-3 py-1 rounded-full border border-gray-600">Click to expand</span>
+                                    </div>
+                                </div>
+                            {% else %}
+                                <div class="flex items-center gap-3 p-3 bg-gray-900/80 rounded-lg border border-gray-700">
+                                    <div class="p-3 bg-cyan-950 text-cyan-400 rounded-lg">
+                                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+                                        </svg>
+                                    </div>
+                                    <div class="overflow-hidden text-ellipsis">
+                                        <p class="text-sm font-semibold text-gray-200 truncate">{{ item.file.name }}</p>
+                                        <p class="text-xs text-gray-400">{{ item.mime_type }}</p>
+                                    </div>
+                                </div>
+                            {% endif %}
+                        </div>
+
+                        <div class="flex justify-between items-center pt-2 border-t border-gray-700/60 text-xs text-gray-400">
+                            <span>Uploaded {{ item.uploaded_at|date:"M d, Y g:i a" }} ({{ item.file_size|filesizeformat }})</span>
+                            <a href="{{ item.file.url }}" download class="text-cyan-400 hover:text-cyan-300 font-semibold hover:underline flex items-center gap-1">
+                                Download
+                            </a>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="text-center py-8 bg-gray-800/40 rounded-xl border border-gray-800">
+                <p class="text-gray-400">No documentary evidence has been submitted yet.</p>
+            </div>
+        {% endif %}
+
+        <!-- Supplementary Upload Form -->
+        {% if dispute.status == 'open' and is_counterparty %}
+            <div class="mt-8 pt-6 border-t border-gray-700">
+                <h4 class="text-xl font-bold text-white mb-4">Submit Supplementary Evidence</h4>
+                <form action="{% url 'add_dispute_evidence' dispute.id %}" method="post" enctype="multipart/form-data" class="space-y-4 bg-gray-800/60 p-5 rounded-xl border border-gray-700">
+                    {% csrf_token %}
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-1">Select File(s)</label>
+                        <input type="file" name="evidence_files" multiple required class="w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-cyan-600 file:text-white hover:file:bg-cyan-700 bg-gray-900 border border-gray-700 rounded-lg p-2 focus:outline-none focus:border-cyan-500">
+                        <p class="text-xs text-gray-400 mt-1">Allowed formats: Images, PDFs, text logs, zip archives. Max size 10MB per file.</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-1">Evidence Category</label>
+                            <select name="evidence_type" class="w-full bg-gray-900 border border-gray-700 text-white rounded-lg p-2.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none text-sm">
+                                <option value="screenshot">Screenshot</option>
+                                <option value="deliverable_proof">Deliverable Proof</option>
+                                <option value="chat_log">Chat Log</option>
+                                <option value="document">Document</option>
+                                <option value="other" selected>Other</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-1">Title / Tag (Optional)</label>
+                            <input type="text" name="title" placeholder="e.g. Completed deliverable screenshot" class="w-full bg-gray-900 border border-gray-700 text-white rounded-lg p-2.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none text-sm">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-1">Description / Context (Optional)</label>
+                        <textarea name="description" rows="2" placeholder="Provide extra explanation or details about this file..." class="w-full bg-gray-900 border border-gray-700 text-white rounded-lg p-2.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none text-sm"></textarea>
+                    </div>
+
+                    <div class="flex justify-end pt-2">
+                        <button type="submit" class="px-6 py-2.5 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-lg shadow-md transition-colors text-sm">
+                            Upload Evidence
+                        </button>
+                    </div>
+                </form>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Lightbox Modal -->
+<div id="lightbox-modal" class="fixed inset-0 bg-black/90 flex items-center justify-center z-50 hidden p-4" onclick="closeLightbox()">
+    <div class="relative max-w-4xl max-h-full" onclick="event.stopPropagation()">
+        <button onclick="closeLightbox()" class="absolute -top-10 right-0 text-white text-2xl font-bold hover:text-cyan-400">&times; Close</button>
+        <img id="lightbox-img" src="" alt="" class="max-h-[85vh] max-w-full rounded-lg shadow-2xl border border-gray-700">
+        <p id="lightbox-caption" class="text-center text-gray-300 mt-2 text-sm font-semibold"></p>
+    </div>
+</div>
+
+<script>
+    function openLightbox(url, caption) {
+        document.getElementById('lightbox-img').src = url;
+        document.getElementById('lightbox-caption').innerText = caption;
+        document.getElementById('lightbox-modal').classList.remove('hidden');
+    }
+
+    function closeLightbox() {
+        document.getElementById('lightbox-modal').classList.add('hidden');
+        document.getElementById('lightbox-img').src = '';
+    }
+</script>
 {% endblock %}
