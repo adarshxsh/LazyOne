@@ -64,6 +64,14 @@ def take_task(request, task_id):
     if task.posted_by == request.user:
         messages.error(request, "You cannot take your own task.")
     else:
+        user_profile = request.user.userprofile
+        if user_profile.reputation_score < user_profile.MIN_REPUTATION_THRESHOLD:
+            messages.error(
+                request,
+                f"Your reputation score ({user_profile.reputation_score:.1f}) is below the required threshold ({user_profile.MIN_REPUTATION_THRESHOLD:.1f}) to claim tasks. Please improve your account standing."
+            )
+            return redirect('my_tasks')
+
         with transaction.atomic():
             task.status = 'in_progress'
             task.taken_by = request.user
@@ -85,13 +93,22 @@ def complete_task(request, task_id):
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
         task_doer_profile.rewards += task.reward
-        task_doer_profile.save()
+        task_doer_profile.tasks_completed += 1
         task.status = 'completed'
         task.save()
 
-        if hasattr(task, 'dispute'):
-            task.dispute.status = 'resolved'
-            task.dispute.save()
+        if hasattr(task, 'dispute') or task.status == 'disputed':
+            if hasattr(task, 'dispute'):
+                task.dispute.status = 'resolved'
+                task.dispute.save()
+            task_doer_profile.disputes_won += 1
+            poster_profile = task.posted_by.userprofile
+            poster_profile.disputes_lost += 1
+            poster_profile.update_reputation()
+            poster_profile.save()
+
+        task_doer_profile.update_reputation()
+        task_doer_profile.save()
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,
@@ -156,6 +173,11 @@ def accept_cancellation(request, task_id):
 def abandon_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
     with transaction.atomic():
+        doer_profile = request.user.userprofile
+        doer_profile.tasks_abandoned += 1
+        doer_profile.update_reputation()
+        doer_profile.save()
+
         task.status = 'available'
         task.taken_by = None
         task.save()

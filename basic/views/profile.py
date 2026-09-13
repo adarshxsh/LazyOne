@@ -15,8 +15,9 @@ def ping(request):
 
 @login_required(login_url='/login/')
 def profile_view(request):
-    db = apps.get_app_config('basic').firestore_db # Get Firestore client
+    db = getattr(apps.get_app_config('basic'), 'firestore_db', None) # Get Firestore client
     profile, created = UserProfile.objects.get_or_create(user=request.user)
+    profile.initialize_baseline_reputation()
     if request.method == 'POST':
         # Update Django model
         profile.first_name = request.POST.get('first_name', '')
@@ -65,6 +66,7 @@ def profile_view(request):
 def user_profile_view(request, user_id):
     viewed_user = get_object_or_404(User, id=user_id)
     viewed_profile = get_object_or_404(UserProfile, user=viewed_user)
+    viewed_profile.initialize_baseline_reputation()
     
     posted_tasks = Task.objects.filter(posted_by=viewed_user).order_by('-created_at')
     user_friends = viewed_profile.friends.all()
@@ -122,7 +124,7 @@ def update_closeness(request, friendship_id):
 
 @login_required(login_url='/login/')
 def verify_phone_token(request):
-    db = apps.get_app_config('basic').firestore_db # Get Firestore client
+    db = getattr(apps.get_app_config('basic'), 'firestore_db', None) # Get Firestore client
     if request.method == 'POST':
         try:
             data = json.loads(request.body)
