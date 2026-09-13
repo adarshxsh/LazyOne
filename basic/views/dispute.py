@@ -21,10 +21,13 @@ def dispute_detail_view(request, dispute_id):
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
     task = get_object_or_404(Task, id=task_id)
+    if request.user != task.posted_by and request.user != task.taken_by:
+        messages.error(request, "You are not authorized to raise a dispute for this task.")
+        return redirect('my_tasks')
     if hasattr(task, 'dispute'):
         return redirect('dispute_detail', dispute_id=task.dispute.id)
-    if task.taken_by != request.user or task.status != 'in_progress':
-        messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
+    if task.status != 'in_progress':
+        messages.error(request, "You can only raise a dispute for a task that is currently in progress.")
         return redirect('my_tasks')
     if request.method == 'POST':
         reason = request.POST.get('reason')
@@ -34,11 +37,13 @@ def raise_dispute(request, task_id):
         dispute = Dispute.objects.create(task=task, raised_by=request.user, reason=reason)
         task.status = 'disputed'
         task.save()
-        Notification.objects.create(
-            recipient=task.posted_by,
-            message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
-            link=reverse('dispute_detail', args=[dispute.id])
-        )
+        counterpart = task.taken_by if request.user == task.posted_by else task.posted_by
+        if counterpart:
+            Notification.objects.create(
+                recipient=counterpart,
+                message=f"{request.user.username} has raised a dispute for task: '{task.title}'.",
+                link=reverse('dispute_detail', args=[dispute.id])
+            )
         messages.success(request, "Dispute raised successfully.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
@@ -51,10 +56,13 @@ def withdraw_dispute(request, dispute_id):
     task.status = 'in_progress'
     task.save()
     dispute.delete()
-    Notification.objects.create(
-        recipient=task.posted_by,
-        message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
-        link=reverse('my_tasks')
-    )
+    counterpart = task.taken_by if request.user == task.posted_by else task.posted_by
+    if counterpart:
+        Notification.objects.create(
+            recipient=counterpart,
+            message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
+            link=reverse('my_tasks')
+        )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'.")
     return redirect('my_tasks')
+
