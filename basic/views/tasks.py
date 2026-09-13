@@ -7,6 +7,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.db.models import Q
 from datetime import datetime, timedelta
+from ..firebase_init import update_dispute_firestore
 
 
 @login_required(login_url='/login/')
@@ -92,6 +93,13 @@ def complete_task(request, task_id):
         if hasattr(task, 'dispute'):
             task.dispute.status = 'resolved'
             task.dispute.save()
+            update_dispute_firestore(
+                dispute_id=task.dispute.id,
+                task_id=task.id,
+                status='resolved',
+                event_type='dispute_resolved',
+                raised_by_username=task.dispute.raised_by.username
+            )
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,

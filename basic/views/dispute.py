@@ -4,6 +4,7 @@ from django.contrib import messages
 from ..models import Dispute, Task, Notification
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+from ..firebase_init import update_dispute_firestore
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
@@ -34,6 +35,13 @@ def raise_dispute(request, task_id):
         dispute = Dispute.objects.create(task=task, raised_by=request.user, reason=reason)
         task.status = 'disputed'
         task.save()
+        update_dispute_firestore(
+            dispute_id=dispute.id,
+            task_id=task.id,
+            status=dispute.status,
+            event_type='dispute_raised',
+            raised_by_username=request.user.username
+        )
         Notification.objects.create(
             recipient=task.posted_by,
             message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
@@ -48,6 +56,13 @@ def raise_dispute(request, task_id):
 def withdraw_dispute(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user)
     task = dispute.task
+    update_dispute_firestore(
+        dispute_id=dispute.id,
+        task_id=task.id,
+        status='withdrawn',
+        event_type='dispute_withdrawn',
+        raised_by_username=dispute.raised_by.username
+    )
     task.status = 'in_progress'
     task.save()
     dispute.delete()
@@ -58,3 +73,4 @@ def withdraw_dispute(request, dispute_id):
     )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'.")
     return redirect('my_tasks')
+
