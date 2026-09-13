@@ -89,7 +89,7 @@ def complete_task(request, task_id):
         task.status = 'completed'
         task.save()
 
-        if hasattr(task, 'dispute'):
+        if hasattr(task, 'dispute') and task.dispute.status == 'open':
             task.dispute.status = 'resolved'
             task.dispute.save()
 
