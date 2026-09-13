@@ -27,11 +27,30 @@ def raise_dispute(request, task_id):
         messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
         return redirect('my_tasks')
     if request.method == 'POST':
+        category = request.POST.get('category')
         reason = request.POST.get('reason')
-        if not reason:
+        evidence_details = request.POST.get('evidence_details')
+
+        valid_categories = [choice[0] for choice in Dispute.CATEGORY_CHOICES]
+        if not category or category not in valid_categories:
+            messages.error(request, "A valid dispute category is required.")
+            return redirect('my_tasks')
+
+        if not reason or not reason.strip():
             messages.error(request, "A reason is required to raise a dispute.")
             return redirect('my_tasks')
-        dispute = Dispute.objects.create(task=task, raised_by=request.user, reason=reason)
+
+        if not evidence_details or not evidence_details.strip():
+            messages.error(request, "Evidence details are required to raise a dispute.")
+            return redirect('my_tasks')
+
+        dispute = Dispute.objects.create(
+            task=task,
+            raised_by=request.user,
+            category=category,
+            reason=reason.strip(),
+            evidence_details=evidence_details.strip()
+        )
         task.status = 'disputed'
         task.save()
         Notification.objects.create(
