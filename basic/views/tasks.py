@@ -89,9 +89,8 @@ def complete_task(request, task_id):
         task.status = 'completed'
         task.save()
 
-        if hasattr(task, 'dispute'):
-            task.dispute.status = 'resolved'
-            task.dispute.save()
+        if hasattr(task, 'dispute') and task.dispute.status != 'resolved':
+            task.dispute.transition_to('resolved')
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,
