@@ -1,9 +1,10 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from ..models import Dispute, Task, Notification
+from ..models import Dispute, Task, Notification, DisputeEvidence, validate_evidence_file
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+from django.core.exceptions import ValidationError
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
@@ -12,9 +13,12 @@ def dispute_detail_view(request, dispute_id):
     if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+    
+    evidence_list = dispute.evidence.all().order_by('created_at')
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'evidence_list': evidence_list,
     }
     return render(request, 'dispute_detail.html', context)
 
@@ -31,7 +35,26 @@ def raise_dispute(request, task_id):
         if not reason:
             messages.error(request, "A reason is required to raise a dispute.")
             return redirect('my_tasks')
+        
+        attachment = request.FILES.get('attachment')
+        if attachment:
+            try:
+                validate_evidence_file(attachment)
+            except ValidationError as e:
+                messages.error(request, e.message if hasattr(e, 'message') else str(e))
+                return redirect('my_tasks')
+
         dispute = Dispute.objects.create(task=task, raised_by=request.user, reason=reason)
+        
+        evidence_type = 'file' if attachment else 'text'
+        DisputeEvidence.objects.create(
+            dispute=dispute,
+            user=request.user,
+            evidence_type=evidence_type,
+            description=reason,
+            attachment=attachment
+        )
+
         task.status = 'disputed'
         task.save()
         Notification.objects.create(
@@ -42,6 +65,53 @@ def raise_dispute(request, task_id):
         messages.success(request, "Dispute raised successfully.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def submit_dispute_evidence(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+        messages.error(request, "You are not authorized to submit evidence for this dispute.")
+        return redirect('home')
+    
+    if dispute.status != 'open':
+        messages.error(request, "This dispute is no longer open.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    description = request.POST.get('description', '').strip()
+    attachment = request.FILES.get('attachment')
+
+    if not description and not attachment:
+        messages.error(request, "Please provide a description or attach a file.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if attachment:
+        try:
+            validate_evidence_file(attachment)
+        except ValidationError as e:
+            messages.error(request, e.message if hasattr(e, 'message') else str(e))
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+    evidence_type = 'file' if attachment else 'text'
+    DisputeEvidence.objects.create(
+        dispute=dispute,
+        user=request.user,
+        evidence_type=evidence_type,
+        description=description,
+        attachment=attachment
+    )
+
+    other_user = task.posted_by if request.user == task.taken_by else task.taken_by
+    if other_user:
+        Notification.objects.create(
+            recipient=other_user,
+            message=f"{request.user.username} submitted new evidence for dispute on '{task.title}'.",
+            link=reverse('dispute_detail', args=[dispute.id])
+        )
+
+    messages.success(request, "Evidence submitted successfully.")
+    return redirect('dispute_detail', dispute_id=dispute.id)
 
 @login_required(login_url='/login/')
 @require_POST
@@ -58,3 +128,4 @@ def withdraw_dispute(request, dispute_id):
     )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'.")
     return redirect('my_tasks')
+
