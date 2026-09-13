@@ -90,8 +90,27 @@ def complete_task(request, task_id):
         task.save()
 
         if hasattr(task, 'dispute'):
-            task.dispute.status = 'resolved'
-            task.dispute.save()
+            dispute = task.dispute
+            if dispute.status != 'resolved':
+                dispute.status = 'resolved'
+                dispute.save()
+
+                deposit_amount = dispute.deposit_amount
+                if dispute.raised_by == task.taken_by:
+                    task_doer_profile.rewards += deposit_amount
+                    task_doer_profile.save()
+                else:
+                    raiser_profile = dispute.raised_by.userprofile
+                    raiser_profile.rewards += deposit_amount
+                    raiser_profile.save()
+
+                RewardLedger.objects.create(
+                    user=dispute.raised_by,
+                    task=task,
+                    amount=deposit_amount,
+                    transaction_type='dispute_refund',
+                    description=f"Deposit bond refunded for resolved dispute on completed task: '{task.title}'"
+                )
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,
