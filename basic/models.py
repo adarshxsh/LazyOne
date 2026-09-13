@@ -76,9 +76,18 @@ class Dispute(models.Model):
         ('open', 'Open'),
         ('resolved', 'Resolved'),
     )
+    CATEGORY_CHOICES = (
+        ('quality_issue', 'Quality Issue'),
+        ('incomplete_work', 'Incomplete Work'),
+        ('unresponsive_partner', 'Unresponsive Partner'),
+        ('payment_dispute', 'Payment Dispute'),
+        ('other', 'Other'),
+    )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
+    category = models.CharField(max_length=50, choices=CATEGORY_CHOICES, default='other')
     reason = models.TextField()
+    evidence_details = models.TextField(blank=True, default='')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     created_at = models.DateTimeField(auto_now_add=True)
 
