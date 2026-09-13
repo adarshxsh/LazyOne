@@ -1,6 +1,8 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
+from django.db import transaction
+from django.core.exceptions import ValidationError
 from ..models import Dispute, Task, Notification
 from django.views.decorators.http import require_POST
 from django.urls import reverse
@@ -31,14 +33,21 @@ def raise_dispute(request, task_id):
         if not reason:
             messages.error(request, "A reason is required to raise a dispute.")
             return redirect('my_tasks')
-        dispute = Dispute.objects.create(task=task, raised_by=request.user, reason=reason)
-        task.status = 'disputed'
-        task.save()
-        Notification.objects.create(
-            recipient=task.posted_by,
-            message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
-            link=reverse('dispute_detail', args=[dispute.id])
-        )
+        with transaction.atomic():
+            dispute = Dispute.objects.create(
+                task=task,
+                raised_by=request.user,
+                reason=reason,
+                status=Dispute.STATUS_INITIATED
+            )
+            dispute.transition_to(Dispute.STATUS_EVIDENCE_SUBMISSION)
+            task.status = 'disputed'
+            task.save()
+            Notification.objects.create(
+                recipient=task.posted_by,
+                message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
+                link=reverse('dispute_detail', args=[dispute.id])
+            )
         messages.success(request, "Dispute raised successfully.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
@@ -48,13 +57,37 @@ def raise_dispute(request, task_id):
 def withdraw_dispute(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user)
     task = dispute.task
-    task.status = 'in_progress'
-    task.save()
-    dispute.delete()
-    Notification.objects.create(
-        recipient=task.posted_by,
-        message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
-        link=reverse('my_tasks')
-    )
+    with transaction.atomic():
+        dispute.transition_to(Dispute.STATUS_CANCELLED)
+        task.status = 'in_progress'
+        task.save()
+        Notification.objects.create(
+            recipient=task.posted_by,
+            message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
+            link=reverse('my_tasks')
+        )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'.")
     return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def transition_dispute(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+        messages.error(request, "You are not authorized to perform transition actions on this dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    target_status = request.POST.get('target_status')
+    if not target_status:
+        messages.error(request, "Target status is required.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    try:
+        with transaction.atomic():
+            dispute.transition_to(target_status)
+            messages.success(request, f"Dispute status updated to '{dispute.get_status_display()}'.")
+    except ValidationError as e:
+        messages.error(request, e.message if hasattr(e, 'message') else str(e))
+
+    return redirect('dispute_detail', dispute_id=dispute.id)
