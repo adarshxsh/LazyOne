@@ -1,6 +1,16 @@
+import os
+import uuid
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
+
+def dispute_attachment_upload_path(instance, filename):
+    ext = os.path.splitext(filename)[1].lower()
+    unique_filename = f"{uuid.uuid4().hex}{ext}"
+    today = timezone.now()
+    return f"disputes/attachments/{today.strftime('%Y/%m/%d')}/{unique_filename}"
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -84,6 +94,40 @@ class Dispute(models.Model):
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+class DisputeAttachment(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='attachments')
+    uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='uploaded_dispute_attachments')
+    file = models.FileField(upload_to=dispute_attachment_upload_path)
+    file_name = models.CharField(max_length=255)
+    file_size = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Attachment {self.file_name} for Dispute {self.dispute_id}"
+
+    @property
+    def formatted_file_size(self):
+        size = self.file_size
+        if size < 1024:
+            return f"{size} B"
+        elif size < 1024 * 1024:
+            return f"{size / 1024:.1f} KB"
+        else:
+            return f"{size / (1024 * 1024):.1f} MB"
+
+    @property
+    def is_image(self):
+        ext = os.path.splitext(self.file_name)[1].lower()
+        return ext in ['.png', '.jpg', '.jpeg', '.gif']
+
+@receiver(post_delete, sender=DisputeAttachment)
+def delete_attachment_file_on_delete(sender, instance, **kwargs):
+    if instance.file:
+        try:
+            instance.file.delete(save=False)
+        except Exception:
+            pass
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
