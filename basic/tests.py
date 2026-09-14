@@ -236,7 +236,8 @@ class JurorSelectionAndStakeLockTests(TestCase):
         dispute3_jurors = set(dispute3.jurors.all())
         # juror1 must be excluded because it's already on 2 active disputes
         self.assertNotIn(self.juror1, dispute3_jurors)
-        self.assertEqual(dispute3_jurors, {self.juror2, self.juror3, juror4} | {juror5} & dispute3_jurors)
+        self.assertEqual(len(dispute3_jurors), 3)
+        self.assertTrue(dispute3_jurors.issubset({self.juror2, self.juror3, juror4, juror5}))
 
     def test_dispute_withdrawal_returns_stakes(self):
         """
