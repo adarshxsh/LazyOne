@@ -83,15 +83,19 @@ def take_task(request, task_id):
 def complete_task(request, task_id):
     task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
     with transaction.atomic():
+        if hasattr(task, 'dispute') and task.dispute.status not in ['resolved', 'withdrawn']:
+            try:
+                # Poster completing task acts as mutual agreement resolution of active dispute
+                task.dispute.transition_to('resolved', user=request.user, is_mutual=True)
+            except ValueError as e:
+                messages.error(request, f"Cannot complete task with active dispute: {e}")
+                return redirect('my_tasks')
+
         task_doer_profile = task.taken_by.userprofile
         task_doer_profile.rewards += task.reward
         task_doer_profile.save()
         task.status = 'completed'
         task.save()
-
-        if hasattr(task, 'dispute'):
-            task.dispute.status = 'resolved'
-            task.dispute.save()
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,

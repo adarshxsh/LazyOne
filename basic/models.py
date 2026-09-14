@@ -73,17 +73,80 @@ class RewardLedger(models.Model):
 
 class Dispute(models.Model):
     STATUS_CHOICES = (
-        ('open', 'Open'),
+        ('evidence_pending', 'Evidence Pending'),
+        ('under_review', 'Under Review'),
         ('resolved', 'Resolved'),
+        ('withdrawn', 'Withdrawn'),
     )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='evidence_pending')
     created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def can_transition_to(self, target_status, user=None, is_mutual=False):
+        if self.status in ['resolved', 'withdrawn']:
+            return False
+        if target_status == 'under_review':
+            return self.status == 'evidence_pending'
+        if target_status == 'withdrawn':
+            return self.status == 'evidence_pending' and (user is None or user == self.raised_by or user.is_staff)
+        if target_status == 'resolved':
+            if self.status == 'under_review':
+                return True
+            if self.status == 'evidence_pending' and is_mutual:
+                return True
+            return False
+        return False
+
+    def transition_to(self, target_status, user=None, is_mutual=False):
+        if not self.can_transition_to(target_status, user=user, is_mutual=is_mutual):
+            raise ValueError(f"Invalid state transition from {self.status} to {target_status}")
+        self.status = target_status
+        if target_status == 'resolved':
+            self.resolved_at = timezone.now()
+        self.save()
+        return True
+
+    def check_auto_transition(self):
+        """
+        Automated 48-hour timers transition disputes from evidence_pending to under_review.
+        """
+        if self.status == 'evidence_pending':
+            latest_evidence = self.evidence_entries.order_by('-created_at').first()
+            ref_time = latest_evidence.created_at if latest_evidence else self.created_at
+            if timezone.now() - ref_time >= timezone.timedelta(hours=48):
+                self.status = 'under_review'
+                self.save()
+                from django.urls import reverse
+                link = reverse('dispute_detail', args=[self.id])
+                for participant in [self.task.posted_by, self.task.taken_by]:
+                    if participant:
+                        Notification.objects.create(
+                            recipient=participant,
+                            message=f"Dispute for task '{self.task.title}' auto-transitioned to Under Review.",
+                            link=link
+                        )
+                return True
+        return False
+
+
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidence_entries')
+    submitted_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='submitted_evidence')
+    description = models.TextField()
+    attachment_link = models.URLField(max_length=500, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"Evidence by {self.submitted_by.username} for Dispute {self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
