@@ -9,6 +9,9 @@
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
             <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p><strong>Reserved Reward:</strong> {{ dispute.task.reward }} points</p>
+            <p><strong>Poster:</strong> {{ dispute.task.posted_by.username }}</p>
+            <p><strong>Doer:</strong> {{ dispute.task.taken_by.username }}</p>
         </div>
 
         <div>
@@ -22,6 +25,59 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if dispute.status == 'resolved' %}
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400">Settlement Breakdown</h3>
+            <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-1">
+                <p><strong>Doer Payout ({{ dispute.task.taken_by.username }}):</strong> {{ dispute.doer_payout|default:0 }} points</p>
+                <p><strong>Poster Refund ({{ dispute.task.posted_by.username }}):</strong> {{ dispute.poster_refund|default:0 }} points</p>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if user.is_staff and dispute.status == 'open' %}
+        <div class="bg-gray-800/80 p-6 rounded-lg border border-cyan-500/30 space-y-4 mt-6">
+            <h3 class="text-2xl font-bold text-cyan-400">Staff Adjudication</h3>
+            <p class="text-sm text-gray-400">Distribute the {{ dispute.task.reward }} escrowed points between the task doer and task poster. The sum must strictly equal {{ dispute.task.reward }}.</p>
+            
+            <form method="POST" action="{% url 'settle_dispute' dispute.id %}" class="space-y-4">
+                {% csrf_token %}
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="doer_payout" class="block text-sm font-medium text-gray-300 mb-1">
+                            Doer Payout ({{ dispute.task.taken_by.username }})
+                        </label>
+                        <input type="number" id="doer_payout" name="doer_payout" min="0" max="{{ dispute.task.reward }}" required
+                            class="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-white focus:outline-none focus:border-cyan-400"
+                            placeholder="Points to doer" oninput="updateRefund()">
+                    </div>
+                    <div>
+                        <label for="poster_refund" class="block text-sm font-medium text-gray-300 mb-1">
+                            Poster Refund ({{ dispute.task.posted_by.username }})
+                        </label>
+                        <input type="number" id="poster_refund" name="poster_refund" min="0" max="{{ dispute.task.reward }}" required
+                            class="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-white focus:outline-none focus:border-cyan-400"
+                            placeholder="Points to poster">
+                    </div>
+                </div>
+                <button type="submit" class="w-full md:w-auto px-6 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold rounded-md shadow transition">
+                    Submit Settlement
+                </button>
+            </form>
+        </div>
+
+        <script>
+            function updateRefund() {
+                const total = {{ dispute.task.reward }};
+                const doerVal = parseInt(document.getElementById('doer_payout').value) || 0;
+                const refundInput = document.getElementById('poster_refund');
+                if (doerVal >= 0 && doerVal <= total) {
+                    refundInput.value = total - doerVal;
+                }
+            }
+        </script>
+        {% endif %}
     </div>
 
 {% endblock %}
