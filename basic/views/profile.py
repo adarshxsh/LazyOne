@@ -15,7 +15,7 @@ def ping(request):
 
 @login_required(login_url='/login/')
 def profile_view(request):
-    db = apps.get_app_config('basic').firestore_db # Get Firestore client
+    db = getattr(apps.get_app_config('basic'), 'firestore_db', None) # Get Firestore client
     profile, created = UserProfile.objects.get_or_create(user=request.user)
     if request.method == 'POST':
         # Update Django model

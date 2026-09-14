@@ -11,6 +11,45 @@
     </div>
 
     <div class="space-y-8">
+        <!-- Reputation & Reliability Metrics Section -->
+        <div>
+            <h2 class="text-2xl font-bold text-gray-800 dark:text-white mb-4">Reputation & Reliability</h2>
+            <div class="bg-white/50 border border-gray-200 rounded-xl p-6 dark:bg-gray-800/50 dark:border-gray-700/50">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                    <div class="p-3 bg-gray-100 dark:bg-gray-700/40 rounded-lg border border-gray-200 dark:border-gray-600/30">
+                        <span class="block text-2xl font-extrabold text-cyan-600 dark:text-cyan-400">{{ viewed_profile.reputation_score }}</span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">Reputation Score</span>
+                    </div>
+                    <div class="p-3 bg-gray-100 dark:bg-gray-700/40 rounded-lg border border-gray-200 dark:border-gray-600/30">
+                        <span class="block text-2xl font-extrabold text-green-600 dark:text-green-400">{{ viewed_profile.completion_rate }}%</span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">Completion Rate</span>
+                    </div>
+                    <div class="p-3 bg-gray-100 dark:bg-gray-700/40 rounded-lg border border-gray-200 dark:border-gray-600/30">
+                        <span class="block text-2xl font-extrabold text-gray-800 dark:text-white">{{ viewed_profile.tasks_completed }}</span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">Tasks Completed</span>
+                    </div>
+                    <div class="p-3 bg-gray-100 dark:bg-gray-700/40 rounded-lg border border-gray-200 dark:border-gray-600/30">
+                        <span class="block text-2xl font-extrabold text-yellow-600 dark:text-yellow-400">{{ viewed_profile.tasks_abandoned }}</span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">Tasks Abandoned</span>
+                    </div>
+                </div>
+                <div class="grid grid-cols-3 gap-4 text-center mt-4">
+                    <div class="p-3 bg-gray-100 dark:bg-gray-700/40 rounded-lg border border-gray-200 dark:border-gray-600/30">
+                        <span class="block text-xl font-bold text-orange-600 dark:text-orange-400">{{ viewed_profile.disputes_raised }}</span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">Disputes Raised</span>
+                    </div>
+                    <div class="p-3 bg-gray-100 dark:bg-gray-700/40 rounded-lg border border-gray-200 dark:border-gray-600/30">
+                        <span class="block text-xl font-bold text-emerald-600 dark:text-emerald-400">{{ viewed_profile.disputes_won }}</span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">Disputes Won</span>
+                    </div>
+                    <div class="p-3 bg-gray-100 dark:bg-gray-700/40 rounded-lg border border-gray-200 dark:border-gray-600/30">
+                        <span class="block text-xl font-bold text-red-600 dark:text-red-400">{{ viewed_profile.disputes_lost }}</span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">Disputes Lost</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Bio Section -->
         <div>
             <h2 class="text-2xl font-bold text-gray-800 dark:text-white mb-4">About Me</h2>
