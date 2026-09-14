@@ -5,12 +5,12 @@ def firebase_keys(request):
     Returns a dictionary of Firebase client-side configuration keys.
     """
     return {
-        'FIREBASE_API_KEY': settings.FIREBASE_API_KEY,
-        'FIREBASE_AUTH_DOMAIN': settings.FIREBASE_AUTH_DOMAIN,
-        'FIREBASE_PROJECT_ID': settings.FIREBASE_PROJECT_ID,
-        'FIREBASE_STORAGE_BUCKET': settings.FIREBASE_STORAGE_BUCKET,
-        'FIREBASE_MESSAGING_SENDER_ID': settings.FIREBASE_MESSAGING_SENDER_ID,
-        'FIREBASE_APP_ID': settings.FIREBASE_APP_ID,
+        'FIREBASE_API_KEY': getattr(settings, 'FIREBASE_API_KEY', ''),
+        'FIREBASE_AUTH_DOMAIN': getattr(settings, 'FIREBASE_AUTH_DOMAIN', ''),
+        'FIREBASE_PROJECT_ID': getattr(settings, 'FIREBASE_PROJECT_ID', ''),
+        'FIREBASE_STORAGE_BUCKET': getattr(settings, 'FIREBASE_STORAGE_BUCKET', ''),
+        'FIREBASE_MESSAGING_SENDER_ID': getattr(settings, 'FIREBASE_MESSAGING_SENDER_ID', ''),
+        'FIREBASE_APP_ID': getattr(settings, 'FIREBASE_APP_ID', ''),
     }
 
 def unread_notifications_count(request):

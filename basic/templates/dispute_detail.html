@@ -8,20 +8,143 @@
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg">
+                {% if dispute.task.conversation %}
+                    <a href="{% url 'chat_view' dispute.task.conversation.id %}" class="hover:underline text-cyan-300">{{ dispute.task.title }}</a>
+                {% else %}
+                    <span class="text-white">{{ dispute.task.title }}</span>
+                {% endif %}
+            </p>
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p>
+                <strong>Status:</strong> 
+                <span id="dispute-status-badge" class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% elif dispute.status == 'resolved' %}bg-green-500/20 text-green-300{% else %}bg-gray-500/20 text-gray-300{% endif %}">
+                    {{ dispute.get_status_display }}
+                </span>
+            </p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+
+            <div id="dispute-status-message" class="hidden p-3 mt-4 rounded-lg text-sm"></div>
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <div id="dispute-actions" class="pt-2">
+            {% if dispute.raised_by == request.user and dispute.status == 'open' %}
+                <form id="withdraw-dispute-form" action="{% url 'withdraw_dispute' dispute.id %}" method="post" class="inline">
+                    {% csrf_token %}
+                    <button type="submit" id="withdraw-dispute-btn" class="bg-red-600 hover:bg-red-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors text-sm">
+                        Withdraw Dispute
+                    </button>
+                </form>
+            {% endif %}
+            {% if dispute.task.conversation %}
+                <a href="{% url 'chat_view' dispute.task.conversation.id %}" class="inline-block bg-cyan-600 hover:bg-cyan-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors text-sm ml-2">
+                    Go to Chat
+                </a>
+            {% endif %}
+        </div>
     </div>
 
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            var firebaseConfig = {
+                apiKey: "{{ FIREBASE_API_KEY|default:'' }}",
+                authDomain: "{{ FIREBASE_AUTH_DOMAIN|default:'' }}",
+                projectId: "{{ FIREBASE_PROJECT_ID|default:'' }}",
+                storageBucket: "{{ FIREBASE_STORAGE_BUCKET|default:'' }}",
+                messagingSenderId: "{{ FIREBASE_MESSAGING_SENDER_ID|default:'' }}",
+                appId: "{{ FIREBASE_APP_ID|default:'' }}"
+            };
+
+            if (firebaseConfig.projectId) {
+                if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+                const db = firebase.firestore();
+                const disputeId = "{{ dispute.id }}";
+
+                db.collection('disputes').doc(disputeId).onSnapshot(function(snapshot) {
+                    const badge = document.getElementById('dispute-status-badge');
+                    const messageContainer = document.getElementById('dispute-status-message');
+                    const withdrawBtn = document.getElementById('withdraw-dispute-btn');
+
+                    if (!snapshot.exists) {
+                        if (badge) {
+                            badge.textContent = 'Withdrawn';
+                            badge.className = 'px-2 py-1 text-sm rounded-full bg-gray-500/20 text-gray-300';
+                        }
+                        if (messageContainer) {
+                            messageContainer.textContent = 'This dispute has been withdrawn.';
+                            messageContainer.className = 'p-3 mt-4 rounded-lg bg-gray-800 text-gray-300 text-sm';
+                            messageContainer.classList.remove('hidden');
+                        }
+                        if (withdrawBtn) {
+                            withdrawBtn.disabled = true;
+                            withdrawBtn.classList.add('opacity-50', 'cursor-not-allowed', 'hidden');
+                        }
+                        return;
+                    }
+
+                    const data = snapshot.data();
+                    if (!data) return;
+
+                    const status = data.status;
+                    if (status === 'open') {
+                        if (badge) {
+                            badge.textContent = 'Open';
+                            badge.className = 'px-2 py-1 text-sm rounded-full bg-yellow-500/20 text-yellow-300';
+                        }
+                        if (messageContainer) {
+                            messageContainer.classList.add('hidden');
+                        }
+                        if (withdrawBtn) {
+                            withdrawBtn.disabled = false;
+                            withdrawBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'hidden');
+                        }
+                    } else if (status === 'resolved') {
+                        if (badge) {
+                            badge.textContent = 'Resolved';
+                            badge.className = 'px-2 py-1 text-sm rounded-full bg-green-500/20 text-green-300';
+                        }
+                        if (messageContainer) {
+                            messageContainer.textContent = 'This dispute has been resolved.';
+                            messageContainer.className = 'p-3 mt-4 rounded-lg bg-green-900/30 text-green-300 text-sm';
+                            messageContainer.classList.remove('hidden');
+                        }
+                        if (withdrawBtn) {
+                            withdrawBtn.disabled = true;
+                            withdrawBtn.classList.add('opacity-50', 'cursor-not-allowed', 'hidden');
+                        }
+                    } else if (status === 'withdrawn') {
+                        if (badge) {
+                            badge.textContent = 'Withdrawn';
+                            badge.className = 'px-2 py-1 text-sm rounded-full bg-gray-500/20 text-gray-300';
+                        }
+                        if (messageContainer) {
+                            messageContainer.textContent = 'This dispute has been withdrawn.';
+                            messageContainer.className = 'p-3 mt-4 rounded-lg bg-gray-800 text-gray-300 text-sm';
+                            messageContainer.classList.remove('hidden');
+                        }
+                        if (withdrawBtn) {
+                            withdrawBtn.disabled = true;
+                            withdrawBtn.classList.add('opacity-50', 'cursor-not-allowed', 'hidden');
+                        }
+                    }
+                }, function(error) {
+                    console.error("Error listening to Firestore dispute document:", error);
+                });
+            }
+        });
+    </script>
 {% endblock %}
