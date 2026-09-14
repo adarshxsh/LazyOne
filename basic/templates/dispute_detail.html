@@ -22,6 +22,30 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if request.user.is_staff and dispute.status == 'open' %}
+            <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 mt-6 space-y-4">
+                <h3 class="text-xl font-semibold text-cyan-400">Staff Moderation Actions</h3>
+                <form method="POST" action="{% url 'resolve_dispute' dispute.id %}" class="space-y-4">
+                    {% csrf_token %}
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-1">Moderator Resolution Note (Optional)</label>
+                        <input type="text" name="note" placeholder="Enter reason or note for resolution..." class="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                    </div>
+                    <div class="flex flex-wrap gap-3">
+                        <button type="submit" name="action" value="award_taker" onclick="return confirm('Award points to task taker {{ dispute.task.taken_by.username }}?');" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-colors">
+                            Resolve: Award Taker
+                        </button>
+                        <button type="submit" name="action" value="refund_poster" onclick="return confirm('Refund points to task poster {{ dispute.task.posted_by.username }}?');" class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-medium rounded-lg transition-colors">
+                            Resolve: Refund Poster
+                        </button>
+                        <button type="submit" name="action" value="dismiss" onclick="return confirm('Dismiss dispute?');" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white font-medium rounded-lg transition-colors">
+                            Dismiss Dispute
+                        </button>
+                    </div>
+                </form>
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}

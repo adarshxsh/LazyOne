@@ -1,0 +1,131 @@
+{% extends 'base.html' %}
+
+{% block title %}Staff Dispute Dashboard - {{ block.super }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-gray-200 dark:border-gray-700 pb-4">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Staff Dispute Dashboard</h1>
+            <p class="text-sm text-gray-600 dark:text-gray-400">Audit open disputes, inspect task chats, and resolve deadlocked cases.</p>
+        </div>
+
+        <!-- Search Bar -->
+        <form method="GET" action="{% url 'staff_dispute_manage' %}" class="flex items-center gap-2">
+            <input type="hidden" name="status" value="{{ status_filter }}">
+            <div class="relative">
+                <input type="text" name="search" value="{{ search_query }}" placeholder="Search title or user..." class="w-64 px-4 py-2 text-sm bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500">
+            </div>
+            <button type="submit" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-medium rounded-lg transition-colors">Search</button>
+            {% if search_query %}
+                <a href="?status={{ status_filter }}" class="px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600">Clear</a>
+            {% endif %}
+        </form>
+    </div>
+
+    <!-- Filter Tabs -->
+    <div class="flex space-x-2 border-b border-gray-200 dark:border-gray-700 pb-2">
+        <a href="?status=all{% if search_query %}&search={{ search_query }}{% endif %}" class="px-4 py-2 text-sm font-medium rounded-lg transition-colors {% if status_filter == 'all' %}bg-cyan-600 text-white{% else %}text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">
+            All Disputes
+        </a>
+        <a href="?status=open{% if search_query %}&search={{ search_query }}{% endif %}" class="px-4 py-2 text-sm font-medium rounded-lg transition-colors {% if status_filter == 'open' %}bg-cyan-600 text-white{% else %}text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">
+            Open
+        </a>
+        <a href="?status=resolved{% if search_query %}&search={{ search_query }}{% endif %}" class="px-4 py-2 text-sm font-medium rounded-lg transition-colors {% if status_filter == 'resolved' %}bg-cyan-600 text-white{% else %}text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">
+            Resolved
+        </a>
+    </div>
+
+    <!-- Dispute List -->
+    {% if disputes %}
+        <div class="space-y-6">
+            {% for dispute in disputes %}
+                <div class="bg-gray-50 dark:bg-gray-900/50 p-6 rounded-xl border border-gray-200 dark:border-gray-700/60 shadow-sm space-y-4">
+                    <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-gray-200 dark:border-gray-800 pb-3">
+                        <div class="space-y-1">
+                            <div class="flex items-center gap-3">
+                                <a href="{% url 'dispute_detail' dispute.id %}" class="text-xl font-semibold text-cyan-600 dark:text-cyan-400 hover:underline">
+                                    {{ dispute.task.title }}
+                                </a>
+                                <span class="px-2.5 py-0.5 text-xs font-semibold rounded-full {% if dispute.status == 'open' %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300{% else %}bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300{% endif %}">
+                                    {{ dispute.get_status_display }}
+                                </span>
+                            </div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">
+                                Raised by <strong class="text-gray-700 dark:text-gray-300">{{ dispute.raised_by.username }}</strong> on {{ dispute.created_at|date:"M d, Y H:i" }} | Task Reward: <strong class="text-cyan-500">{{ dispute.task.reward }} pts</strong>
+                            </p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            {% if dispute.task.main_chat %}
+                                <a href="{% url 'chat_view' dispute.task.main_chat.id %}" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-md transition-colors">
+                                    View Chat
+                                </a>
+                            {% endif %}
+                            <a href="{% url 'dispute_detail' dispute.id %}" class="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-xs font-medium rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors">
+                                View Details
+                            </a>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-700 dark:text-gray-300">
+                        <div>
+                            <p><strong>Poster:</strong> {{ dispute.task.posted_by.username }} (Rewards: {{ dispute.task.posted_by.userprofile.rewards }})</p>
+                            <p><strong>Taker:</strong> {% if dispute.task.taken_by %}{{ dispute.task.taken_by.username }} (Rewards: {{ dispute.task.taken_by.userprofile.rewards }}){% else %}None{% endif %}</p>
+                            <p><strong>Task Status:</strong> <span class="capitalize font-medium">{{ dispute.task.status }}</span></p>
+                        </div>
+                        <div class="bg-gray-100 dark:bg-gray-800/80 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
+                            <p class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Dispute Reason</p>
+                            <p class="text-sm italic text-gray-800 dark:text-gray-200">{{ dispute.reason|linebreaksbr }}</p>
+                        </div>
+                    </div>
+
+                    <!-- Moderation Actions -->
+                    {% if dispute.status == 'open' %}
+                        <div class="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700/80 mt-2">
+                            <h4 class="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-3">Staff Resolution Actions</h4>
+                            <form method="POST" action="{% url 'resolve_dispute' dispute.id %}" class="space-y-3">
+                                {% csrf_token %}
+                                <div>
+                                    <input type="text" name="note" placeholder="Optional resolution note for parties..." class="w-full px-3 py-1.5 text-sm bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                                </div>
+                                <div class="flex flex-wrap gap-2">
+                                    <button type="submit" name="action" value="award_taker" onclick="return confirm('Award points to task taker {{ dispute.task.taken_by.username }}?');" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-md shadow transition-colors">
+                                        Resolve: Award Taker
+                                    </button>
+                                    <button type="submit" name="action" value="refund_poster" onclick="return confirm('Refund points to task poster {{ dispute.task.posted_by.username }}?');" class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-md shadow transition-colors">
+                                        Resolve: Refund Poster
+                                    </button>
+                                    <button type="submit" name="action" value="dismiss" onclick="return confirm('Dismiss this dispute and return task to in progress?');" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white text-xs font-semibold rounded-md shadow transition-colors">
+                                        Dismiss Dispute
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+
+        <!-- Pagination -->
+        {% if page_obj.has_other_pages %}
+            <div class="flex justify-center items-center space-x-2 pt-4">
+                {% if page_obj.has_previous %}
+                    <a href="?page={{ page_obj.previous_page_number }}&status={{ status_filter }}{% if search_query %}&search={{ search_query }}{% endif %}" class="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-xs font-medium rounded-md hover:bg-gray-300 dark:hover:bg-gray-600">Previous</a>
+                {% endif %}
+
+                <span class="text-xs text-gray-600 dark:text-gray-400">
+                    Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+                </span>
+
+                {% if page_obj.has_next %}
+                    <a href="?page={{ page_obj.next_page_number }}&status={{ status_filter }}{% if search_query %}&search={{ search_query }}{% endif %}" class="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-xs font-medium rounded-md hover:bg-gray-300 dark:hover:bg-gray-600">Next</a>
+                {% endif %}
+            </div>
+        {% endif %}
+    {% else %}
+        <div class="text-center py-12 bg-gray-50 dark:bg-gray-900/30 rounded-xl border border-dashed border-gray-300 dark:border-gray-700">
+            <p class="text-gray-500 dark:text-gray-400 text-base">No disputes found matching the selected criteria.</p>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
