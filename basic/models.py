@@ -60,11 +60,15 @@ class RewardLedger(models.Model):
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('juror_stake_lock', 'Juror Stake Lock'),
+        ('juror_stake_return', 'Juror Stake Return'),
+        ('juror_reward', 'Juror Reward Share'),
+        ('juror_slash', 'Juror Stake Slashed'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=30, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -80,10 +84,24 @@ class Dispute(models.Model):
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    jurors = models.ManyToManyField(User, related_name='assigned_disputes', blank=True)
+    winner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='won_disputes')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+class DisputeVote(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    voted_for = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes_received')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'voter')
+
+    def __str__(self):
+        return f"Vote by {self.voter.username} for {self.voted_for.username} in dispute {self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)

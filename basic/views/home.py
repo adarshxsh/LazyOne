@@ -5,7 +5,15 @@ import json
 
 def home(request):
     # --- Disputed Tasks ---
-    disputed_tasks = Task.objects.filter(status='disputed').order_by('-created_at')
+    if request.user.is_authenticated:
+        if request.user.is_staff:
+            disputed_tasks = Task.objects.filter(status='disputed').order_by('-created_at')
+        else:
+            disputed_tasks = Task.objects.filter(status='disputed').filter(
+                Q(posted_by=request.user) | Q(taken_by=request.user) | Q(dispute__jurors=request.user)
+            ).distinct().order_by('-created_at')
+    else:
+        disputed_tasks = Task.objects.none()
 
     # --- Search Logic for Available Tasks ---
     query = request.GET.get('q', '')
