@@ -60,11 +60,15 @@ class RewardLedger(models.Model):
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('juror_slashing', 'Juror Slashing'),
+        ('litigant_slashing', 'Litigant Slashing'),
+        ('appeal_bond_slash', 'Appeal Bond Slash'),
+        ('mediation_reward', 'Mediation Reward'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=30, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -74,6 +78,10 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('voting', 'Voting'),
+        ('resolved_tier1', 'Resolved Tier 1'),
+        ('appealed', 'Appealed'),
+        ('resolved_tier2', 'Resolved Tier 2'),
         ('resolved', 'Resolved'),
     )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
@@ -81,9 +89,63 @@ class Dispute(models.Model):
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     created_at = models.DateTimeField(auto_now_add=True)
+    winner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='won_disputes')
+    winning_vote = models.CharField(max_length=20, null=True, blank=True)
+    resolved_tier1_at = models.DateTimeField(null=True, blank=True)
+    appellant = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='appealed_disputes')
+    appeal_bond_amount = models.IntegerField(default=0)
+    appealed_at = models.DateTimeField(null=True, blank=True)
+    tier2_resolved_at = models.DateTimeField(null=True, blank=True)
+    tier2_decision = models.CharField(max_length=20, null=True, blank=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def can_vote(self, user):
+        if not user or not user.is_authenticated:
+            return False, "You must be logged in."
+        if user == self.task.posted_by or user == self.task.taken_by:
+            return False, "Task poster and task taker cannot participate as jurors."
+        if not user.is_active:
+            return False, "Jurors must maintain an active profile."
+        completed_count = Task.objects.filter(models.Q(posted_by=user) | models.Q(taken_by=user), status='completed').count()
+        if completed_count < 3:
+            return False, "Jurors must have completed at least 3 tasks on the platform."
+        if self.status not in ['open', 'voting']:
+            return False, "Voting is closed for this dispute."
+        if DisputeVote.objects.filter(dispute=self, juror=user).exists():
+            return False, "You have already voted on this dispute."
+        return True, ""
+
+    def is_appeal_window_open(self):
+        if self.status != 'resolved_tier1' or not self.resolved_tier1_at:
+            return False
+        return timezone.now() <= self.resolved_tier1_at + timezone.timedelta(hours=48)
+
+    def can_appeal(self, user):
+        if not user or not user.is_authenticated:
+            return False, "You must be logged in."
+        if user != self.task.posted_by and user != self.task.taken_by:
+            return False, "Only task poster or task taker can submit an appeal."
+        if not self.is_appeal_window_open():
+            return False, "The 48-hour appeal window has expired."
+        return True, ""
+
+class DisputeVote(models.Model):
+    VOTE_CHOICES = (
+        ('poster', 'Task Poster'),
+        ('taker', 'Task Taker'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    vote = models.CharField(max_length=20, choices=VOTE_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Vote by {self.juror.username} on dispute {self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
