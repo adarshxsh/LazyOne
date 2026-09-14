@@ -1,9 +1,10 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from ..models import Dispute, Task, Notification
+from ..models import Dispute, Task, Notification, RewardLedger, UserProfile
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+from django.db import transaction
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
@@ -17,6 +18,120 @@ def dispute_detail_view(request, dispute_id):
         'task': task
     }
     return render(request, 'dispute_detail.html', context)
+
+def resolve_dispute(dispute, winner=None, voting_jurors=None):
+    """
+    Resolves a dispute by allocating a fixed 10% fee to voting jurors and
+    transferring the remaining reward points to the winning party.
+    All point transfers and status updates are executed within a single transaction.atomic() block.
+    """
+    if dispute.status == 'resolved':
+        return
+
+    task = dispute.task
+    total_reward = task.reward
+
+    with transaction.atomic():
+        juror_list = list(voting_jurors) if voting_jurors else []
+        num_jurors = len(juror_list)
+
+        if num_jurors > 0:
+            juror_pool = int(total_reward * 0.10)
+            fee_per_juror = juror_pool // num_jurors
+            actual_juror_total = fee_per_juror * num_jurors
+        else:
+            juror_pool = 0
+            fee_per_juror = 0
+            actual_juror_total = 0
+
+        settlement_payout = total_reward - actual_juror_total
+
+        if fee_per_juror > 0:
+            for juror in juror_list:
+                juror_profile, _ = UserProfile.objects.get_or_create(user=juror)
+                juror_profile.rewards += fee_per_juror
+                juror_profile.save()
+
+                RewardLedger.objects.create(
+                    user=juror,
+                    task=task,
+                    amount=fee_per_juror,
+                    transaction_type='juror_reward',
+                    description=f"Juror reward for dispute resolution on task: '{task.title}'"
+                )
+
+        dispute.status = 'resolved'
+        dispute.save()
+
+        if winner == task.taken_by or winner == 'taker':
+            task.status = 'completed'
+            task.save()
+
+            if task.taken_by:
+                taker_profile, _ = UserProfile.objects.get_or_create(user=task.taken_by)
+                taker_profile.rewards += settlement_payout
+                taker_profile.save()
+
+                RewardLedger.objects.create(
+                    user=task.taken_by,
+                    task=task,
+                    amount=settlement_payout,
+                    transaction_type='dispute_settlement',
+                    description=f"Dispute settlement payout for task: '{task.title}'"
+                )
+
+                Notification.objects.create(
+                    recipient=task.taken_by,
+                    message=f"Dispute for '{task.title}' resolved in your favor! {settlement_payout} points awarded.",
+                    link=reverse('dispute_detail', args=[dispute.id])
+                )
+
+            Notification.objects.create(
+                recipient=task.posted_by,
+                message=f"Dispute for '{task.title}' resolved in favor of worker ({task.taken_by.username if task.taken_by else 'taker'}).",
+                link=reverse('dispute_detail', args=[dispute.id])
+            )
+        else:
+            task.status = 'cancelled'
+            task.save()
+
+            poster_profile, _ = UserProfile.objects.get_or_create(user=task.posted_by)
+            poster_profile.rewards += settlement_payout
+            poster_profile.save()
+
+            RewardLedger.objects.create(
+                user=task.posted_by,
+                task=task,
+                amount=settlement_payout,
+                transaction_type='dispute_refund',
+                description=f"Dispute settlement refund for task: '{task.title}'"
+            )
+
+            Notification.objects.create(
+                recipient=task.posted_by,
+                message=f"Dispute for '{task.title}' resolved in your favor! {settlement_payout} points refunded.",
+                link=reverse('dispute_detail', args=[dispute.id])
+            )
+            if task.taken_by:
+                Notification.objects.create(
+                    recipient=task.taken_by,
+                    message=f"Dispute for '{task.title}' resolved in favor of task poster ({task.posted_by.username}).",
+                    link=reverse('dispute_detail', args=[dispute.id])
+                )
+
+@login_required(login_url='/login/')
+@require_POST
+def resolve_dispute_view(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+    if not request.user.is_staff and request.user != task.posted_by and request.user != task.taken_by:
+        messages.error(request, "You are not authorized to resolve this dispute.")
+        return redirect('home')
+
+    winner = request.POST.get('winner')  # 'poster' or 'taker'
+    resolve_dispute(dispute, winner=winner)
+    messages.success(request, f"Dispute for '{task.title}' has been resolved.")
+    return redirect('dispute_detail', dispute_id=dispute.id)
 
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
