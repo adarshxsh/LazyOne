@@ -2,6 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from ..models import Dispute, Task, Notification
+from ..forms import DisputeForm
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -27,20 +28,26 @@ def raise_dispute(request, task_id):
         messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
         return redirect('my_tasks')
     if request.method == 'POST':
-        reason = request.POST.get('reason')
-        if not reason:
-            messages.error(request, "A reason is required to raise a dispute.")
+        form = DisputeForm(request.POST)
+        if form.is_valid():
+            dispute = form.save(commit=False)
+            dispute.task = task
+            dispute.raised_by = request.user
+            dispute.save()
+            task.status = 'disputed'
+            task.save()
+            Notification.objects.create(
+                recipient=task.posted_by,
+                message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
+                link=reverse('dispute_detail', args=[dispute.id])
+            )
+            messages.success(request, "Dispute raised successfully.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+        else:
+            for field, errors in form.errors.items():
+                for error in errors:
+                    messages.error(request, error)
             return redirect('my_tasks')
-        dispute = Dispute.objects.create(task=task, raised_by=request.user, reason=reason)
-        task.status = 'disputed'
-        task.save()
-        Notification.objects.create(
-            recipient=task.posted_by,
-            message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
-            link=reverse('dispute_detail', args=[dispute.id])
-        )
-        messages.success(request, "Dispute raised successfully.")
-        return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
