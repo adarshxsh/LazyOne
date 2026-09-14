@@ -72,13 +72,24 @@ class RewardLedger(models.Model):
         return f"{self.user.username}: {self.amount} points for {self.description}"
 
 class Dispute(models.Model):
+    CATEGORY_CHOICES = (
+        ('incomplete_requirements', 'Incomplete Requirements'),
+        ('unresponsive_counterparty', 'Unresponsive Counterparty'),
+        ('deliverable_issue', 'Deliverable Issue'),
+        ('payment_points_dispute', 'Payment/Points Dispute'),
+        ('other', 'Other'),
+    )
+
     STATUS_CHOICES = (
         ('open', 'Open'),
         ('resolved', 'Resolved'),
     )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
+    category = models.CharField(max_length=50, choices=CATEGORY_CHOICES, blank=True, null=True)
     reason = models.TextField()
+    evidence_url = models.URLField(blank=True, null=True)
+    evidence_details = models.TextField(blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     created_at = models.DateTimeField(auto_now_add=True)
 
