@@ -52,7 +52,7 @@ class Task(models.Model):
 
     @property
     def main_chat(self):
-        return self.conversations.first()
+        return getattr(self, 'conversation', None)
 
 class RewardLedger(models.Model):
     TRANSACTION_TYPES = (
