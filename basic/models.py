@@ -1,3 +1,4 @@
+import math
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -51,6 +52,10 @@ class Task(models.Model):
         return self.title
 
     @property
+    def collateral_required(self):
+        return max(1, math.ceil(self.reward * 0.2))
+
+    @property
     def main_chat(self):
         return self.conversations.first()
 
@@ -60,11 +65,14 @@ class RewardLedger(models.Model):
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('collateral_lock', 'Collateral Lock'),
+        ('collateral_release', 'Collateral Release'),
+        ('collateral_slash', 'Collateral Slash'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=30, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
