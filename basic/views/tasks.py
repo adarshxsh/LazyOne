@@ -7,6 +7,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.db.models import Q
 from datetime import datetime, timedelta
+from django.conf import settings
 
 
 @login_required(login_url='/login/')
@@ -64,6 +65,18 @@ def take_task(request, task_id):
     if task.posted_by == request.user:
         messages.error(request, "You cannot take your own task.")
     else:
+        user_profile = request.user.userprofile
+        high_val_threshold = getattr(settings, 'HIGH_VALUE_TASK_THRESHOLD', 500)
+        min_rep_high_val = getattr(settings, 'MIN_REPUTATION_HIGH_VALUE_TASK', 80)
+        min_rep_task = getattr(settings, 'MIN_REPUTATION_TASK_TAKING', 30)
+
+        if user_profile.reputation_score < min_rep_task:
+            messages.error(request, f"Your reputation score ({user_profile.reputation_score}) is too low to claim tasks.")
+            return redirect('my_tasks')
+        elif task.reward >= high_val_threshold and user_profile.reputation_score < min_rep_high_val:
+            messages.error(request, f"Your reputation score ({user_profile.reputation_score}) is too low to claim high-reward tasks (minimum required: {min_rep_high_val}).")
+            return redirect('my_tasks')
+
         with transaction.atomic():
             task.status = 'in_progress'
             task.taken_by = request.user
@@ -85,6 +98,8 @@ def complete_task(request, task_id):
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
         task_doer_profile.rewards += task.reward
+        task_doer_profile.tasks_completed += 1
+        task_doer_profile.update_reputation(5)
         task_doer_profile.save()
         task.status = 'completed'
         task.save()
@@ -156,6 +171,11 @@ def accept_cancellation(request, task_id):
 def abandon_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
     with transaction.atomic():
+        taker_profile = request.user.userprofile
+        taker_profile.tasks_abandoned += 1
+        taker_profile.update_reputation(-15)
+        taker_profile.save()
+
         task.status = 'available'
         task.taken_by = None
         task.save()
