@@ -85,13 +85,31 @@ def complete_task(request, task_id):
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
         task_doer_profile.rewards += task.reward
+
+        if hasattr(task, 'dispute'):
+            dispute = task.dispute
+            dispute.status = 'resolved'
+            if dispute.bond_status == 'held' and dispute.deposit_amount > 0:
+                if dispute.raised_by == task.taken_by:
+                    task_doer_profile.rewards += dispute.deposit_amount
+                else:
+                    raised_by_profile = dispute.raised_by.userprofile
+                    raised_by_profile.rewards += dispute.deposit_amount
+                    raised_by_profile.save()
+
+                RewardLedger.objects.create(
+                    user=dispute.raised_by,
+                    task=task,
+                    amount=dispute.deposit_amount,
+                    transaction_type='dispute_deposit_refund',
+                    description=f"Deposit bond refund upon task completion: '{task.title}'"
+                )
+                dispute.bond_status = 'refunded'
+            dispute.save()
+
         task_doer_profile.save()
         task.status = 'completed'
         task.save()
-
-        if hasattr(task, 'dispute'):
-            task.dispute.status = 'resolved'
-            task.dispute.save()
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,
@@ -140,6 +158,20 @@ def accept_cancellation(request, task_id):
             user=task.posted_by, task=task, amount=task.reward,
             transaction_type='task_cancellation', description=f"Refund for cancelled task: '{task.title}'"
         )
+        if hasattr(task, 'dispute'):
+            dispute = task.dispute
+            if dispute.bond_status == 'held' and dispute.deposit_amount > 0:
+                dispute_raiser_profile = dispute.raised_by.userprofile
+                dispute_raiser_profile.rewards += dispute.deposit_amount
+                dispute_raiser_profile.save()
+
+                RewardLedger.objects.create(
+                    user=dispute.raised_by, task=task, amount=dispute.deposit_amount,
+                    transaction_type='dispute_deposit_refund', description=f"Deposit bond refund on cancellation for task: '{task.title}'"
+                )
+                dispute.bond_status = 'refunded'
+                dispute.save()
+            dispute.delete()
         task.status = 'available'
         task.taken_by = None
         task.cancellation_requested = False
@@ -156,6 +188,20 @@ def accept_cancellation(request, task_id):
 def abandon_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
     with transaction.atomic():
+        if hasattr(task, 'dispute'):
+            dispute = task.dispute
+            if dispute.bond_status == 'held' and dispute.deposit_amount > 0:
+                dispute_raiser_profile = dispute.raised_by.userprofile
+                dispute_raiser_profile.rewards += dispute.deposit_amount
+                dispute_raiser_profile.save()
+
+                RewardLedger.objects.create(
+                    user=dispute.raised_by, task=task, amount=dispute.deposit_amount,
+                    transaction_type='dispute_deposit_refund', description=f"Deposit bond refund on abandonment for task: '{task.title}'"
+                )
+                dispute.bond_status = 'refunded'
+                dispute.save()
+            dispute.delete()
         task.status = 'available'
         task.taken_by = None
         task.save()

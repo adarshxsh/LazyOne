@@ -125,7 +125,10 @@
 <div id="dispute-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 hidden">
     <div class="bg-gray-100 rounded-2xl shadow-2xl p-8 max-w-md w-full border border-gray-300">
         <h3 class="text-2xl font-bold text-gray-800 mb-4">Raise a Dispute</h3>
-        <p class="text-gray-600 mb-6">Please explain why you are raising a dispute. This will be visible to the task poster.</p>
+        <p class="text-gray-600 mb-2">Please explain why you are raising a dispute. This will be visible to the task poster.</p>
+        <p class="text-xs text-amber-700 bg-amber-50 p-2 rounded mb-4 font-medium border border-amber-200">
+            Note: Initiating a dispute requires a refundable 20% deposit bond (minimum 10 points), which will be held in escrow until the dispute is resolved or withdrawn.
+        </p>
         <form id="dispute-form" method="post">
             {% csrf_token %}
             <textarea id="dispute-reason" name="reason" rows="4" required class="w-full px-4 py-3 bg-white border border-gray-300 rounded-lg text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-600"></textarea>
