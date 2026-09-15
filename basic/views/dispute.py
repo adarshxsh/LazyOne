@@ -1,9 +1,11 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from ..models import Dispute, Task, Notification
+from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+from django.db import transaction
+from django.core.exceptions import ValidationError
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
@@ -48,13 +50,50 @@ def raise_dispute(request, task_id):
 def withdraw_dispute(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user)
     task = dispute.task
-    task.status = 'in_progress'
-    task.save()
-    dispute.delete()
-    Notification.objects.create(
-        recipient=task.posted_by,
-        message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
-        link=reverse('my_tasks')
-    )
-    messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'.")
+    try:
+        with transaction.atomic():
+            task.status = 'in_progress'
+            task.save()
+            dispute.transition_to('withdrawn', save=True)
+            Notification.objects.create(
+                recipient=task.posted_by,
+                message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
+                link=reverse('my_tasks')
+            )
+        messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'.")
+    except ValidationError as e:
+        messages.error(request, e.message if hasattr(e, 'message') else str(e))
     return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def transition_dispute(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+    if request.user != task.posted_by and request.user != task.taken_by and request.user != dispute.raised_by and not request.user.is_staff:
+        messages.error(request, "You are not authorized to update this dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    target_state = request.POST.get('target_state')
+    if not target_state:
+        messages.error(request, "Target state is required.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    try:
+        with transaction.atomic():
+            dispute.transition_to(target_state, save=True)
+            if target_state == 'resolved':
+                task_doer_profile = task.taken_by.userprofile
+                task_doer_profile.rewards += task.reward
+                task_doer_profile.save()
+                task.status = 'completed'
+                task.save()
+                RewardLedger.objects.create(
+                    user=task.taken_by, task=task, amount=task.reward,
+                    transaction_type='task_completion', description=f"Completed task: '{task.title}'"
+                )
+        messages.success(request, f"Dispute updated to '{dispute.get_status_display()}'.")
+    except ValidationError as e:
+        messages.error(request, e.message if hasattr(e, 'message') else str(e))
+
+    return redirect('dispute_detail', dispute_id=dispute.id)

@@ -82,6 +82,11 @@ def take_task(request, task_id):
 @login_required(login_url='/login/')
 def complete_task(request, task_id):
     task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
+    if hasattr(task, 'dispute') and task.dispute.status not in ['resolved', 'withdrawn']:
+        if not task.dispute.can_transition_to('resolved'):
+            messages.error(request, f"Cannot complete task: the active dispute in '{task.dispute.get_status_display()}' state cannot be resolved directly.")
+            return redirect('my_tasks')
+
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
         task_doer_profile.rewards += task.reward
@@ -89,9 +94,8 @@ def complete_task(request, task_id):
         task.status = 'completed'
         task.save()
 
-        if hasattr(task, 'dispute'):
-            task.dispute.status = 'resolved'
-            task.dispute.save()
+        if hasattr(task, 'dispute') and task.dispute.status not in ['resolved', 'withdrawn']:
+            task.dispute.transition_to('resolved', save=True)
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,
