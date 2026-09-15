@@ -60,11 +60,13 @@ class RewardLedger(models.Model):
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('juror_stake_lock', 'Jury Stake Locked'),
+        ('juror_stake_release', 'Jury Stake Released'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -74,6 +76,8 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('pending_juror', 'Pending Juror'),
+        ('pending-juror', 'Pending Juror'),
         ('resolved', 'Resolved'),
     )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
@@ -84,6 +88,44 @@ class Dispute(models.Model):
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+class JuryAssignment(models.Model):
+    STAKE_STATUS_CHOICES = (
+        ('locked', 'Locked'),
+        ('released', 'Released'),
+        ('refunded', 'Refunded'),
+        ('slashed', 'Slashed'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='jury_assignments')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jury_assignments')
+    staked_amount = models.IntegerField(default=100)
+    stake_status = models.CharField(max_length=20, choices=STAKE_STATUS_CHOICES, default='locked')
+    is_staked = models.BooleanField(default=True)
+    has_voted = models.BooleanField(default=False)
+    voted_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Jury assignment: {self.juror.username} for dispute {self.dispute.id}"
+
+class DisputeVote(models.Model):
+    VOTE_CHOICES = (
+        ('poster', 'In Favor of Poster'),
+        ('taker', 'In Favor of Taker'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    choice = models.CharField(max_length=10, choices=VOTE_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'voter')
+
+    def __str__(self):
+        return f"Vote by {self.voter.username} on dispute {self.dispute.id}: {self.choice}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
