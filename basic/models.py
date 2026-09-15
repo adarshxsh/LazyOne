@@ -1,3 +1,4 @@
+import os
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -84,6 +85,31 @@ class Dispute(models.Model):
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    @property
+    def evidence_list(self):
+        return self.evidence_entries.all()
+
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidence_entries')
+    uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='uploaded_evidence')
+    file = models.FileField(upload_to='dispute_evidence/%Y/%m/%d/')
+    description = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Evidence for Dispute #{self.dispute.id} by {self.uploaded_by.username}"
+
+    @property
+    def filename(self):
+        return os.path.basename(self.file.name) if self.file else ''
+
+    @property
+    def is_image(self):
+        if not self.file:
+            return False
+        ext = os.path.splitext(self.file.name)[1].lower()
+        return ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
