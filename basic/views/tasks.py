@@ -1,6 +1,7 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.conf import settings
 from ..models import Task, Conversation, Notification, RewardLedger
 from django.db import transaction
 from django.urls import reverse
@@ -90,8 +91,21 @@ def complete_task(request, task_id):
         task.save()
 
         if hasattr(task, 'dispute'):
-            task.dispute.status = 'resolved'
-            task.dispute.save()
+            dispute = task.dispute
+            if dispute.status == 'open':
+                dispute.status = 'resolved'
+                dispute.save()
+                deposit_amount = getattr(dispute, 'deposit_amount', getattr(settings, 'DISPUTE_DEPOSIT', 100))
+                raised_by_profile = dispute.raised_by.userprofile
+                raised_by_profile.rewards += deposit_amount
+                raised_by_profile.save()
+                RewardLedger.objects.create(
+                    user=dispute.raised_by,
+                    task=task,
+                    amount=deposit_amount,
+                    transaction_type='dispute_deposit_refund',
+                    description=f"Dispute deposit refunded for task: '{task.title}'"
+                )
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,
