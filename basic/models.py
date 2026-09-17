@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.conf import settings
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -46,9 +47,15 @@ class Task(models.Model):
     deadline = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='available')
     cancellation_requested = models.BooleanField(default=False)
+    taker_collateral = models.IntegerField(default=0)
 
     def __str__(self):
         return self.title
+
+    @property
+    def collateral_required(self):
+        pct = getattr(settings, 'TASK_COLLATERAL_PERCENTAGE', 20)
+        return (self.reward * pct) // 100
 
     @property
     def main_chat(self):
@@ -60,11 +67,14 @@ class RewardLedger(models.Model):
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('taker_collateral_deposit', 'Taker Collateral Deposit'),
+        ('taker_collateral_refund', 'Taker Collateral Refund'),
+        ('taker_collateral_slash', 'Taker Collateral Slash'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
