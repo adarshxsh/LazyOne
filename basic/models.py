@@ -1,6 +1,18 @@
+import os
+from datetime import timedelta
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.core.exceptions import ValidationError
+
+def validate_evidence_file(value):
+    ext = os.path.splitext(value.name)[1].lower()
+    valid_extensions = ['.png', '.jpg', '.jpeg', '.pdf']
+    if ext not in valid_extensions:
+        raise ValidationError(f"Unsupported file extension: '{ext}'. Allowed extensions are: .png, .jpg, .jpeg, .pdf")
+    max_size = 5 * 1024 * 1024  # 5 MB
+    if value.size > max_size:
+        raise ValidationError("File size exceeds maximum allowed limit of 5 MB.")
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -81,9 +93,26 @@ class Dispute(models.Model):
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        if not self.expires_at:
+            base_time = self.created_at if self.created_at else timezone.now()
+            self.expires_at = base_time + timedelta(days=7)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidence')
+    submitted_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='submitted_evidence')
+    statement = models.TextField(blank=True)
+    file = models.FileField(upload_to='dispute_evidence/', validators=[validate_evidence_file], null=True, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Evidence by {self.submitted_by.username} for Dispute {self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
