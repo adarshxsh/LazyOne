@@ -27,6 +27,15 @@ def raise_dispute(request, task_id):
     if task.taken_by != request.user or task.status != 'in_progress':
         messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
         return redirect('my_tasks')
+
+    user_profile = request.user.userprofile
+    if user_profile.reputation_score < user_profile.MIN_REPUTATION_THRESHOLD:
+        messages.error(
+            request,
+            f"Your reputation score ({user_profile.reputation_score:.1f}) is below the required threshold ({user_profile.MIN_REPUTATION_THRESHOLD:.1f}) to raise disputes."
+        )
+        return redirect('my_tasks')
+
     if request.method == 'POST':
         reason = request.POST.get('reason')
         if not reason:
@@ -94,6 +103,16 @@ def withdraw_dispute(request, dispute_id):
         )
         dispute.status = 'resolved'
         dispute.save()
+
+        raiser_profile = request.user.userprofile
+        raiser_profile.disputes_lost += 1
+        raiser_profile.update_reputation()
+        raiser_profile.save()
+
+        poster_profile = task.posted_by.userprofile
+        poster_profile.disputes_won += 1
+        poster_profile.update_reputation()
+        poster_profile.save()
 
         task.status = 'in_progress'
         task.save()

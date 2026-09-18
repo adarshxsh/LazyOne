@@ -26,6 +26,38 @@ class UserProfile(models.Model):
     email_otp = models.CharField(max_length=6, blank=True, null=True)
     email_otp_created_at = models.DateTimeField(blank=True, null=True)
 
+    # Reputation & Reliability Tracking
+    MIN_REPUTATION_THRESHOLD = 50.0
+
+    reputation_score = models.FloatField(default=100.0)
+    tasks_completed = models.IntegerField(default=0)
+    tasks_abandoned = models.IntegerField(default=0)
+    disputes_won = models.IntegerField(default=0)
+    disputes_lost = models.IntegerField(default=0)
+
+    @property
+    def reliability_percentage(self):
+        total = self.tasks_completed + self.tasks_abandoned
+        if total > 0:
+            return round((self.tasks_completed / total) * 100.0, 1)
+        return 100.0
+
+    @property
+    def completion_rate(self):
+        return self.reliability_percentage
+
+    def update_reputation(self):
+        score = 100.0 + (self.tasks_completed * 10.0) - (self.tasks_abandoned * 20.0) + (self.disputes_won * 10.0) - (self.disputes_lost * 15.0)
+        self.reputation_score = max(0.0, score)
+
+    def initialize_baseline_reputation(self):
+        if hasattr(self.user, 'taken_tasks'):
+            completed_count = self.user.taken_tasks.filter(status='completed').count()
+            if self.tasks_completed < completed_count:
+                self.tasks_completed = completed_count
+                self.update_reputation()
+                self.save()
+
     def __str__(self):
         return self.user.username
 
