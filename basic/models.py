@@ -2,6 +2,7 @@ import math
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.core.exceptions import ValidationError
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -80,10 +81,31 @@ class RewardLedger(models.Model):
         return f"{self.user.username}: {self.amount} points for {self.description}"
 
 class Dispute(models.Model):
+    STATUS_OPEN = 'open'
+    STATUS_EVIDENCE_SUBMISSION = 'evidence_submission'
+    STATUS_VOTING = 'voting'
+    STATUS_APPEALED = 'appealed'
+    STATUS_RESOLVED = 'resolved'
+    STATUS_WITHDRAWN = 'withdrawn'
+
     STATUS_CHOICES = (
-        ('open', 'Open'),
-        ('resolved', 'Resolved'),
+        (STATUS_OPEN, 'Open'),
+        (STATUS_EVIDENCE_SUBMISSION, 'Evidence Submission'),
+        (STATUS_VOTING, 'Voting'),
+        (STATUS_APPEALED, 'Appealed'),
+        (STATUS_RESOLVED, 'Resolved'),
+        (STATUS_WITHDRAWN, 'Withdrawn'),
     )
+
+    VALID_TRANSITIONS = {
+        STATUS_OPEN: {STATUS_EVIDENCE_SUBMISSION, STATUS_VOTING, STATUS_RESOLVED, STATUS_WITHDRAWN},
+        STATUS_EVIDENCE_SUBMISSION: {STATUS_VOTING, STATUS_RESOLVED, STATUS_WITHDRAWN},
+        STATUS_VOTING: {STATUS_APPEALED, STATUS_RESOLVED, STATUS_WITHDRAWN},
+        STATUS_APPEALED: {STATUS_VOTING, STATUS_RESOLVED, STATUS_WITHDRAWN},
+        STATUS_RESOLVED: set(),
+        STATUS_WITHDRAWN: set(),
+    }
+
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
         ('refunded', 'Refunded'),
@@ -99,6 +121,38 @@ class Dispute(models.Model):
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def get_available_transitions(self):
+        return list(self.VALID_TRANSITIONS.get(self.status, set()))
+
+    def can_transition_to(self, target_state):
+        return target_state in self.VALID_TRANSITIONS.get(self.status, set())
+
+    def transition_to(self, target_state, save=True):
+        if not self.can_transition_to(target_state):
+            raise ValidationError(
+                f"Invalid state transition from '{self.status}' to '{target_state}'."
+            )
+        self.status = target_state
+        if save:
+            self.save()
+
+    def clean(self):
+        super().clean()
+        if self.pk:
+            try:
+                old_instance = Dispute.objects.get(pk=self.pk)
+                if old_instance.status != self.status:
+                    if not old_instance.can_transition_to(self.status):
+                        raise ValidationError(
+                            f"Invalid status transition from '{old_instance.status}' to '{self.status}'."
+                        )
+            except Dispute.DoesNotExist:
+                pass
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:

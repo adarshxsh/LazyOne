@@ -2,6 +2,8 @@ from django.test import TestCase, Client
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
+from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from datetime import timedelta
 from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
 
@@ -113,7 +115,7 @@ class DisputeDepositBondTests(TestCase):
 
         dispute.refresh_from_db()
         self.assertEqual(dispute.escrow_status, 'refunded')
-        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.status, 'withdrawn')
 
         # Balance restored: 40 + 60 = 100
         self.taker_profile.refresh_from_db()
@@ -181,4 +183,124 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class DisputeStateTransitionTests(TestCase):
+    def setUp(self):
+        self.user1 = User.objects.create_user(username='user1', password='password123')
+        self.user2 = User.objects.create_user(username='user2', password='password123')
+        UserProfile.objects.create(user=self.user1, rewards=500)
+        UserProfile.objects.create(user=self.user2, rewards=500)
+
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="State Transition Task",
+            description="Testing states",
+            reward=100,
+            posted_by=self.user1,
+            taken_by=self.user2,
+            status='disputed',
+            deadline=self.deadline
+        )
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.user2,
+            reason="State machine test",
+            deposit_amount=50,
+            escrow_status='held',
+            status='open'
+        )
+
+    def test_status_choices_tuple_includes_all_states(self):
+        choice_keys = [choice[0] for choice in Dispute.STATUS_CHOICES]
+        expected = ['open', 'evidence_submission', 'voting', 'appealed', 'resolved', 'withdrawn']
+        for state in expected:
+            self.assertIn(state, choice_keys)
+
+    def test_valid_state_transitions_via_transition_to(self):
+        # open -> evidence_submission
+        self.dispute.transition_to('evidence_submission')
+        self.assertEqual(self.dispute.status, 'evidence_submission')
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'evidence_submission')
+
+        # evidence_submission -> voting
+        self.dispute.transition_to('voting')
+        self.assertEqual(self.dispute.status, 'voting')
+
+        # voting -> appealed
+        self.dispute.transition_to('appealed')
+        self.assertEqual(self.dispute.status, 'appealed')
+
+        # appealed -> voting
+        self.dispute.transition_to('voting')
+        self.assertEqual(self.dispute.status, 'voting')
+
+        # voting -> resolved
+        self.dispute.transition_to('resolved')
+        self.assertEqual(self.dispute.status, 'resolved')
+
+    def test_invalid_state_transition_raises_validation_error(self):
+        # open -> appealed is illegal
+        with self.assertRaises(ValidationError):
+            self.dispute.transition_to('appealed')
+
+        # Verify DB status remained 'open'
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'open')
+
+    def test_orm_assignment_and_save_enforces_validation(self):
+        # Direct assignment open -> appealed
+        self.dispute.status = 'appealed'
+        with self.assertRaises(ValidationError):
+            self.dispute.save()
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'open')
+
+    def test_terminal_states_prohibit_further_transitions(self):
+        # Transition open -> resolved (terminal)
+        self.dispute.transition_to('resolved')
+        self.assertEqual(self.dispute.status, 'resolved')
+
+        # Attempt transition from resolved -> open or voting or appealed or withdrawn
+        for target in ['open', 'evidence_submission', 'voting', 'appealed', 'withdrawn']:
+            with self.assertRaises(ValidationError):
+                self.dispute.transition_to(target)
+
+        # Transition open -> withdrawn (terminal)
+        dispute2 = Dispute.objects.create(
+            task=Task.objects.create(
+                title="Task 2", description="Test", reward=100,
+                posted_by=self.user1, taken_by=self.user2, status='disputed', deadline=self.deadline
+            ),
+            raised_by=self.user2,
+            reason="Test withdrawn",
+            deposit_amount=50,
+            escrow_status='held',
+            status='open'
+        )
+        dispute2.transition_to('withdrawn')
+        self.assertEqual(dispute2.status, 'withdrawn')
+
+        for target in ['open', 'evidence_submission', 'voting', 'appealed', 'resolved']:
+            with self.assertRaises(ValidationError):
+                dispute2.transition_to(target)
+
+    def test_resolve_expired_disputes_command_processes_intermediate_states(self):
+        # Set dispute created_at to past expiry threshold (8 days ago)
+        Dispute.objects.filter(id=self.dispute.id).update(
+            created_at=timezone.now() - timedelta(days=8)
+        )
+        self.dispute.refresh_from_db()
+
+        # Move to evidence_submission
+        self.dispute.transition_to('evidence_submission')
+        self.assertEqual(self.dispute.status, 'evidence_submission')
+
+        # Run resolve_expired_disputes management command
+        call_command('resolve_expired_disputes', days=7)
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'resolved')
 
