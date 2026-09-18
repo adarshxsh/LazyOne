@@ -182,3 +182,27 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+    def test_backwards_compatibility_old_dispute_zero_deposit(self):
+        """Existing disputes created prior to bond enforcement (0 deposit) resolve gracefully without errors."""
+        self.task.status = 'disputed'
+        self.task.save()
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Old dispute',
+            deposit_amount=0,
+            escrow_status='held'
+        )
+
+        self.client.login(username='poster', password='password123')
+        response = self.client.get(reverse('complete_task', args=[self.task.id]))
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.taker_profile.refresh_from_db()
+        # 100 (initial) + 300 (task reward) = 400
+        self.assertEqual(self.taker_profile.rewards, 400)
+
+
