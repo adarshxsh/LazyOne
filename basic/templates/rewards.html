@@ -10,7 +10,7 @@
     </div>
 
     <!-- Key Metrics -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 text-center">
         <div class="bg-gray-700/50 p-6 rounded-2xl">
             <p class="text-sm font-medium text-gray-400">Current Balance</p>
             <p class="mt-1 text-4xl font-bold text-cyan-400">{{ current_balance }}</p>
@@ -22,6 +22,10 @@
         <div class="bg-gray-700/50 p-6 rounded-2xl">
             <p class="text-sm font-medium text-gray-400">Points Pending</p>
             <p class="mt-1 text-4xl font-bold text-yellow-400">{{ pending_points }}</p>
+        </div>
+        <div class="bg-gray-700/50 p-6 rounded-2xl">
+            <p class="text-sm font-medium text-gray-400">Escrowed Dispute Balance</p>
+            <p class="mt-1 text-4xl font-bold text-red-400">{{ escrowed_dispute_balance }}</p>
         </div>
     </div>
 
