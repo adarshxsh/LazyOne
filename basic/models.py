@@ -36,6 +36,7 @@ class Task(models.Model):
         ('completed', 'Completed'),
         ('disputed', 'Disputed'),
         ('cancelled', 'Cancelled'),
+        ('resolved', 'Resolved'),
     )
 
     title = models.CharField(max_length=200)
@@ -68,6 +69,7 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('dispute_resolution', 'Dispute Resolution'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
@@ -83,6 +85,8 @@ class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
         ('resolved', 'Resolved'),
+        ('appealed', 'Appealed'),
+        ('finalized', 'Finalized'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
@@ -96,6 +100,18 @@ class Dispute(models.Model):
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
+
+    # Initial arbitration fields
+    resolved_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='resolved_disputes')
+    winner = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='won_disputes')
+    resolution_note = models.TextField(blank=True, default='')
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    # Secondary appeal review fields
+    final_reviewer = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='finalized_disputes')
+    final_verdict = models.CharField(max_length=20, blank=True, default='')
+    final_verdict_note = models.TextField(blank=True, default='')
+    finalized_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
@@ -141,6 +157,18 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class DisputeAppeal(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='appeals')
+    appellant = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_appeals')
+    reason = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'appellant')
+
+    def __str__(self):
+        return f"Appeal by {self.appellant.username} for dispute #{self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
