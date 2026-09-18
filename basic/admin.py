@@ -1,3 +1,9 @@
 from django.contrib import admin
+from .models import Dispute, DisputeEvidence, Task, UserProfile, RewardLedger, Notification
 
-# Register your models here.
+admin.site.register(Dispute)
+admin.site.register(DisputeEvidence)
+admin.site.register(Task)
+admin.site.register(UserProfile)
+admin.site.register(RewardLedger)
+admin.site.register(Notification)
