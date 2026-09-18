@@ -64,6 +64,7 @@ class RewardLedger(models.Model):
         ('task_creation', 'Task Creation (Points Reserved)'),
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
+        ('task_abandonment', 'Task Abandonment Penalty'),
         ('initial_points', 'Initial Points'),
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
