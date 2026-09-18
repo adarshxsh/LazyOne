@@ -28,9 +28,22 @@ def raise_dispute(request, task_id):
         messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
         return redirect('my_tasks')
     if request.method == 'POST':
-        reason = request.POST.get('reason')
+        category = request.POST.get('category', '').strip()
+        reason = request.POST.get('reason', '').strip()
+        evidence = (request.POST.get('evidence') or request.POST.get('evidence_description') or '').strip()
+
+        valid_categories = [choice[0] for choice in Dispute.CATEGORY_CHOICES]
+        if not category or category not in valid_categories:
+            messages.error(request, "A valid dispute category is required.")
+            return redirect('my_tasks')
+
         if not reason:
             messages.error(request, "A reason is required to raise a dispute.")
+            return redirect('my_tasks')
+
+        evidence_text = evidence if evidence else reason
+        if len(evidence_text) < 10:
+            messages.error(request, "A minimum evidence description of at least 10 characters is required.")
             return redirect('my_tasks')
 
         deposit_amount = task.deposit_bond_amount
@@ -49,7 +62,9 @@ def raise_dispute(request, task_id):
             if hasattr(task, 'dispute'):
                 dispute = task.dispute
                 dispute.raised_by = request.user
+                dispute.category = category
                 dispute.reason = reason
+                dispute.evidence = evidence
                 dispute.status = 'open'
                 dispute.deposit_amount = deposit_amount
                 dispute.escrow_status = 'held'
@@ -58,7 +73,9 @@ def raise_dispute(request, task_id):
                 dispute = Dispute.objects.create(
                     task=task,
                     raised_by=request.user,
+                    category=category,
                     reason=reason,
+                    evidence=evidence,
                     deposit_amount=deposit_amount,
                     escrow_status='held'
                 )

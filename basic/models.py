@@ -89,9 +89,17 @@ class Dispute(models.Model):
         ('refunded', 'Refunded'),
         ('forfeited', 'Forfeited'),
     )
+    CATEGORY_CHOICES = (
+        ('non_delivery', 'Non-Delivery'),
+        ('poor_quality', 'Poor Quality'),
+        ('unresponsive_poster', 'Unresponsive Poster'),
+        ('other', 'Other'),
+    )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
+    category = models.CharField(max_length=50, choices=CATEGORY_CHOICES, default='other')
     reason = models.TextField()
+    evidence = models.TextField(blank=True, default='')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')

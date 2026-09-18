@@ -116,6 +116,9 @@
                         </div>
                     </div>
                     <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">Posted by: {{ task.posted_by.username }} | Taken by: {{ task.taken_by.username }}</p>
+                    {% if task.dispute.category %}
+                    <p class="text-sm text-gray-700 dark:text-gray-300 mt-1">Category: <span class="font-semibold text-red-600 dark:text-red-400">{{ task.dispute.get_category_display }}</span></p>
+                    {% endif %}
                     <p class="text-sm text-gray-700 dark:text-gray-300 mt-2">Reason: <em class="text-gray-800 dark:text-gray-200">"{{ task.dispute.reason }}"</em></p>
                 </div>
                 <div class="mt-4 pt-4 border-t border-red-300 dark:border-red-700/50 flex items-center justify-end">

@@ -57,7 +57,7 @@ class DisputeDepositBondTests(TestCase):
         self.client.login(username='taker', password='password123')
         response = self.client.post(
             reverse('raise_dispute', args=[self.task.id]),
-            {'reason': 'Work not clear'}
+            {'category': 'other', 'reason': 'Work not clear', 'evidence': 'Detailed evidence description here'}
         )
 
         self.assertRedirects(response, reverse('my_tasks'))
@@ -73,7 +73,7 @@ class DisputeDepositBondTests(TestCase):
         self.client.login(username='taker', password='password123')
         response = self.client.post(
             reverse('raise_dispute', args=[self.task.id]),
-            {'reason': 'Unreasonable request'}
+            {'category': 'other', 'reason': 'Unreasonable request', 'evidence': 'Detailed evidence description here'}
         )
 
         # Deposit bond is 60. Taker balance was 100 -> now 40
@@ -99,7 +99,7 @@ class DisputeDepositBondTests(TestCase):
         self.client.login(username='taker', password='password123')
         self.client.post(
             reverse('raise_dispute', args=[self.task.id]),
-            {'reason': 'Dispute reason'}
+            {'category': 'other', 'reason': 'Dispute reason', 'evidence': 'Detailed evidence description here'}
         )
 
         dispute = Dispute.objects.get(task=self.task)
@@ -129,7 +129,7 @@ class DisputeDepositBondTests(TestCase):
         self.client.login(username='taker', password='password123')
         self.client.post(
             reverse('raise_dispute', args=[self.task.id]),
-            {'reason': 'Dispute reason'}
+            {'category': 'other', 'reason': 'Dispute reason', 'evidence': 'Detailed evidence description here'}
         )
 
         # Poster marks task as completed
@@ -182,3 +182,97 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class DisputeCategoryAndEvidenceTests(TestCase):
+    def setUp(self):
+        self.poster = User.objects.create_user(username='poster_evidence', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+        self.taker = User.objects.create_user(username='taker_evidence', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+        self.task = Task.objects.create(
+            title='Test Task for Dispute',
+            description='Task description',
+            reward=10,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress'
+        )
+        self.conversation = Conversation.objects.create(task=self.task)
+        self.conversation.participants.add(self.poster, self.taker)
+        self.client = Client()
+        self.client.login(username='taker_evidence', password='password123')
+
+    def test_raise_dispute_valid_category_and_evidence(self):
+        url = reverse('raise_dispute', args=[self.task.id])
+        data = {
+            'category': 'non_delivery',
+            'reason': 'The work was not delivered as promised.',
+            'evidence': 'I contacted the poster multiple times over 3 days with no delivery.'
+        }
+        response = self.client.post(url, data)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+        self.assertTrue(hasattr(self.task, 'dispute'))
+        dispute = self.task.dispute
+        self.assertEqual(dispute.category, 'non_delivery')
+        self.assertEqual(dispute.get_category_display(), 'Non-Delivery')
+        self.assertEqual(dispute.reason, 'The work was not delivered as promised.')
+        self.assertEqual(dispute.evidence, 'I contacted the poster multiple times over 3 days with no delivery.')
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+    def test_raise_dispute_missing_category_rejected(self):
+        url = reverse('raise_dispute', args=[self.task.id])
+        data = {
+            'category': '',
+            'reason': 'Valid reason here that is long enough.',
+            'evidence': 'Valid evidence description here.'
+        }
+        response = self.client.post(url, data, follow=True)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+        self.assertFalse(hasattr(self.task, 'dispute'))
+        self.assertContains(response, "A valid dispute category is required.")
+
+    def test_raise_dispute_invalid_category_rejected(self):
+        url = reverse('raise_dispute', args=[self.task.id])
+        data = {
+            'category': 'invalid_enum_choice',
+            'reason': 'Valid reason here that is long enough.',
+            'evidence': 'Valid evidence description here.'
+        }
+        response = self.client.post(url, data, follow=True)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+        self.assertFalse(hasattr(self.task, 'dispute'))
+        self.assertContains(response, "A valid dispute category is required.")
+
+    def test_raise_dispute_short_evidence_rejected(self):
+        url = reverse('raise_dispute', args=[self.task.id])
+        data = {
+            'category': 'poor_quality',
+            'reason': 'Short',
+            'evidence': 'Short'
+        }
+        response = self.client.post(url, data, follow=True)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+        self.assertFalse(hasattr(self.task, 'dispute'))
+        self.assertContains(response, "at least 10 characters")
+
+    def test_dispute_detail_view_renders_category_and_evidence(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            category='poor_quality',
+            reason='The work quality was below standards.',
+            evidence='Screenshots and logs showing errors.'
+        )
+        self.task.status = 'disputed'
+        self.task.save()
+
+        url = reverse('dispute_detail', args=[dispute.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Poor Quality')
+        self.assertContains(response, 'The work quality was below standards.')
+        self.assertContains(response, 'Screenshots and logs showing errors.')
