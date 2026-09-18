@@ -130,4 +130,7 @@ print("MEDIA_FILES: OK")
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 print("DEFAULT_AUTO_FIELD: OK")
 
+# Task abandonment penalty (fixed flat point value)
+TASK_ABANDONMENT_PENALTY = int(os.getenv('TASK_ABANDONMENT_PENALTY', 50))
+
 print("--- settings.py loaded successfully ---")
