@@ -2,6 +2,8 @@ import math
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.conf import settings
+import math
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -47,6 +49,7 @@ class Task(models.Model):
     deadline = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='available')
     cancellation_requested = models.BooleanField(default=False)
+    locked_collateral = models.PositiveIntegerField(default=0)
 
     def __str__(self):
         return self.title
@@ -59,6 +62,19 @@ class Task(models.Model):
     def deposit_bond_amount(self):
         return max(50, math.ceil(self.reward * 0.20))
 
+    @property
+    def required_collateral(self):
+        percentage = getattr(settings, 'COLLATERAL_PERCENTAGE', 20)
+        return math.ceil(self.reward * (percentage / 100.0))
+
+    @property
+    def collateral_required(self):
+        return self.required_collateral
+
+    @property
+    def collateral(self):
+        return self.required_collateral
+
 class RewardLedger(models.Model):
     TRANSACTION_TYPES = (
         ('task_creation', 'Task Creation (Points Reserved)'),
@@ -68,6 +84,9 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('collateral_lock', 'Collateral Locked'),
+        ('collateral_unlock', 'Collateral Unlocked'),
+        ('collateral_forfeit', 'Collateral Forfeited'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
