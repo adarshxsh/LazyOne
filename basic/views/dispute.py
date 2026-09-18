@@ -2,7 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, Task, Notification, RewardLedger, DisputeEvidence
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -18,6 +18,52 @@ def dispute_detail_view(request, dispute_id):
         'task': task
     }
     return render(request, 'dispute_detail.html', context)
+
+@login_required(login_url='/login/')
+@require_POST
+def upload_dispute_evidence(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+        messages.error(request, "You are not authorized to upload evidence for this dispute.")
+        return redirect('home')
+
+    if dispute.status != 'open':
+        messages.error(request, "Cannot upload evidence for a resolved dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    files = request.FILES.getlist('file') or request.FILES.getlist('files') or list(request.FILES.values())
+    if not files:
+        messages.error(request, "Please select at least one file to upload.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    MAX_SIZE = 10 * 1024 * 1024  # 10 MB
+    ALLOWED_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'pdf', 'doc', 'docx', 'txt', 'rtf', 'csv', 'xls', 'xlsx', 'zip', 'pages', 'key', 'numbers'}
+
+    description = request.POST.get('description', '').strip()
+
+    for uploaded_file in files:
+        if uploaded_file.size > MAX_SIZE:
+            messages.error(request, f"File '{uploaded_file.name}' exceeds the maximum allowed size of 10 MB.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+        ext = uploaded_file.name.rsplit('.', 1)[-1].lower() if '.' in uploaded_file.name else ''
+        if ext not in ALLOWED_EXTENSIONS:
+            messages.error(request, f"File extension '.{ext}' is not allowed.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+    uploaded_count = 0
+    for uploaded_file in files:
+        DisputeEvidence.objects.create(
+            dispute=dispute,
+            uploader=request.user,
+            file=uploaded_file,
+            description=description
+        )
+        uploaded_count += 1
+
+    messages.success(request, f"Successfully uploaded {uploaded_count} evidence file(s).")
+    return redirect('dispute_detail', dispute_id=dispute.id)
 
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):

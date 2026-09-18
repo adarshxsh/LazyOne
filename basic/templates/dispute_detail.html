@@ -23,6 +23,68 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Evidence Attachments</h3>
+            {% if dispute.evidence_items.all %}
+                <div class="space-y-4">
+                    {% for item in dispute.evidence_items.all %}
+                        <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="font-semibold text-white">Submitted by: {{ item.uploader.username }}</span>
+                                <span class="text-sm text-gray-400">{{ item.uploaded_at|date:"F d, Y H:i" }}</span>
+                            </div>
+                            {% if item.description %}
+                                <p class="text-gray-300 mb-3">{{ item.description|linebreaksbr }}</p>
+                            {% endif %}
+                            
+                            {% if item.file %}
+                                <div class="mt-2">
+                                    {% if item.file.url %}
+                                        {% if ".jpg" in item.file.url.lower or ".jpeg" in item.file.url.lower or ".png" in item.file.url.lower or ".gif" in item.file.url.lower or ".webp" in item.file.url.lower %}
+                                            <div class="mb-2">
+                                                <img src="{{ item.file.url }}" alt="Evidence preview" class="max-w-md max-h-64 rounded border border-gray-700 object-contain">
+                                            </div>
+                                        {% endif %}
+                                        <a href="{{ item.file.url }}" download class="inline-flex items-center px-3 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-medium rounded transition-colors">
+                                            Download File
+                                        </a>
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-gray-400 italic">No evidence attachments uploaded yet.</p>
+            {% endif %}
+        </div>
+
+        {% if dispute.status == 'open' %}
+            <div class="mt-8 bg-gray-800/50 p-6 rounded-lg border border-gray-700">
+                <h3 class="text-xl font-semibold text-cyan-400 mb-4">Upload Evidence</h3>
+                <form action="{% url 'upload_dispute_evidence' dispute.id %}" method="POST" enctype="multipart/form-data" class="space-y-4">
+                    {% csrf_token %}
+                    <div>
+                        <label for="id_file" class="block text-sm font-medium text-gray-300 mb-1">Select File(s) (Max 10 MB each):</label>
+                        <input type="file" id="id_file" name="file" multiple class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-cyan-600 file:text-white hover:file:bg-cyan-700 cursor-pointer border border-gray-700 rounded-md bg-gray-900 p-2" required>
+                    </div>
+                    <div>
+                        <label for="id_description" class="block text-sm font-medium text-gray-300 mb-1">Description (optional):</label>
+                        <textarea id="id_description" name="description" rows="3" class="w-full bg-gray-900 border border-gray-700 rounded-md p-2 text-white focus:outline-none focus:border-cyan-500" placeholder="Add details or context for this evidence..."></textarea>
+                    </div>
+                    <div>
+                        <button type="submit" class="px-5 py-2 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-lg transition-colors">
+                            Upload Evidence
+                        </button>
+                    </div>
+                </form>
+            </div>
+        {% else %}
+            <div class="mt-8 bg-gray-800/30 p-4 rounded-lg border border-gray-700 text-gray-400">
+                <p>This dispute is resolved. Evidence submissions are closed.</p>
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}
