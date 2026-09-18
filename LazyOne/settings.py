@@ -76,6 +76,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'basic.context_processors.unread_notifications_count',
+                'basic.context_processors.firebase_keys',
             ],
         },
     },
