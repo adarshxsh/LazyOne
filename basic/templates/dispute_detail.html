@@ -1,28 +1,102 @@
 {% extends 'base.html' %}
 
-{% block title %}Dispute Details - {{ block.super }}{% endblock %}
+{% block title %}Dispute Arbitration - {{ block.super }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
+    <h2 class="text-3xl font-bold text-white mb-4">Dispute Arbitration Dashboard</h2>
 
     <div class="space-y-6 text-gray-300">
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+        <!-- Task Details -->
+        <div class="bg-gray-800/60 p-5 rounded-lg border border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Task Information</h3>
+            <p class="text-lg font-bold text-white">{{ dispute.task.title }}</p>
+            <p class="text-sm text-gray-400 mt-1">{{ dispute.task.description }}</p>
+            <div class="mt-3 text-sm flex flex-wrap gap-4">
+                <span><strong>Reward:</strong> <span class="text-cyan-400">{{ dispute.task.reward }} pts</span></span>
+                <span><strong>Posted By:</strong> {{ dispute.task.posted_by.username }}</span>
+                <span><strong>Taken By:</strong> {{ dispute.task.taken_by.username|default:"Unassigned" }}</span>
+                {% if dispute.task.conversation %}
+                    <span><a href="{% url 'chat_view' dispute.task.conversation.id %}" class="text-cyan-400 hover:underline">View Task Chat Room</a></span>
+                {% endif %}
+            </div>
         </div>
 
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
+        <!-- Dispute Information -->
+        <div class="bg-gray-800/60 p-5 rounded-lg border border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Dispute Information</h3>
             <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y H:i" }}</p>
+            <div class="mt-3">
+                <h4 class="font-semibold text-gray-200">Reason for Dispute:</h4>
+                <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 mt-1">{{ dispute.reason|linebreaksbr }}</p>
+            </div>
         </div>
 
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
-            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+        <!-- Task Conversation History -->
+        {% if chat_messages %}
+        <div class="bg-gray-800/60 p-5 rounded-lg border border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Communication History</h3>
+            <div class="space-y-2 max-h-60 overflow-y-auto bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+                {% for msg in chat_messages %}
+                    <div class="text-sm">
+                        <span class="font-bold text-cyan-300">{{ msg.sender.username }}:</span>
+                        <span class="text-gray-200">{{ msg.content }}</span>
+                        <span class="text-xs text-gray-500 ml-2">{{ msg.timestamp|date:"M d, H:i" }}</span>
+                    </div>
+                {% endfor %}
+            </div>
         </div>
+        {% endif %}
+
+        <!-- Jury Arbitration & Secret Voting Section -->
+        {% if is_juror %}
+        <div class="bg-gray-800/60 p-5 rounded-lg border border-cyan-500/40">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Neutral Community Jury Voting</h3>
+
+            {% if dispute.status == 'open' %}
+                {% if can_vote %}
+                    <p class="text-sm text-gray-300 mb-4">You have been selected as a neutral community juror. Please review the task details, dispute reason, and communication history before submitting your vote. <strong>Staking {{ stake_amount }} reward points is required to cast your vote.</strong></p>
+
+                    <form action="{% url 'submit_dispute_vote' dispute.id %}" method="post" class="space-y-4">
+                        {% csrf_token %}
+                        <div class="flex items-center space-x-6">
+                            <label class="flex items-center space-x-2 cursor-pointer">
+                                <input type="radio" name="choice" value="poster" required class="text-cyan-500 focus:ring-cyan-400">
+                                <span>In favor of Task Poster ({{ dispute.task.posted_by.username }})</span>
+                            </label>
+                            <label class="flex items-center space-x-2 cursor-pointer">
+                                <input type="radio" name="choice" value="taker" required class="text-cyan-500 focus:ring-cyan-400">
+                                <span>In favor of Task Taker ({{ dispute.task.taken_by.username }})</span>
+                            </label>
+                        </div>
+                        <button type="submit" class="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-6 rounded-lg transition-colors">
+                            Stake {{ stake_amount }} Pts & Submit Secret Vote
+                        </button>
+                    </form>
+                {% elif user_vote %}
+                    <div class="bg-cyan-950/40 p-4 rounded-lg border border-cyan-700 text-cyan-200">
+                        <p class="font-semibold">Your vote has been recorded!</p>
+                        <p class="text-sm">You voted for: <strong>{{ user_vote.get_choice_display }}</strong>. Your vote is secret until supermajority consensus is reached.</p>
+                    </div>
+                {% endif %}
+            {% else %}
+                <div class="bg-green-950/40 p-4 rounded-lg border border-green-700 text-green-200">
+                    <p class="font-semibold">Supermajority Consensus Reached!</p>
+                    <p class="text-sm">Dispute resolved in favor of <strong>{{ winner_username }}</strong>.</p>
+                </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Participant Notice if Dispute Resolved -->
+        {% if dispute.status == 'resolved' and not is_juror %}
+        <div class="bg-green-950/40 p-4 rounded-lg border border-green-700 text-green-200">
+            <p class="font-semibold">Dispute Resolution Complete</p>
+            <p class="text-sm">The community jury panel has resolved this dispute in favor of <strong>{{ winner_username }}</strong>.</p>
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}
