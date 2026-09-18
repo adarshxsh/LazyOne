@@ -3,7 +3,8 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from django.contrib import admin
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, Notification
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +182,217 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class StaffDisputeManagementTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Users
+        self.staff_user = User.objects.create_user(
+            username='staff_admin', password='password123', is_staff=True
+        )
+        self.poster_user = User.objects.create_user(
+            username='poster_user', password='password123'
+        )
+        self.worker_user = User.objects.create_user(
+            username='worker_user', password='password123'
+        )
+        self.normal_user = User.objects.create_user(
+            username='normal_user', password='password123'
+        )
+
+        # Profiles
+        self.staff_profile, _ = UserProfile.objects.get_or_create(user=self.staff_user, defaults={'rewards': 1000})
+        self.poster_profile, _ = UserProfile.objects.get_or_create(user=self.poster_user, defaults={'rewards': 1000})
+        self.worker_profile, _ = UserProfile.objects.get_or_create(user=self.worker_user, defaults={'rewards': 500})
+        self.normal_profile, _ = UserProfile.objects.get_or_create(user=self.normal_user, defaults={'rewards': 500})
+
+        # Task and Dispute
+        self.task = Task.objects.create(
+            title="Clean up garden",
+            description="Mow lawn and sweep leaves",
+            reward=200,
+            posted_by=self.poster_user,
+            taken_by=self.worker_user,
+            status='disputed'
+        )
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.worker_user,
+            reason="Poster refused to acknowledge completion.",
+            status='open'
+        )
+
+    def test_non_staff_access_denied_to_dashboard(self):
+        """Non-staff users must be redirected with an error when accessing /staff/disputes/."""
+        self.client.login(username='normal_user', password='password123')
+        response = self.client.get(reverse('staff_disputes'), follow=True)
+        self.assertRedirects(response, reverse('home'))
+        messages = list(response.context['messages'])
+        self.assertTrue(any("Access denied" in str(m) or "staff" in str(m).lower() for m in messages))
+
+    def test_non_staff_access_denied_to_resolve(self):
+        """Non-staff users must be redirected when attempting to post to resolution endpoint."""
+        self.client.login(username='normal_user', password='password123')
+        response = self.client.post(
+            reverse('staff_resolve_dispute', args=[self.dispute.id]),
+            {'action': 'reward_worker'},
+            follow=True
+        )
+        self.assertRedirects(response, reverse('home'))
+
+    def test_staff_dashboard_view_and_filtering(self):
+        """Staff members can view dashboard, filter by status, and search."""
+        self.client.login(username='staff_admin', password='password123')
+
+        # View dashboard
+        response = self.client.get(reverse('staff_disputes'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Clean up garden")
+        self.assertContains(response, "Staff Dispute Dashboard")
+
+        # Filter by open status
+        response = self.client.get(reverse('staff_disputes') + '?status=open')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context['disputes']), 1)
+
+        # Filter by resolved status (should be empty initially)
+        response = self.client.get(reverse('staff_disputes') + '?status=resolved')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context['disputes']), 0)
+
+        # Search by username
+        response = self.client.get(reverse('staff_disputes') + '?q=worker_user')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context['disputes']), 1)
+
+        # Search by non-matching query
+        response = self.client.get(reverse('staff_disputes') + '?q=nonexistent')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context['disputes']), 0)
+
+    def test_staff_resolve_in_favor_of_worker(self):
+        """Staff resolving in favor of worker updates worker rewards, task status, dispute status, ledger & notifications."""
+        self.client.login(username='staff_admin', password='password123')
+        initial_worker_rewards = self.worker_profile.rewards
+
+        response = self.client.post(
+            reverse('staff_resolve_dispute', args=[self.dispute.id]),
+            {'action': 'reward_worker'},
+            follow=True
+        )
+        self.assertRedirects(response, reverse('staff_disputes'))
+
+        # Refresh state
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+        self.worker_profile.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.task.status, 'completed')
+        self.assertEqual(self.worker_profile.rewards, initial_worker_rewards + self.task.reward)
+
+        # Check RewardLedger
+        ledger = RewardLedger.objects.filter(user=self.worker_user, task=self.task).first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, self.task.reward)
+        self.assertEqual(ledger.transaction_type, 'task_completion')
+
+        # Check Notifications
+        notifications = Notification.objects.filter(recipient=self.worker_user)
+        self.assertTrue(notifications.exists())
+
+    def test_staff_resolve_in_favor_of_poster(self):
+        """Staff refunding poster updates poster rewards, task status, dispute status, ledger & notifications."""
+        self.client.login(username='staff_admin', password='password123')
+        initial_poster_rewards = self.poster_profile.rewards
+
+        response = self.client.post(
+            reverse('staff_resolve_dispute', args=[self.dispute.id]),
+            {'action': 'refund_poster'},
+            follow=True
+        )
+        self.assertRedirects(response, reverse('staff_disputes'))
+
+        # Refresh state
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+        self.poster_profile.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.task.status, 'cancelled')
+        self.assertEqual(self.poster_profile.rewards, initial_poster_rewards + self.task.reward)
+
+        # Check RewardLedger
+        ledger = RewardLedger.objects.filter(user=self.poster_user, task=self.task).first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, self.task.reward)
+        self.assertEqual(ledger.transaction_type, 'task_cancellation')
+
+    def test_staff_resolve_custom_adjustment(self):
+        """Staff applying custom adjustment awards specific points to poster and worker."""
+        self.client.login(username='staff_admin', password='password123')
+        initial_poster_rewards = self.poster_profile.rewards
+        initial_worker_rewards = self.worker_profile.rewards
+
+        response = self.client.post(
+            reverse('staff_resolve_dispute', args=[self.dispute.id]),
+            {'action': 'custom', 'poster_points': 100, 'worker_points': 100},
+            follow=True
+        )
+        self.assertRedirects(response, reverse('staff_disputes'))
+
+        self.dispute.refresh_from_db()
+        self.poster_profile.refresh_from_db()
+        self.worker_profile.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.poster_profile.rewards, initial_poster_rewards + 100)
+        self.assertEqual(self.worker_profile.rewards, initial_worker_rewards + 100)
+
+    def test_admin_models_registered(self):
+        """Dispute, Task, RewardLedger, and UserProfile models must be registered in basic/admin.py."""
+        self.assertTrue(admin.site.is_registered(Dispute))
+        self.assertTrue(admin.site.is_registered(Task))
+        self.assertTrue(admin.site.is_registered(RewardLedger))
+        self.assertTrue(admin.site.is_registered(UserProfile))
+
+    def test_navbar_displays_staff_disputes_for_staff(self):
+        """Navbar in base.html displays Staff Disputes link for staff users and hides it for normal users."""
+        self.client.login(username='staff_admin', password='password123')
+        response = self.client.get(reverse('home'))
+        self.assertContains(response, 'Staff Disputes')
+
+        self.client.login(username='normal_user', password='password123')
+        response = self.client.get(reverse('home'))
+        self.assertNotContains(response, 'Staff Disputes')
+
+    def test_unauthenticated_access_redirects(self):
+        """Unauthenticated user accessing staff routes is redirected to login page."""
+        response = self.client.get(reverse('staff_disputes'))
+        self.assertRedirects(response, '/login/?next=/staff/disputes/')
+
+    def test_invalid_resolution_action(self):
+        """Posting invalid resolution action shows error and redirects to dispute detail."""
+        self.client.login(username='staff_admin', password='password123')
+        response = self.client.post(
+            reverse('staff_resolve_dispute', args=[self.dispute.id]),
+            {'action': 'invalid_action'},
+            follow=True
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+
+    def test_already_resolved_dispute(self):
+        """Resolving an already resolved dispute shows warning and redirects to dispute detail."""
+        self.client.login(username='staff_admin', password='password123')
+        self.dispute.status = 'resolved'
+        self.dispute.save()
+
+        response = self.client.post(
+            reverse('staff_resolve_dispute', args=[self.dispute.id]),
+            {'action': 'reward_worker'},
+            follow=True
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
 
