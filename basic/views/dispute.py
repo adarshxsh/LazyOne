@@ -5,6 +5,11 @@ from django.db import transaction
 from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+from django.apps import apps
+from firebase_admin import firestore
+import logging
+
+logger = logging.getLogger(__name__)
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
@@ -79,6 +84,26 @@ def raise_dispute(request, task_id):
                 message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
                 link=reverse('dispute_detail', args=[dispute.id])
             )
+
+        try:
+            db = apps.get_app_config('basic').firestore_db
+            if db:
+                dispute_ref = db.collection('disputes').document(str(dispute.id))
+                dispute_ref.set({
+                    'id': dispute.id,
+                    'task_id': task.id,
+                    'task_title': task.title,
+                    'raised_by': request.user.username,
+                    'reason': reason,
+                    'status': 'open',
+                    'deposit_amount': deposit_amount,
+                    'escrow_status': 'held',
+                    'created_at': firestore.SERVER_TIMESTAMP if hasattr(firestore, 'SERVER_TIMESTAMP') else None,
+                    'updated_at': firestore.SERVER_TIMESTAMP if hasattr(firestore, 'SERVER_TIMESTAMP') else None,
+                })
+        except Exception as e:
+            logger.error(f"Failed to sync dispute creation to Firestore: {e}")
+
         messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
@@ -87,6 +112,7 @@ def raise_dispute(request, task_id):
 @require_POST
 def withdraw_dispute(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user)
+    dispute_id_val = dispute.id
     task = dispute.task
     with transaction.atomic():
         dispute.refund_deposit(
@@ -103,5 +129,20 @@ def withdraw_dispute(request, dispute_id):
             message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
             link=reverse('my_tasks')
         )
+
+    try:
+        db = apps.get_app_config('basic').firestore_db
+        if db:
+            dispute_ref = db.collection('disputes').document(str(dispute_id_val))
+            dispute_ref.set({
+                'status': 'resolved',
+                'escrow_status': 'refunded',
+                'task_status': 'in_progress',
+                'updated_at': firestore.SERVER_TIMESTAMP if hasattr(firestore, 'SERVER_TIMESTAMP') else None,
+            }, merge=True)
+    except Exception as e:
+        logger.error(f"Failed to sync dispute withdrawal to Firestore: {e}")
+
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
+
