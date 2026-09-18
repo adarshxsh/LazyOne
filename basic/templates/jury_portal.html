@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+
+{% block title %}Community Jury Portal - {{ block.super }}{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div class="border-b border-gray-200 dark:border-gray-700 pb-5">
+        <h2 class="text-3xl font-bold text-gray-900 dark:text-white">Community Jury Arbitration Portal</h2>
+        <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
+            Review active task disputes, evaluate party submissions, and cast your binding peer vote to resolve escrow disputes.
+        </p>
+    </div>
+
+    <!-- Active Jury Voting Section -->
+    <div class="space-y-4">
+        <h3 class="text-xl font-semibold text-purple-600 dark:text-purple-400 flex items-center gap-2">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Active Disputes Awaiting Juror Votes
+        </h3>
+
+        {% if active_disputes %}
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {% for dispute in active_disputes %}
+                    <div class="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow">
+                        <div class="flex justify-between items-start mb-3">
+                            <h4 class="text-lg font-bold text-gray-900 dark:text-white">{{ dispute.task.title }}</h4>
+                            <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300">
+                                {{ dispute.task.reward }} Points
+                            </span>
+                        </div>
+
+                        <p class="text-sm text-gray-600 dark:text-gray-300 line-clamp-2 mb-4">
+                            {{ dispute.reason }}
+                        </p>
+
+                        <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 border-t border-gray-100 dark:border-gray-700/50 pt-3 mb-4">
+                            <span>Poster: <strong class="text-gray-800 dark:text-gray-200">{{ dispute.task.posted_by.username }}</strong></span>
+                            <span>Taker: <strong class="text-gray-800 dark:text-gray-200">{{ dispute.task.taken_by.username }}</strong></span>
+                            <span>Votes: <strong class="text-purple-600 dark:text-purple-400">{{ dispute.total_votes_count }}/{{ quorum }}</strong></span>
+                        </div>
+
+                        <a href="{% url 'dispute_detail' dispute.id %}" class="block w-full text-center bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 rounded-lg text-sm transition-colors duration-200">
+                            Review & Cast Vote
+                        </a>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="bg-gray-50 dark:bg-gray-900/40 p-8 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 text-center">
+                <p class="text-gray-500 dark:text-gray-400 font-medium">There are currently no active disputes awaiting community jury voting.</p>
+            </div>
+        {% endif %}
+    </div>
+
+    <!-- Recently Resolved Disputes -->
+    {% if resolved_disputes %}
+        <div class="space-y-4 pt-6 border-t border-gray-200 dark:border-gray-700">
+            <h3 class="text-xl font-semibold text-green-600 dark:text-green-400">Recently Resolved by Jury</h3>
+            <div class="space-y-3">
+                {% for dispute in resolved_disputes %}
+                    <div class="flex items-center justify-between bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                        <div>
+                            <span class="font-bold text-gray-900 dark:text-white">{{ dispute.task.title }}</span>
+                            <span class="text-xs text-gray-500 dark:text-gray-400 ml-2">({{ dispute.task.reward }} points)</span>
+                        </div>
+                        <a href="{% url 'dispute_detail' dispute.id %}" class="text-sm text-cyan-600 dark:text-cyan-400 hover:underline">
+                            View Outcome
+                        </a>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

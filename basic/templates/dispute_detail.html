@@ -3,26 +3,136 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
-
-    <div class="space-y-6 text-gray-300">
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
         <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <h2 class="text-3xl font-bold text-gray-900 dark:text-white">Dispute Details</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Dispute ID #{{ dispute.id }}</p>
         </div>
 
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
-            <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
-        </div>
-
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
-            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+        <div class="flex items-center space-x-3">
+            <span class="px-3 py-1.5 text-sm font-semibold rounded-full 
+                {% if dispute.status == 'open' %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300
+                {% elif dispute.status == 'under_review' %}bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300
+                {% elif dispute.status == 'jury_voting' %}bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300
+                {% elif dispute.status == 'resolved' %}bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300
+                {% elif dispute.status == 'withdrawn' %}bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300
+                {% else %}bg-gray-200 text-gray-800 dark:bg-gray-800 dark:text-gray-400{% endif %}">
+                Status: {{ dispute.get_status_display }}
+            </span>
         </div>
     </div>
 
+    <div class="space-y-6 text-gray-700 dark:text-gray-300">
+        <!-- Task Details -->
+        <div class="bg-gray-50 dark:bg-gray-900/50 p-6 rounded-xl border border-gray-200 dark:border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-600 dark:text-cyan-400 mb-2">Task Information</h3>
+            <p class="text-lg font-bold text-gray-900 dark:text-white mb-2">{{ dispute.task.title }}</p>
+            <p class="text-gray-600 dark:text-gray-300 mb-4">{{ dispute.task.description }}</p>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                <div><strong class="text-gray-900 dark:text-white">Reward Escrow:</strong> {{ dispute.task.reward }} points</div>
+                <div><strong class="text-gray-900 dark:text-white">Posted By:</strong> {{ dispute.task.posted_by.username }}</div>
+                <div><strong class="text-gray-900 dark:text-white">Taken By:</strong> {{ dispute.task.taken_by.username|default:"Unassigned" }}</div>
+            </div>
+        </div>
+
+        <!-- Dispute Metadata -->
+        <div class="bg-gray-50 dark:bg-gray-900/50 p-6 rounded-xl border border-gray-200 dark:border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-600 dark:text-cyan-400 mb-2">Dispute Summary</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm mb-4">
+                <div><strong class="text-gray-900 dark:text-white">Raised By:</strong> {{ dispute.raised_by.username }}</div>
+                <div><strong class="text-gray-900 dark:text-white">Date Raised:</strong> {{ dispute.created_at|date:"F d, Y H:i" }}</div>
+                <div><strong class="text-gray-900 dark:text-white">Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points ({{ dispute.get_escrow_status_display }})</div>
+            </div>
+            <h4 class="font-semibold text-gray-900 dark:text-white mb-1">Reason:</h4>
+            <div class="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-200">
+                {{ dispute.reason|linebreaksbr }}
+            </div>
+        </div>
+
+        <!-- Party Actions: Escalation & Withdrawal -->
+        {% if is_party %}
+            <div class="flex flex-wrap items-center gap-4 pt-2">
+                {% if dispute.status == 'open' or dispute.status == 'under_review' %}
+                    <form method="POST" action="{% url 'escalate_to_jury' dispute.id %}">
+                        {% csrf_token %}
+                        <button type="submit" class="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-lg font-medium transition-colors duration-200 flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                            </svg>
+                            Escalate to Community Jury
+                        </button>
+                    </form>
+                {% endif %}
+
+                {% if dispute.status == 'open' or dispute.status == 'under_review' or dispute.status == 'jury_voting' %}
+                    {% if user == dispute.raised_by or user == dispute.task.posted_by or user == dispute.task.taken_by %}
+                        <form method="POST" action="{% url 'withdraw_dispute' dispute.id %}">
+                            {% csrf_token %}
+                            <button type="submit" class="bg-gray-600 hover:bg-gray-700 text-white px-5 py-2.5 rounded-lg font-medium transition-colors duration-200 flex items-center gap-2" onclick="return confirm('Are you sure you want to withdraw this dispute? The task will return to in-progress status.');">
+                                Withdraw Dispute
+                            </button>
+                        </form>
+                    {% endif %}
+                {% endif %}
+            </div>
+        {% endif %}
+
+        <!-- Community Jury Voting Section -->
+        {% if dispute.status == 'jury_voting' or dispute.status == 'resolved' %}
+            <div class="bg-gray-50 dark:bg-gray-900/50 p-6 rounded-xl border border-gray-200 dark:border-gray-700 space-y-4">
+                <h3 class="text-xl font-semibold text-purple-600 dark:text-purple-400">Community Jury Arbitration</h3>
+                
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
+                    <div class="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                        <span class="block text-2xl font-bold text-blue-600 dark:text-blue-400">{{ dispute.poster_votes_count }}</span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400">Favor Poster ({{ dispute.task.posted_by.username }})</span>
+                    </div>
+                    <div class="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                        <span class="block text-2xl font-bold text-green-600 dark:text-green-400">{{ dispute.taker_votes_count }}</span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400">Favor Taker ({{ dispute.task.taken_by.username }})</span>
+                    </div>
+                    <div class="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                        <span class="block text-2xl font-bold text-purple-600 dark:text-purple-400">{{ dispute.total_votes_count }} / {{ quorum }}</span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400">Quorum Progress</span>
+                    </div>
+                </div>
+
+                {% if dispute.status == 'jury_voting' %}
+                    {% if can_vote %}
+                        <div class="bg-purple-50 dark:bg-purple-900/20 p-5 rounded-lg border border-purple-200 dark:border-purple-800 mt-4">
+                            <h4 class="font-semibold text-purple-900 dark:text-purple-200 mb-2">Cast Your Peer Juror Vote</h4>
+                            <p class="text-sm text-purple-700 dark:text-purple-300 mb-4">Review the task details and dispute reason above, then select your binding vote:</p>
+                            <div class="flex flex-wrap gap-4">
+                                <form method="POST" action="{% url 'cast_jury_vote' dispute.id %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="vote" value="favor_poster">
+                                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors duration-200">
+                                        Vote Favor Poster ({{ dispute.task.posted_by.username }})
+                                    </button>
+                                </form>
+
+                                <form method="POST" action="{% url 'cast_jury_vote' dispute.id %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="vote" value="favor_taker">
+                                    <button type="submit" class="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors duration-200">
+                                        Vote Favor Taker ({{ dispute.task.taken_by.username }})
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    {% elif user_vote %}
+                        <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg border border-gray-300 dark:border-gray-700 text-sm">
+                            <strong class="text-gray-900 dark:text-white">Your Juror Selection:</strong> 
+                            <span class="text-purple-600 dark:text-purple-400 font-semibold">{{ user_vote.get_vote_display }}</span>
+                        </div>
+                    {% endif %}
+                {% elif dispute.status == 'resolved' %}
+                    <div class="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border border-green-200 dark:border-green-800 text-sm">
+                        <strong class="text-green-800 dark:text-green-300">Resolution Completed:</strong> 
+                        This dispute has been resolved by community jury voting quorum and reward escrow points have been automatically settled.
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+    </div>
 {% endblock %}
