@@ -1,0 +1,167 @@
+{% extends 'base.html' %}
+
+{% block title %}Staff Dispute Dashboard - {{ block.super }}{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto space-y-10">
+    <div class="border-b border-gray-700 pb-4">
+        <h2 class="text-3xl font-bold text-gray-900 dark:text-white">Staff Arbitration & Administrative Appeals Dashboard</h2>
+        <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">Review active task disputes, inspect evidence, issue binding arbitration rulings, and process administrative appeals.</p>
+    </div>
+
+    <!-- 1. Open Disputes Queue -->
+    <div class="space-y-4">
+        <h3 class="text-2xl font-semibold text-cyan-600 dark:text-cyan-400 flex items-center space-x-2">
+            <span>Open Task Disputes</span>
+            <span class="text-sm bg-cyan-100 dark:bg-cyan-900/50 text-cyan-800 dark:text-cyan-200 px-2.5 py-0.5 rounded-full font-bold">{{ open_disputes.count }}</span>
+        </h3>
+
+        {% if open_disputes %}
+            <div class="grid grid-cols-1 gap-4">
+                {% for dispute in open_disputes %}
+                    <div class="bg-gray-50 dark:bg-gray-900/50 p-6 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                        <div class="space-y-1">
+                            <h4 class="text-lg font-bold text-gray-900 dark:text-white">{{ dispute.task.title }}</h4>
+                            <p class="text-sm text-gray-600 dark:text-gray-400">
+                                <strong>Reward:</strong> {{ dispute.task.reward }} pts | 
+                                <strong>Poster:</strong> {{ dispute.task.posted_by.username }} | 
+                                <strong>Taker:</strong> {% if dispute.task.taken_by %}{{ dispute.task.taken_by.username }}{% else %}N/A{% endif %}
+                            </p>
+                            <p class="text-sm text-gray-700 dark:text-gray-300">
+                                <strong>Raised By:</strong> {{ dispute.raised_by.username }} on {{ dispute.created_at|date:"M d, Y H:i" }}
+                            </p>
+                            <p class="text-sm text-gray-600 dark:text-gray-400 italic mt-1">"{{ dispute.reason|truncatewords:20 }}"</p>
+                        </div>
+                        <a href="{% url 'dispute_detail' dispute.id %}" class="shrink-0 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold px-5 py-2.5 rounded-lg transition-colors text-sm">
+                            Arbitrate Dispute
+                        </a>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="text-gray-500 italic p-4 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-gray-200 dark:border-gray-700">No open disputes requiring arbitration at this time.</p>
+        {% endif %}
+    </div>
+
+    <!-- 2. Senior Administrative Review Queue (Pending Appeals) -->
+    <div class="space-y-4">
+        <h3 class="text-2xl font-semibold text-indigo-600 dark:text-indigo-400 flex items-center space-x-2">
+            <span>Senior Administrative Review Queue (Pending Appeals)</span>
+            <span class="text-sm bg-indigo-100 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-200 px-2.5 py-0.5 rounded-full font-bold">{{ pending_appeals.count }}</span>
+        </h3>
+
+        {% if pending_appeals %}
+            <div class="grid grid-cols-1 gap-6">
+                {% for appeal in pending_appeals %}
+                    <div class="bg-indigo-50/50 dark:bg-indigo-950/20 p-6 rounded-xl border border-indigo-200 dark:border-indigo-800/50 space-y-4">
+                        <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-indigo-200 dark:border-indigo-800/50 pb-3">
+                            <div>
+                                <h4 class="text-lg font-bold text-gray-900 dark:text-white">{{ appeal.dispute.task.title }}</h4>
+                                <p class="text-xs text-indigo-600 dark:text-indigo-400">
+                                    Submitted by <strong>{{ appeal.appellant.username }}</strong> on {{ appeal.created_at|date:"M d, Y H:i" }}
+                                </p>
+                            </div>
+                            <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-yellow-500/20 text-yellow-700 dark:text-yellow-300 border border-yellow-500/30">
+                                Pending Senior Review
+                            </span>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <p><strong>Initial Ruling:</strong> {{ appeal.dispute.get_resolution_outcome_display }}</p>
+                                <p><strong>Resolved By:</strong> {{ appeal.dispute.resolved_by.username|default:"Staff" }}</p>
+                            </div>
+                            <div>
+                                <p><strong>Appellant Reason:</strong> {{ appeal.reason }}</p>
+                            </div>
+                        </div>
+
+                        <!-- Review Action Form -->
+                        <form action="{% url 'review_appeal' appeal.id %}" method="post" class="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700 space-y-3">
+                            {% csrf_token %}
+                            <h5 class="text-sm font-bold text-gray-800 dark:text-gray-200">Adjudicate Appeal</h5>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Decision Action</label>
+                                    <select name="action" id="action_{{ appeal.id }}" onchange="toggleNewResolution('{{ appeal.id }}')" required class="w-full px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200">
+                                        <option value="uphold">Uphold Initial Ruling (Reject Appeal)</option>
+                                        <option value="overturn">Overturn Initial Ruling (Accept Appeal)</option>
+                                    </select>
+                                </div>
+                                <div id="new_res_container_{{ appeal.id }}" class="hidden">
+                                    <label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">New Resolution Outcome</label>
+                                    <select name="new_resolution" class="w-full px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200">
+                                        <option value="refund_poster">Refund Poster</option>
+                                        <option value="pay_taker">Pay Taker</option>
+                                        <option value="cancel">Cancel Task</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Review Notes</label>
+                                <textarea name="notes" rows="2" class="w-full px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200" placeholder="Explanation for decision..."></textarea>
+                            </div>
+
+                            <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-colors">
+                                Submit Appeal Ruling
+                            </button>
+                        </form>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="text-gray-500 italic p-4 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-gray-200 dark:border-gray-700">No pending administrative appeals in queue.</p>
+        {% endif %}
+    </div>
+
+    <!-- 3. Resolved Disputes & Appeal History -->
+    <div class="space-y-4">
+        <h3 class="text-2xl font-semibold text-gray-700 dark:text-gray-300">Resolved Disputes & History</h3>
+        {% if resolved_disputes %}
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm text-gray-700 dark:text-gray-300 border-collapse">
+                    <thead>
+                        <tr class="border-b border-gray-300 dark:border-gray-700 bg-gray-100 dark:bg-gray-800">
+                            <th class="p-3">Task Title</th>
+                            <th class="p-3">Raised By</th>
+                            <th class="p-3">Outcome</th>
+                            <th class="p-3">Resolved By</th>
+                            <th class="p-3">Resolved Date</th>
+                            <th class="p-3">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
+                        {% for dispute in resolved_disputes %}
+                            <tr>
+                                <td class="p-3 font-medium">{{ dispute.task.title }}</td>
+                                <td class="p-3">{{ dispute.raised_by.username }}</td>
+                                <td class="p-3"><span class="px-2 py-0.5 rounded text-xs bg-gray-200 dark:bg-gray-700">{{ dispute.get_resolution_outcome_display }}</span></td>
+                                <td class="p-3">{{ dispute.resolved_by.username|default:"System" }}</td>
+                                <td class="p-3">{{ dispute.resolved_at|date:"M d, Y H:i" }}</td>
+                                <td class="p-3">
+                                    <a href="{% url 'dispute_detail' dispute.id %}" class="text-cyan-600 hover:underline">View</a>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p class="text-gray-500 italic p-4 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-gray-200 dark:border-gray-700">No resolved disputes history.</p>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+    function toggleNewResolution(appealId) {
+        const select = document.getElementById('action_' + appealId);
+        const container = document.getElementById('new_res_container_' + appealId);
+        if (select.value === 'overturn') {
+            container.classList.remove('hidden');
+        } else {
+            container.classList.add('hidden');
+        }
+    }
+</script>
+{% endblock %}
