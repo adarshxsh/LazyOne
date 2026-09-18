@@ -49,8 +49,9 @@ document.addEventListener('DOMContentLoaded', function() {
             let usersFound = false;
             usersSnapshot.forEach(doc => {
                 const userData = doc.data();
+                const djangoId = userData.django_id;
                 // Filter out users in the exclusion list
-                if (!excludeUids.includes(userData.uid)) {
+                if (!excludeUids.includes(djangoId) && !excludeUids.includes(Number(djangoId)) && !excludeUids.includes(String(djangoId))) {
                     usersFound = true;
                     const userCard = createUserCard(userData);
                     userListContainer.appendChild(userCard);
@@ -85,10 +86,6 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
             <form action="/friend/send/${userData.django_id || ''}/" method="post" class="flex items-center space-x-4">
                 <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-                <div class="flex items-center space-x-2">
-                    <label for="closeness-${userData.uid}" class="text-sm text-gray-400">Closeness:</label>
-                    <input type="range" id="closeness-${userData.uid}" name="closeness" min="0" max="100" value="50" class="w-24 accent-cyan-500">
-                </div>
                 <button type="submit" class="px-5 py-2 bg-cyan-500 hover:bg-cyan-600 text-white font-bold rounded-lg transition-colors text-sm whitespace-nowrap">
                     Add Friend
                 </button>

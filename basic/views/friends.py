@@ -10,18 +10,17 @@ import json
 def user_list(request):
     user_profile = get_object_or_404(UserProfile, user=request.user)
 
-    # Get Firebase UIDs of users to exclude (friends, pending requests, self)
-    friend_uids = list(user_profile.friends.all().values_list('firebase_uid', flat=True))
-    sent_request_uids = list(FriendRequest.objects.filter(from_user=request.user).values_list('to_user__userprofile__firebase_uid', flat=True))
-    received_request_uids = list(FriendRequest.objects.filter(to_user=request.user).values_list('from_user__userprofile__firebase_uid', flat=True))
+    # Get Django IDs of users to exclude (friends, pending requests, self)
+    friend_ids = list(user_profile.friends.all().values_list('user__id', flat=True))
+    sent_request_ids = list(FriendRequest.objects.filter(from_user=request.user).values_list('to_user__id', flat=True))
+    received_request_ids = list(FriendRequest.objects.filter(to_user=request.user).values_list('from_user__id', flat=True))
 
-    # Combine all UIDs to exclude, including the current user's
-    exclude_uids = set(friend_uids) | set(sent_request_uids) | set(received_request_uids)
-    if user_profile.firebase_uid:
-        exclude_uids.add(user_profile.firebase_uid)
+    # Combine all IDs to exclude, including the current user's
+    exclude_ids = set(friend_ids) | set(sent_request_ids) | set(received_request_ids)
+    exclude_ids.add(request.user.id)
 
     context = {
-        'exclude_uids_json': json.dumps(list(exclude_uids))
+        'exclude_uids_json': json.dumps(list(exclude_ids))
     }
     return render(request, 'user_list.html', context)
 
@@ -47,11 +46,9 @@ def friends_view(request):
 def send_friend_request(request, user_id):
     if request.method == 'POST':
         to_user = get_object_or_404(User, id=user_id)
-        closeness = request.POST.get('closeness', 50)
         friend_request, created = FriendRequest.objects.get_or_create(
             from_user=request.user,
-            to_user=to_user,
-            defaults={'closeness': closeness}
+            to_user=to_user
         )
         if created:
             messages.success(request, 'Friend request sent.')
@@ -76,12 +73,12 @@ def accept_friend_request(request, request_id):
         Friendship.objects.get_or_create(
             from_user=from_user_profile,
             to_user=to_user_profile,
-            defaults={'closeness': friend_request.closeness}
+            defaults={'closeness': 50}
         )
         Friendship.objects.get_or_create(
             from_user=to_user_profile,
             to_user=from_user_profile,
-            defaults={'closeness': friend_request.closeness}
+            defaults={'closeness': 50}
         )
         friend_request.delete()
         messages.success(request, 'Friend request accepted.')

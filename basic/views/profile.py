@@ -37,10 +37,11 @@ def profile_view(request):
         profile.save()
 
         # Update Firestore document
-        if db and request.user.userprofile.firebase_uid:
+        if db:
             try:
-                user_ref = db.collection('users').document(request.user.userprofile.firebase_uid)
+                user_ref = db.collection('users').document(str(request.user.id))
                 user_ref.set({
+                    'django_id': profile.user.id,
                     'username': request.user.username,
                     'first_name': profile.first_name,
                     'last_name': profile.last_name,
@@ -145,9 +146,9 @@ def verify_phone_token(request):
             user_profile.save()
 
             # Also update the phone number in Firestore
-            if db and user_profile.firebase_uid:
+            if db:
                 try:
-                    user_ref = db.collection('users').document(user_profile.firebase_uid)
+                    user_ref = db.collection('users').document(str(request.user.id))
                     user_ref.set({
                         'phone_number': firebase_phone_number,
                         'is_phone_verified': True
