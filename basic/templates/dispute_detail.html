@@ -13,15 +13,48 @@
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
-            <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            <p class="mt-2"><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p class="mt-2"><strong>Category:</strong> <span class="px-3 py-1 text-sm rounded-full font-semibold {{ dispute.category_badge_class }}">{{ dispute.category_display }}</span></p>
+            <p class="mt-2"><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
+            <p class="mt-2"><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
+            <p class="mt-2"><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
-            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 mt-2">{{ dispute.reason|linebreaksbr }}</p>
+        </div>
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Submitted Evidence</h3>
+            {% if dispute.formatted_evidence %}
+                <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-gray-700 text-gray-400 text-sm">
+                                <th class="py-2 px-3 font-semibold">Attribute</th>
+                                <th class="py-2 px-3 font-semibold">Value</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-800 text-sm">
+                            {% for item in dispute.formatted_evidence %}
+                                <tr>
+                                    <td class="py-2 px-3 font-medium text-cyan-300">{{ item.label }}</td>
+                                    <td class="py-2 px-3 text-gray-200">
+                                        {% if item.is_url %}
+                                            <a href="{{ item.value }}" target="_blank" rel="noopener noreferrer" class="text-cyan-400 underline hover:text-cyan-300 break-all">{{ item.value }}</a>
+                                        {% else %}
+                                            {{ item.value|linebreaksbr }}
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 text-gray-400 italic">No evidence payload provided for this dispute.</p>
+            {% endif %}
         </div>
     </div>
 
