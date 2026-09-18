@@ -10,6 +10,34 @@
         <p class="text-lg text-gray-600 dark:text-gray-400 mt-2">{{ viewed_profile.college }}</p>
     </div>
 
+    <!-- Reputation & Dispute Stats -->
+    <div class="bg-white/50 border border-gray-200 rounded-xl p-6 mb-8 dark:bg-gray-800/50 dark:border-gray-700/50">
+        <div class="flex flex-col sm:flex-row items-center justify-between border-b border-gray-200 dark:border-gray-700 pb-4 mb-4">
+            <div>
+                <h2 class="text-xl font-bold text-gray-800 dark:text-cyan-400">Reputation & Trust Score</h2>
+                <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">Trust Badge: <span class="font-semibold text-emerald-600 dark:text-emerald-400" id="trust-badge">{{ viewed_profile.trust_badge }}</span></p>
+            </div>
+            <div class="mt-4 sm:mt-0 text-center sm:text-right">
+                <span class="text-3xl font-extrabold text-cyan-600 dark:text-cyan-300" id="reputation-score">{{ viewed_profile.reputation_score }}</span>
+                <span class="text-sm text-gray-500 dark:text-gray-400">/ 100</span>
+            </div>
+        </div>
+        <div class="grid grid-cols-3 gap-4 text-center">
+            <div class="bg-gray-100 dark:bg-gray-900/50 p-3 rounded-lg border border-gray-200 dark:border-gray-700/50">
+                <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Disputes</p>
+                <p class="text-lg font-bold text-gray-800 dark:text-white mt-1" id="total-disputes">{{ viewed_profile.total_disputes }}</p>
+            </div>
+            <div class="bg-gray-100 dark:bg-gray-900/50 p-3 rounded-lg border border-gray-200 dark:border-gray-700/50">
+                <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">Disputes Won</p>
+                <p class="text-lg font-bold text-green-600 dark:text-green-400 mt-1" id="disputes-won">{{ viewed_profile.disputes_won }}</p>
+            </div>
+            <div class="bg-gray-100 dark:bg-gray-900/50 p-3 rounded-lg border border-gray-200 dark:border-gray-700/50">
+                <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">Disputes Lost</p>
+                <p class="text-lg font-bold text-red-600 dark:text-red-400 mt-1" id="disputes-lost">{{ viewed_profile.disputes_lost }}</p>
+            </div>
+        </div>
+    </div>
+
     <div class="space-y-8">
         <!-- Bio Section -->
         <div>
