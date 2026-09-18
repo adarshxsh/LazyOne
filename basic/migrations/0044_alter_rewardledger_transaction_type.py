@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("basic", "0042_remove_dispute_dispute_type_and_more"),
+        ("basic", "0043_dispute_deposit_amount_dispute_escrow_status_and_more"),
     ]
 
     operations = [
@@ -20,6 +20,9 @@ class Migration(migrations.Migration):
                     ("task_cancellation", "Task Cancellation (Points Refunded)"),
                     ("task_abandonment", "Task Abandonment (Penalty)"),
                     ("initial_points", "Initial Points"),
+                    ("dispute_deposit", "Dispute Deposit Bond Held"),
+                    ("dispute_refund", "Dispute Deposit Bond Refunded"),
+                    ("dispute_forfeit", "Dispute Deposit Bond Forfeited"),
                 ],
                 max_length=20,
             ),
