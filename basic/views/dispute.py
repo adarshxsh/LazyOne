@@ -28,7 +28,18 @@ def raise_dispute(request, task_id):
         messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
         return redirect('my_tasks')
     if request.method == 'POST':
-        reason = request.POST.get('reason')
+        reason = (request.POST.get('reason') or '').strip()
+        category = (request.POST.get('category') or '').strip()
+        evidence_url = (request.POST.get('evidence_url') or '').strip()
+
+        valid_categories = [choice[0] for choice in Dispute.CATEGORY_CHOICES]
+
+        if not category or category not in valid_categories:
+            messages.error(request, "A valid category selection is required to raise a dispute.")
+            return redirect('my_tasks')
+        if not evidence_url:
+            messages.error(request, "Evidence details are required to raise a dispute.")
+            return redirect('my_tasks')
         if not reason:
             messages.error(request, "A reason is required to raise a dispute.")
             return redirect('my_tasks')
@@ -49,7 +60,9 @@ def raise_dispute(request, task_id):
             if hasattr(task, 'dispute'):
                 dispute = task.dispute
                 dispute.raised_by = request.user
+                dispute.category = category
                 dispute.reason = reason
+                dispute.evidence_url = evidence_url
                 dispute.status = 'open'
                 dispute.deposit_amount = deposit_amount
                 dispute.escrow_status = 'held'
@@ -58,7 +71,9 @@ def raise_dispute(request, task_id):
                 dispute = Dispute.objects.create(
                     task=task,
                     raised_by=request.user,
+                    category=category,
                     reason=reason,
+                    evidence_url=evidence_url,
                     deposit_amount=deposit_amount,
                     escrow_status='held'
                 )

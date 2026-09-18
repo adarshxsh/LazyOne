@@ -57,7 +57,11 @@ class DisputeDepositBondTests(TestCase):
         self.client.login(username='taker', password='password123')
         response = self.client.post(
             reverse('raise_dispute', args=[self.task.id]),
-            {'reason': 'Work not clear'}
+            {
+                'category': 'other',
+                'reason': 'Work not clear',
+                'evidence_url': 'https://example.com/proof.png'
+            }
         )
 
         self.assertRedirects(response, reverse('my_tasks'))
@@ -73,7 +77,11 @@ class DisputeDepositBondTests(TestCase):
         self.client.login(username='taker', password='password123')
         response = self.client.post(
             reverse('raise_dispute', args=[self.task.id]),
-            {'reason': 'Unreasonable request'}
+            {
+                'category': 'quality_issue',
+                'reason': 'Unreasonable request',
+                'evidence_url': 'https://example.com/proof.png'
+            }
         )
 
         # Deposit bond is 60. Taker balance was 100 -> now 40
@@ -84,6 +92,8 @@ class DisputeDepositBondTests(TestCase):
         self.assertEqual(self.task.status, 'disputed')
 
         dispute = Dispute.objects.get(task=self.task)
+        self.assertEqual(dispute.category, 'quality_issue')
+        self.assertEqual(dispute.evidence_url, 'https://example.com/proof.png')
         self.assertEqual(dispute.deposit_amount, 60)
         self.assertEqual(dispute.escrow_status, 'held')
         self.assertEqual(dispute.status, 'open')
@@ -99,7 +109,11 @@ class DisputeDepositBondTests(TestCase):
         self.client.login(username='taker', password='password123')
         self.client.post(
             reverse('raise_dispute', args=[self.task.id]),
-            {'reason': 'Dispute reason'}
+            {
+                'category': 'quality_issue',
+                'reason': 'Dispute reason',
+                'evidence_url': 'https://example.com/proof.png'
+            }
         )
 
         dispute = Dispute.objects.get(task=self.task)
@@ -129,7 +143,11 @@ class DisputeDepositBondTests(TestCase):
         self.client.login(username='taker', password='password123')
         self.client.post(
             reverse('raise_dispute', args=[self.task.id]),
-            {'reason': 'Dispute reason'}
+            {
+                'category': 'quality_issue',
+                'reason': 'Dispute reason',
+                'evidence_url': 'https://example.com/proof.png'
+            }
         )
 
         # Poster marks task as completed
@@ -182,3 +200,109 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class DisputeTestCase(TestCase):
+    def setUp(self):
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=100)
+        self.task = Task.objects.create(
+            title='Test Task',
+            description='Test Description',
+            reward=100,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress'
+        )
+        self.conversation = Conversation.objects.create(task=self.task)
+        self.conversation.participants.add(self.poster, self.taker)
+
+    def test_raise_dispute_success(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(reverse('raise_dispute', args=[self.task.id]), {
+            'category': 'non_completion',
+            'reason': 'The poster did not complete their part',
+            'evidence_url': 'https://example.com/proof.png'
+        }, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertEqual(dispute.category, 'non_completion')
+        self.assertEqual(dispute.get_category_display(), 'Non Completion')
+        self.assertEqual(dispute.reason, 'The poster did not complete their part')
+        self.assertEqual(dispute.evidence_url, 'https://example.com/proof.png')
+        self.assertEqual(dispute.raised_by, self.taker)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+
+    def test_raise_dispute_missing_category(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(reverse('raise_dispute', args=[self.task.id]), {
+            'category': '',
+            'reason': 'Some reason',
+            'evidence_url': 'https://example.com/proof.png'
+        }, follow=True)
+
+        self.assertFalse(Dispute.objects.filter(task=self.task).exists())
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+
+    def test_raise_dispute_invalid_category(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(reverse('raise_dispute', args=[self.task.id]), {
+            'category': 'invalid_choice',
+            'reason': 'Some reason',
+            'evidence_url': 'https://example.com/proof.png'
+        }, follow=True)
+
+        self.assertFalse(Dispute.objects.filter(task=self.task).exists())
+
+    def test_raise_dispute_missing_evidence(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(reverse('raise_dispute', args=[self.task.id]), {
+            'category': 'quality_issue',
+            'reason': 'Low quality',
+            'evidence_url': '   '
+        }, follow=True)
+
+        self.assertFalse(Dispute.objects.filter(task=self.task).exists())
+
+    def test_dispute_detail_view(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            category='late_delivery',
+            reason='Delivered very late',
+            evidence_url='https://example.com/late_log.txt'
+        )
+        self.task.status = 'disputed'
+        self.task.save()
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Late Delivery')
+        self.assertContains(response, 'https://example.com/late_log.txt')
+
+    def test_withdraw_dispute(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            category='unresponsive',
+            reason='No response from user',
+            evidence_url='https://example.com/chat.png',
+            deposit_amount=50,
+            escrow_status='held'
+        )
+        self.task.status = 'disputed'
+        self.task.save()
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]), follow=True)
+        self.assertEqual(response.status_code, 200)
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.escrow_status, 'refunded')
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
