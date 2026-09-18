@@ -1,4 +1,6 @@
 import math
+from datetime import timedelta
+from django.apps import apps
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -141,6 +143,160 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+    @property
+    def poster_votes_count(self):
+        return self.votes.filter(voted_for=self.task.posted_by).count()
+
+    @property
+    def taker_votes_count(self):
+        return self.votes.filter(voted_for=self.task.taken_by).count()
+
+    @property
+    def total_votes_count(self):
+        return self.votes.count()
+
+    def check_and_resolve_consensus(self, threshold=None, expiration_hours=None):
+        if self.status != 'open':
+            return False
+
+        from django.conf import settings
+        if threshold is None:
+            threshold = getattr(settings, 'JURY_VOTE_THRESHOLD', 3)
+        if expiration_hours is None:
+            expiration_hours = getattr(settings, 'DISPUTE_EXPIRATION_HOURS', 72)
+
+        total_votes = self.votes.count()
+        is_expired = timezone.now() >= (self.created_at + timedelta(hours=expiration_hours))
+
+        if total_votes >= threshold or is_expired:
+            poster_votes = self.votes.filter(voted_for=self.task.posted_by).count()
+            taker_votes = self.votes.filter(voted_for=self.task.taken_by).count()
+
+            if taker_votes > poster_votes:
+                winning_party = 'taker'
+            elif poster_votes > taker_votes:
+                winning_party = 'poster'
+            else:
+                winning_party = 'poster'
+
+            self.resolve_with_winner(winning_party)
+            return True
+
+        return False
+
+    def resolve_with_winner(self, winning_party):
+        from django.db import transaction
+        from django.urls import reverse
+
+        with transaction.atomic():
+            task = self.task
+            Notification = apps.get_model('basic', 'Notification')
+
+            if winning_party == 'taker':
+                task.status = 'completed'
+                task.save()
+
+                taker_profile = task.taken_by.userprofile
+                taker_profile.rewards += task.reward
+                taker_profile.save()
+
+                RewardLedger.objects.create(
+                    user=task.taken_by,
+                    task=task,
+                    amount=task.reward,
+                    transaction_type='task_completion',
+                    description=f"Completed task: '{task.title}' via community jury consensus"
+                )
+
+                if self.raised_by == task.taken_by:
+                    self.refund_deposit(
+                        reason_description=f"Security deposit bond refunded upon winning dispute resolution for task: '{task.title}'"
+                    )
+                else:
+                    self.forfeit_deposit(
+                        beneficiary=task.taken_by,
+                        reason_description=f"Security deposit bond forfeited upon losing dispute resolution for task: '{task.title}'"
+                    )
+
+                self.status = 'resolved'
+                self.save()
+
+                Notification.objects.create(
+                    recipient=task.posted_by,
+                    message=f"Community jury consensus resolved dispute for '{task.title}' in favor of task taker ({task.taken_by.username}).",
+                    link=reverse('my_tasks')
+                )
+                Notification.objects.create(
+                    recipient=task.taken_by,
+                    message=f"Community jury consensus resolved dispute for '{task.title}' in your favor. {task.reward} points awarded.",
+                    link=reverse('my_tasks')
+                )
+
+            else:  # winning_party == 'poster'
+                task.status = 'cancelled'
+                task.save()
+
+                poster_profile = task.posted_by.userprofile
+                poster_profile.rewards += task.reward
+                poster_profile.save()
+
+                RewardLedger.objects.create(
+                    user=task.posted_by,
+                    task=task,
+                    amount=task.reward,
+                    transaction_type='task_cancellation',
+                    description=f"Refund for dispute resolution on task: '{task.title}'"
+                )
+
+                if self.raised_by == task.posted_by:
+                    self.refund_deposit(
+                        reason_description=f"Security deposit bond refunded upon winning dispute resolution for task: '{task.title}'"
+                    )
+                else:
+                    self.forfeit_deposit(
+                        beneficiary=task.posted_by,
+                        reason_description=f"Security deposit bond forfeited upon losing dispute resolution for task: '{task.title}'"
+                    )
+
+                self.status = 'resolved'
+                self.save()
+
+                Notification.objects.create(
+                    recipient=task.posted_by,
+                    message=f"Community jury consensus resolved dispute for '{task.title}' in your favor. Task reward refunded.",
+                    link=reverse('my_tasks')
+                )
+                Notification.objects.create(
+                    recipient=task.taken_by,
+                    message=f"Community jury consensus resolved dispute for '{task.title}' in favor of task poster ({task.posted_by.username}).",
+                    link=reverse('my_tasks')
+                )
+
+
+class DisputeVote(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    voted_for = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes_received')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'voter')
+
+    def __str__(self):
+        return f"{self.voter.username} voted for {self.voted_for.username} on dispute {self.dispute.id}"
+
+    @property
+    def vote(self):
+        if self.voted_for_id == self.dispute.task.posted_by_id:
+            return 'poster'
+        elif self.voted_for_id == self.dispute.task.taken_by_id:
+            return 'taker'
+        return None
+
+    @property
+    def choice(self):
+        return self.vote
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)

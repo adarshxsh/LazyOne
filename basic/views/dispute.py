@@ -2,7 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, Task, Notification, RewardLedger, DisputeVote
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,14 +10,72 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
-        messages.error(request, "You are not authorized to view this dispute.")
-        return redirect('home')
+
+    if dispute.status == 'open':
+        dispute.check_and_resolve_consensus()
+
+    poster_votes = dispute.votes.filter(voted_for=task.posted_by).count()
+    taker_votes = dispute.votes.filter(voted_for=task.taken_by).count()
+    total_votes = dispute.votes.count()
+
+    user_vote = dispute.votes.filter(voter=request.user).first() if request.user.is_authenticated else None
+    is_participant = (request.user == task.posted_by or request.user == task.taken_by)
+    can_vote = request.user.is_authenticated and dispute.status == 'open' and not is_participant and user_vote is None
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'poster_votes': poster_votes,
+        'taker_votes': taker_votes,
+        'total_votes': total_votes,
+        'user_vote': user_vote,
+        'is_participant': is_participant,
+        'can_vote': can_vote,
     }
     return render(request, 'dispute_detail.html', context)
+
+@login_required(login_url='/login/')
+@require_POST
+def cast_dispute_vote(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+
+    if dispute.status != 'open':
+        messages.error(request, "This dispute is no longer open for voting.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if request.user == task.posted_by or request.user == task.taken_by:
+        messages.error(request, "Task participants are prohibited from voting on their own disputes.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if DisputeVote.objects.filter(dispute=dispute, voter=request.user).exists():
+        messages.error(request, "You have already voted on this dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    vote_choice = request.POST.get('voted_for') or request.POST.get('vote') or request.POST.get('choice')
+    target_user = None
+
+    if vote_choice:
+        vote_choice_str = str(vote_choice).strip().lower()
+        if vote_choice_str in ['poster', str(task.posted_by.id), task.posted_by.username.lower()]:
+            target_user = task.posted_by
+        elif vote_choice_str in ['taker', str(task.taken_by.id), task.taken_by.username.lower()]:
+            target_user = task.taken_by
+
+    if not target_user:
+        messages.error(request, "Invalid vote choice. Please select either the poster or the task taker.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    with transaction.atomic():
+        DisputeVote.objects.create(
+            dispute=dispute,
+            voter=request.user,
+            voted_for=target_user
+        )
+        messages.success(request, f"Your vote in favor of {target_user.username} has been recorded.")
+        dispute.check_and_resolve_consensus()
+
+    return redirect('dispute_detail', dispute_id=dispute.id)
 
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
