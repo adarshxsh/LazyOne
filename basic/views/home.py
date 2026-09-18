@@ -1,6 +1,6 @@
 from django.shortcuts import render
 from django.db.models import Q
-from ..models import UserProfile, Task, Friendship, Conversation
+from ..models import UserProfile, Task, Friendship, Conversation, JuryAssignment
 import json
 
 def home(request):
@@ -26,11 +26,18 @@ def home(request):
         'recent_tasks': recent_tasks,
         'search_query': query,
         'user_nodes_json': json.dumps([]),
-        'recent_conversations': []
+        'recent_conversations': [],
+        'pending_jury_assignments': []
     }
 
     if request.user.is_authenticated:
         user_profile, created = UserProfile.objects.get_or_create(user=request.user)
+
+        # --- Data for Active Jury Assignments ---
+        context['pending_jury_assignments'] = JuryAssignment.objects.filter(
+            juror=request.user,
+            dispute__status='open'
+        ).select_related('dispute', 'dispute__task')
 
         # --- Data for Recent Conversations ---
         context['recent_conversations'] = Conversation.objects.filter(participants=request.user).order_by('-last_message_at')[:10]
