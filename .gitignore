@@ -14,9 +14,11 @@ db.sqlite3
 
 # Media files
 /media/
+/mediafiles/
 
 # Static files
 /static/
+/staticfiles/
 
 # Virtual environment
 .venv/

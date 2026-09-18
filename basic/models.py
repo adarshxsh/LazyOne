@@ -59,6 +59,10 @@ class Task(models.Model):
     def deposit_bond_amount(self):
         return max(50, math.ceil(self.reward * 0.20))
 
+    @property
+    def dispute(self):
+        return self.disputes.order_by('-created_at').first()
+
 class RewardLedger(models.Model):
     TRANSACTION_TYPES = (
         ('task_creation', 'Task Creation (Points Reserved)'),
@@ -68,6 +72,7 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('dispute_settlement', 'Automated Dispute Settlement'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
@@ -83,19 +88,22 @@ class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
         ('resolved', 'Resolved'),
+        ('withdrawn', 'Withdrawn'),
+        ('auto_resolved', 'Auto-Resolved'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
         ('refunded', 'Refunded'),
         ('forfeited', 'Forfeited'),
     )
-    task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='disputes')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
@@ -141,6 +149,19 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidences')
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_evidences')
+    content = models.TextField(blank=True, default='')
+    file = models.FileField(upload_to='dispute_evidence/', blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"Evidence by {self.sender.username} on {self.dispute}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
