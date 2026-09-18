@@ -68,6 +68,7 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('juror_reward', 'Juror Reward Payout'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
@@ -117,16 +118,61 @@ class Dispute(models.Model):
             self.escrow_status = 'refunded'
             self.save()
 
-    def forfeit_deposit(self, beneficiary=None, reason_description=None):
+    def forfeit_deposit(self, beneficiary=None, reason_description=None, jurors=None, juror_reward_amount=0):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
-            if beneficiary:
+            total_juror_payout = 0
+            juror_list = []
+            if jurors is not None:
+                if isinstance(jurors, dict):
+                    juror_list = [(u, amt) for u, amt in jurors.items()]
+                elif isinstance(jurors, (list, tuple, set)) or hasattr(jurors, '__iter__'):
+                    for item in jurors:
+                        if isinstance(item, (list, tuple)) and len(item) == 2:
+                            juror_list.append((item[0], item[1]))
+                        else:
+                            juror_list.append((item, juror_reward_amount))
+
+            for juror, reward_amt in juror_list:
+                if reward_amt > 0:
+                    total_juror_payout += reward_amt
+
+            if total_juror_payout > self.deposit_amount:
+                scale = self.deposit_amount / total_juror_payout
+                scaled_juror_list = []
+                accumulated = 0
+                for idx, (juror, amt) in enumerate(juror_list):
+                    if idx == len(juror_list) - 1:
+                        new_amt = self.deposit_amount - accumulated
+                    else:
+                        new_amt = int(amt * scale)
+                        accumulated += new_amt
+                    scaled_juror_list.append((juror, new_amt))
+                juror_list = scaled_juror_list
+                total_juror_payout = self.deposit_amount
+
+            for juror, reward_amt in juror_list:
+                if reward_amt > 0:
+                    juror_profile = juror.userprofile
+                    juror_profile.rewards += reward_amt
+                    juror_profile.save()
+                    RewardLedger.objects.create(
+                        user=juror,
+                        task=self.task,
+                        amount=reward_amt,
+                        transaction_type='juror_reward',
+                        description=f"Juror reward payout for dispute on task: '{self.task.title}'"
+                    )
+
+            remaining_for_beneficiary = self.deposit_amount - total_juror_payout
+
+            if beneficiary and remaining_for_beneficiary > 0:
                 beneficiary_profile = beneficiary.userprofile
-                beneficiary_profile.rewards += self.deposit_amount
+                beneficiary_profile.rewards += remaining_for_beneficiary
                 beneficiary_profile.save()
                 RewardLedger.objects.create(
                     user=beneficiary,
                     task=self.task,
-                    amount=self.deposit_amount,
+                    amount=remaining_for_beneficiary,
                     transaction_type='dispute_refund',
                     description=f"Forfeited dispute deposit bond awarded from task: '{self.task.title}'"
                 )
