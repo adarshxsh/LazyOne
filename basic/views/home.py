@@ -1,9 +1,14 @@
 from django.shortcuts import render
 from django.db.models import Q
-from ..models import UserProfile, Task, Friendship, Conversation
+from ..models import UserProfile, Task, Friendship, Conversation, Dispute
+from .dispute import check_and_expire_dispute
 import json
 
 def home(request):
+    open_disputes = Dispute.objects.filter(status='open')
+    for dispute in open_disputes:
+        check_and_expire_dispute(dispute)
+
     # --- Disputed Tasks ---
     disputed_tasks = Task.objects.filter(status='disputed').order_by('-created_at')
 
