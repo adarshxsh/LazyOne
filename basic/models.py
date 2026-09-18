@@ -68,6 +68,7 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('dispute_resolution', 'Dispute Resolution'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
@@ -82,7 +83,11 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('under_review', 'Under Review'),
+        ('jury_voting', 'Jury Voting'),
         ('resolved', 'Resolved'),
+        ('withdrawn', 'Withdrawn'),
+        ('closed', 'Closed'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
@@ -141,6 +146,46 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+    @property
+    def poster_votes_count(self):
+        return self.votes.filter(vote='favor_poster').count()
+
+    @property
+    def taker_votes_count(self):
+        return self.votes.filter(vote='favor_taker').count()
+
+    @property
+    def total_votes_count(self):
+        return self.votes.count()
+
+    def can_user_vote(self, user):
+        if not user or not user.is_authenticated:
+            return False
+        if user == self.task.posted_by or user == self.task.taken_by:
+            return False
+        user_profile = getattr(user, 'userprofile', None)
+        if not user_profile or user_profile.rewards <= 0:
+            return False
+        if self.votes.filter(juror=user).exists():
+            return False
+        return True
+
+class DisputeVote(models.Model):
+    VOTE_CHOICES = (
+        ('favor_poster', 'Favor Poster'),
+        ('favor_taker', 'Favor Taker'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    vote = models.CharField(max_length=20, choices=VOTE_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Vote by {self.juror.username} on Dispute {self.dispute.id}: {self.vote}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
