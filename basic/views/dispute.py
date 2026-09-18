@@ -24,7 +24,7 @@ def raise_dispute(request, task_id):
     task = get_object_or_404(Task, id=task_id)
     if hasattr(task, 'dispute') and task.dispute.status == 'open':
         return redirect('dispute_detail', dispute_id=task.dispute.id)
-    if task.taken_by != request.user or task.status != 'in_progress':
+    if not task.can_raise_dispute(user=request.user):
         messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
         return redirect('my_tasks')
     if request.method == 'POST':
@@ -79,14 +79,18 @@ def raise_dispute(request, task_id):
                 message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
                 link=reverse('dispute_detail', args=[dispute.id])
             )
-        messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
-        return redirect('dispute_detail', dispute_id=dispute.id)
+            messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
 @require_POST
 def withdraw_dispute(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user)
+    if not dispute.can_withdraw():
+        messages.error(request, "This dispute cannot be withdrawn.")
+        return redirect('my_tasks')
+
     task = dispute.task
     with transaction.atomic():
         dispute.refund_deposit(
@@ -103,5 +107,5 @@ def withdraw_dispute(request, dispute_id):
             message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
             link=reverse('my_tasks')
         )
-    messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
+        messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
