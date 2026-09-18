@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, Notification
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +181,104 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class TaskAbandonmentTestCase(TestCase):
+    def setUp(self):
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1500)
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        self.task = Task.objects.create(
+            title='Test Task',
+            description='Test Description',
+            reward=100,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=timezone.now() + timedelta(days=1)
+        )
+        self.client = Client()
+
+    def test_abandon_task_success_with_sufficient_balance(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.get(reverse('abandon_task', args=[self.task.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        # Check user profile balance (500 - 20 = 480)
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 480)
+
+        # Check task status reset
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'available')
+        self.assertIsNone(self.task.taken_by)
+
+        # Check RewardLedger
+        ledger_entry = RewardLedger.objects.filter(user=self.taker, task=self.task, transaction_type='task_abandonment').first()
+        self.assertIsNotNone(ledger_entry)
+        self.assertEqual(ledger_entry.amount, -20)
+        self.assertIn("Test Task", ledger_entry.description)
+
+        # Check Notification to poster
+        notification = Notification.objects.filter(recipient=self.poster).first()
+        self.assertIsNotNone(notification)
+        self.assertIn("abandoned", notification.message)
+
+    def test_abandon_task_floors_balance_at_zero(self):
+        # Set taker rewards lower than 20% penalty (10 points available, penalty is 20)
+        self.taker_profile.rewards = 10
+        self.taker_profile.save()
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.get(reverse('abandon_task', args=[self.task.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        # Check user profile balance floored at 0
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 0)
+
+        # Check RewardLedger recorded actual deducted amount (-10)
+        ledger_entry = RewardLedger.objects.filter(user=self.taker, task=self.task, transaction_type='task_abandonment').first()
+        self.assertIsNotNone(ledger_entry)
+        self.assertEqual(ledger_entry.amount, -10)
+
+        # Check task status reset
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'available')
+        self.assertIsNone(self.task.taken_by)
+
+    def test_abandon_task_with_zero_balance(self):
+        self.taker_profile.rewards = 0
+        self.taker_profile.save()
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.get(reverse('abandon_task', args=[self.task.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        # Balance remains 0
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 0)
+
+        # Ledger recorded 0 amount
+        ledger_entry = RewardLedger.objects.filter(user=self.taker, task=self.task, transaction_type='task_abandonment').first()
+        self.assertIsNotNone(ledger_entry)
+        self.assertEqual(ledger_entry.amount, 0)
+
+    def test_abandon_task_unauthorized_user(self):
+        # Try to abandon task as poster (not taken_by)
+        self.client.login(username='poster', password='password123')
+        response = self.client.get(reverse('abandon_task', args=[self.task.id]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_abandon_task_not_in_progress(self):
+        self.task.status = 'available'
+        self.task.taken_by = None
+        self.task.save()
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.get(reverse('abandon_task', args=[self.task.id]))
+        self.assertEqual(response.status_code, 404)
 
