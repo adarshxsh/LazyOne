@@ -28,9 +28,21 @@ def raise_dispute(request, task_id):
         messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
         return redirect('my_tasks')
     if request.method == 'POST':
+        category = request.POST.get('category')
         reason = request.POST.get('reason')
-        if not reason:
+        evidence_details = request.POST.get('evidence_details')
+
+        valid_categories = [choice[0] for choice in Dispute.CATEGORY_CHOICES]
+        if not category or category not in valid_categories:
+            messages.error(request, "A valid dispute category is required.")
+            return redirect('my_tasks')
+
+        if not reason or not reason.strip():
             messages.error(request, "A reason is required to raise a dispute.")
+            return redirect('my_tasks')
+
+        if not evidence_details or not evidence_details.strip():
+            messages.error(request, "Evidence details are required to raise a dispute.")
             return redirect('my_tasks')
 
         deposit_amount = task.deposit_bond_amount
@@ -49,7 +61,9 @@ def raise_dispute(request, task_id):
             if hasattr(task, 'dispute'):
                 dispute = task.dispute
                 dispute.raised_by = request.user
-                dispute.reason = reason
+                dispute.category = category
+                dispute.reason = reason.strip()
+                dispute.evidence_details = evidence_details.strip()
                 dispute.status = 'open'
                 dispute.deposit_amount = deposit_amount
                 dispute.escrow_status = 'held'
@@ -58,7 +72,9 @@ def raise_dispute(request, task_id):
                 dispute = Dispute.objects.create(
                     task=task,
                     raised_by=request.user,
-                    reason=reason,
+                    category=category,
+                    reason=reason.strip(),
+                    evidence_details=evidence_details.strip(),
                     deposit_amount=deposit_amount,
                     escrow_status='held'
                 )
