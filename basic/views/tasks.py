@@ -1,3 +1,4 @@
+import logging
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -7,6 +8,8 @@ from django.urls import reverse
 from django.utils import timezone
 from django.db.models import Q
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 
 
 @login_required(login_url='/login/')
@@ -60,9 +63,15 @@ def add_task(request):
 
 @login_required(login_url='/login/')
 def take_task(request, task_id):
-    task = get_object_or_404(Task, id=task_id, status='available')
+    task = get_object_or_404(Task, id=task_id)
     if task.posted_by == request.user:
         messages.error(request, "You cannot take your own task.")
+    elif task.status == 'disputed':
+        logger.warning(f"User {request.user.id} attempted to take disputed task {task.id}.")
+        messages.error(request, "Cannot modify task while a dispute is open.")
+    elif task.status != 'available':
+        logger.warning(f"User {request.user.id} attempted to take task {task.id} with status '{task.status}'.")
+        messages.error(request, "Task is not available.")
     else:
         with transaction.atomic():
             task.status = 'in_progress'
@@ -81,7 +90,16 @@ def take_task(request, task_id):
 
 @login_required(login_url='/login/')
 def complete_task(request, task_id):
-    task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
+    task = get_object_or_404(Task, id=task_id, posted_by=request.user)
+    if task.status == 'disputed':
+        logger.warning(f"User {request.user.id} attempted to complete disputed task {task.id}.")
+        messages.error(request, "Cannot modify task while a dispute is open.")
+        return redirect('my_tasks')
+    if task.status != 'in_progress':
+        logger.warning(f"User {request.user.id} attempted to complete task {task.id} with status '{task.status}'.")
+        messages.error(request, "Task cannot be completed in its current state.")
+        return redirect('my_tasks')
+
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
         task_doer_profile.rewards += task.reward
@@ -105,7 +123,16 @@ def complete_task(request, task_id):
 
 @login_required(login_url='/login/')
 def cancel_task(request, task_id):
-    task = get_object_or_404(Task, id=task_id, posted_by=request.user, status='available')
+    task = get_object_or_404(Task, id=task_id, posted_by=request.user)
+    if task.status == 'disputed':
+        logger.warning(f"User {request.user.id} attempted to cancel disputed task {task.id}.")
+        messages.error(request, "Cannot modify task while a dispute is open.")
+        return redirect('my_tasks')
+    if task.status != 'available':
+        logger.warning(f"User {request.user.id} attempted to cancel task {task.id} with status '{task.status}'.")
+        messages.error(request, "Task cannot be cancelled in its current state.")
+        return redirect('my_tasks')
+
     with transaction.atomic():
         task.status = 'cancelled'
         task.save()
@@ -121,7 +148,16 @@ def cancel_task(request, task_id):
 
 @login_required(login_url='/login/')
 def request_cancellation(request, task_id):
-    task = get_object_or_404(Task, id=task_id, posted_by=request.user, status='in_progress')
+    task = get_object_or_404(Task, id=task_id, posted_by=request.user)
+    if task.status == 'disputed':
+        logger.warning(f"User {request.user.id} attempted to request cancellation for disputed task {task.id}.")
+        messages.error(request, "Cannot modify task while a dispute is open.")
+        return redirect('my_tasks')
+    if task.status != 'in_progress':
+        logger.warning(f"User {request.user.id} attempted to request cancellation for task {task.id} with status '{task.status}'.")
+        messages.error(request, "Cancellation cannot be requested for task in its current state.")
+        return redirect('my_tasks')
+
     task.cancellation_requested = True
     task.save()
     Notification.objects.create(
@@ -134,7 +170,16 @@ def request_cancellation(request, task_id):
 
 @login_required(login_url='/login/')
 def accept_cancellation(request, task_id):
-    task = get_object_or_404(Task, id=task_id, taken_by=request.user, cancellation_requested=True)
+    task = get_object_or_404(Task, id=task_id, taken_by=request.user)
+    if task.status == 'disputed':
+        logger.warning(f"User {request.user.id} attempted to accept cancellation for disputed task {task.id}.")
+        messages.error(request, "Cannot modify task while a dispute is open.")
+        return redirect('my_tasks')
+    if task.status != 'in_progress' or not task.cancellation_requested:
+        logger.warning(f"User {request.user.id} attempted to accept cancellation for task {task.id} with status '{task.status}'.")
+        messages.error(request, "Cancellation cannot be accepted for task in its current state.")
+        return redirect('my_tasks')
+
     with transaction.atomic():
         poster_profile = task.posted_by.userprofile
         poster_profile.rewards += task.reward
@@ -157,7 +202,16 @@ def accept_cancellation(request, task_id):
 
 @login_required(login_url='/login/')
 def abandon_task(request, task_id):
-    task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
+    task = get_object_or_404(Task, id=task_id, taken_by=request.user)
+    if task.status == 'disputed':
+        logger.warning(f"User {request.user.id} attempted to abandon disputed task {task.id}.")
+        messages.error(request, "Cannot modify task while a dispute is open.")
+        return redirect('my_tasks')
+    if task.status != 'in_progress':
+        logger.warning(f"User {request.user.id} attempted to abandon task {task.id} with status '{task.status}'.")
+        messages.error(request, "Task cannot be abandoned in its current state.")
+        return redirect('my_tasks')
+
     with transaction.atomic():
         task.status = 'available'
         task.taken_by = None
@@ -176,3 +230,4 @@ def my_tasks(request):
     taken_tasks = Task.objects.filter(taken_by=request.user).order_by('-created_at')
     context = {'posted_tasks': posted_tasks, 'taken_tasks': taken_tasks}
     return render(request, 'my_tasks.html', context)
+
