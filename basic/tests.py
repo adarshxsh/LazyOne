@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, Notification
 
 
 class DisputeDepositBondTests(TestCase):
@@ -182,3 +182,210 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class ProportionalDisputeSettlementTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Create Poster
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        # Create Taker
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        # Create Staff
+        self.staff = User.objects.create_user(username='staff', password='password123', is_staff=True)
+        self.staff_profile = UserProfile.objects.create(user=self.staff, rewards=1000)
+
+        # Create Task (Reward 100)
+        self.task = Task.objects.create(
+            title='Test Task',
+            description='Test Description',
+            reward=100,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            deadline=timezone.now() + timedelta(days=1),
+            status='disputed'
+        )
+
+        # Poster's initial points reserved during task creation
+        self.poster_profile.rewards -= 100
+        self.poster_profile.save()
+        RewardLedger.objects.create(
+            user=self.poster, task=self.task, amount=-100,
+            transaction_type='task_creation', description="Reserved for task: 'Test Task'"
+        )
+
+        # Create Dispute
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Partial work completed before dispute'
+        )
+
+    def test_reward_ledger_and_dispute_model_fields(self):
+        """Verify model choices and settlement fields exist."""
+        transaction_types = dict(RewardLedger.TRANSACTION_TYPES)
+        self.assertIn('partial_payout', transaction_types)
+        self.assertIn('partial_refund', transaction_types)
+
+        self.dispute.taker_payout_amount = 60
+        self.dispute.poster_refund_amount = 40
+        self.dispute.resolved_by = self.staff
+        self.dispute.resolution_notes = "60% work done"
+        self.dispute.save()
+
+        refreshed = Dispute.objects.get(id=self.dispute.id)
+        self.assertEqual(refreshed.taker_payout_amount, 60)
+        self.assertEqual(refreshed.poster_refund_amount, 40)
+        self.assertEqual(refreshed.resolved_by, self.staff)
+        self.assertEqual(refreshed.resolution_notes, "60% work done")
+
+    def test_staff_proportional_settlement_success(self):
+        """Staff successfully settles a dispute with explicit points split."""
+        self.client.login(username='staff', password='password123')
+        url = reverse('settle_partial_dispute', args=[self.dispute.id])
+
+        response = self.client.post(url, {
+            'taker_payout_amount': '60',
+            'poster_refund_amount': '40',
+            'resolution_notes': 'Taker completed 60% of agreed work.'
+        }, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+
+        # Verify UserProfile reward balances
+        self.taker_profile.refresh_from_db()
+        self.poster_profile.refresh_from_db()
+
+        self.assertEqual(self.taker_profile.rewards, 1060) # 1000 + 60
+        self.assertEqual(self.poster_profile.rewards, 940)   # 900 + 40
+        # Financial ledger balance check: 1060 + 940 == 2000 (total initial rewards)
+
+        # Verify Dispute status and fields
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.dispute.taker_payout_amount, 60)
+        self.assertEqual(self.dispute.poster_refund_amount, 40)
+        self.assertEqual(self.dispute.resolved_by, self.staff)
+        self.assertEqual(self.dispute.resolution_notes, 'Taker completed 60% of agreed work.')
+
+        # Verify Task status
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+
+        # Verify RewardLedger records
+        payout_ledger = RewardLedger.objects.get(user=self.taker, transaction_type='partial_payout')
+        refund_ledger = RewardLedger.objects.get(user=self.poster, transaction_type='partial_refund')
+
+        self.assertEqual(payout_ledger.amount, 60)
+        self.assertEqual(refund_ledger.amount, 40)
+        self.assertIn('Test Task', payout_ledger.description)
+        self.assertIn(str(self.dispute.id), payout_ledger.description)
+
+        # Verify Notifications
+        taker_notif = Notification.objects.get(recipient=self.taker)
+        poster_notif = Notification.objects.get(recipient=self.poster)
+
+        self.assertIn('60 points payout', taker_notif.message)
+        self.assertIn('40 points refund', poster_notif.message)
+
+    def test_percentage_settlement_split(self):
+        """Staff settles dispute using percentage split."""
+        self.client.login(username='staff', password='password123')
+        url = reverse('settle_partial_dispute', args=[self.dispute.id])
+
+        response = self.client.post(url, {
+            'split_type': 'percentage',
+            'taker_percentage': '75',
+            'resolution_notes': '75% completion'
+        }, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+
+        self.taker_profile.refresh_from_db()
+        self.poster_profile.refresh_from_db()
+
+        self.assertEqual(self.taker_profile.rewards, 1075)
+        self.assertEqual(self.poster_profile.rewards, 925)
+
+    def test_non_staff_authorization_blocked(self):
+        """Non-staff user cannot execute partial settlement."""
+        self.client.login(username='taker', password='password123')
+        url = reverse('settle_partial_dispute', args=[self.dispute.id])
+
+        response = self.client.post(url, {
+            'taker_payout_amount': '60',
+            'poster_refund_amount': '40',
+            'resolution_notes': 'Unauthorized attempt'
+        }, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+
+        # Balances and statuses remain unchanged
+        self.taker_profile.refresh_from_db()
+        self.poster_profile.refresh_from_db()
+        self.dispute.refresh_from_db()
+
+        self.assertEqual(self.taker_profile.rewards, 1000)
+        self.assertEqual(self.poster_profile.rewards, 900)
+        self.assertEqual(self.dispute.status, 'open')
+
+    def test_invalid_settlement_sum_aborts(self):
+        """Settlement amounts that do not equal task reward abort transaction."""
+        self.client.login(username='staff', password='password123')
+        url = reverse('settle_partial_dispute', args=[self.dispute.id])
+
+        # Sum is 110 != task.reward (100)
+        response = self.client.post(url, {
+            'taker_payout_amount': '70',
+            'poster_refund_amount': '40',
+            'resolution_notes': 'Invalid sum'
+        }, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+
+        # Verify no changes executed
+        self.taker_profile.refresh_from_db()
+        self.poster_profile.refresh_from_db()
+        self.dispute.refresh_from_db()
+
+        self.assertEqual(self.taker_profile.rewards, 1000)
+        self.assertEqual(self.poster_profile.rewards, 900)
+        self.assertEqual(self.dispute.status, 'open')
+
+    def test_negative_settlement_amounts_aborts(self):
+        """Negative payout/refund amounts are rejected."""
+        self.client.login(username='staff', password='password123')
+        url = reverse('settle_partial_dispute', args=[self.dispute.id])
+
+        response = self.client.post(url, {
+            'taker_payout_amount': '-10',
+            'poster_refund_amount': '110',
+            'resolution_notes': 'Negative input'
+        }, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'open')
+
+    def test_cannot_resettle_already_resolved_dispute(self):
+        """Resolved disputes cannot be partially settled again."""
+        self.dispute.status = 'resolved'
+        self.dispute.save()
+
+        self.client.login(username='staff', password='password123')
+        url = reverse('settle_partial_dispute', args=[self.dispute.id])
+
+        response = self.client.post(url, {
+            'taker_payout_amount': '50',
+            'poster_refund_amount': '50',
+            'resolution_notes': 'Re-settle attempt'
+        }, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 1000)
