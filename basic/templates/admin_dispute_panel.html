@@ -1,0 +1,138 @@
+{% extends 'base.html' %}
+
+{% block title %}Staff Dispute Panel - {{ block.super }}{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div class="border-b border-gray-700 pb-4">
+        <h1 class="text-3xl font-bold text-white">Staff Dispute Resolution Panel</h1>
+        <p class="mt-1 text-gray-300">Arbitrate active task disputes by assigning exact point split amounts to poster and taker.</p>
+    </div>
+
+    <!-- Active Disputes Section -->
+    <div>
+        <h2 class="text-2xl font-semibold text-cyan-400 mb-4">Active Disputes</h2>
+
+        {% if open_disputes %}
+            <div class="space-y-6">
+                {% for dispute in open_disputes %}
+                    <div class="bg-gray-800/90 border border-yellow-500/30 rounded-xl p-6 shadow-lg space-y-4">
+                        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                            <div>
+                                <h3 class="text-xl font-bold text-white">
+                                    <a href="{% url 'dispute_detail' dispute.id %}" class="hover:underline text-cyan-400">
+                                        {{ dispute.task.title }}
+                                    </a>
+                                </h3>
+                                <p class="text-xs text-gray-400">Dispute #{{ dispute.id }} &bull; Raised on {{ dispute.created_at|date:"F d, Y, g:i a" }}</p>
+                            </div>
+                            <span class="px-3 py-1 text-xs font-semibold rounded-full bg-yellow-500/20 text-yellow-300 border border-yellow-500/40">
+                                Open Dispute
+                            </span>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-900/50 p-4 rounded-lg text-sm text-gray-300">
+                            <div>
+                                <span class="block text-gray-400 font-medium">Task Reward (Escrow Hold)</span>
+                                <span class="text-lg font-bold text-cyan-400">{{ dispute.task.reward }} Points</span>
+                            </div>
+                            <div>
+                                <span class="block text-gray-400 font-medium">Task Poster</span>
+                                <span class="font-semibold text-white">{{ dispute.task.posted_by.username }}</span>
+                            </div>
+                            <div>
+                                <span class="block text-gray-400 font-medium">Task Taker</span>
+                                <span class="font-semibold text-white">
+                                    {% if dispute.task.taken_by %}{{ dispute.task.taken_by.username }}{% else %}N/A{% endif %}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div>
+                            <p class="text-sm font-medium text-gray-300 mb-1">Task Description:</p>
+                            <p class="text-sm text-gray-400 bg-gray-900/30 p-3 rounded border border-gray-700/50">{{ dispute.task.description|linebreaksbr }}</p>
+                        </div>
+
+                        <div>
+                            <p class="text-sm font-medium text-yellow-300 mb-1">
+                                Dispute Reason (Raised by {{ dispute.raised_by.username }}):
+                            </p>
+                            <p class="text-sm text-gray-300 bg-gray-900/50 p-3 rounded border border-yellow-500/20 italic">
+                                "{{ dispute.reason }}"
+                            </p>
+                        </div>
+
+                        <!-- Settlement Form -->
+                        <div class="mt-4 pt-4 border-t border-gray-700">
+                            <h4 class="text-md font-semibold text-white mb-2">Split Settlement Arbitration</h4>
+                            <p class="text-xs text-gray-400 mb-4">
+                                Assign integer point amounts to taker payout and poster refund. The sum must strictly equal the held escrow of <strong class="text-cyan-400">{{ dispute.task.reward }}</strong> points.
+                            </p>
+
+                            <form action="{% url 'settle_dispute' dispute.id %}" method="post" class="space-y-4">
+                                {% csrf_token %}
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div>
+                                        <label for="taker_payout_{{ dispute.id }}" class="block text-xs font-medium text-gray-300 mb-1">
+                                            Taker Payout ({% if dispute.task.taken_by %}{{ dispute.task.taken_by.username }}{% else %}Taker{% endif %})
+                                        </label>
+                                        <input type="number" id="taker_payout_{{ dispute.id }}" name="taker_payout" min="0" max="{{ dispute.task.reward }}" step="1" required
+                                            class="w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-cyan-500 text-sm"
+                                            placeholder="e.g., 50">
+                                    </div>
+                                    <div>
+                                        <label for="poster_refund_{{ dispute.id }}" class="block text-xs font-medium text-gray-300 mb-1">
+                                            Poster Refund ({{ dispute.task.posted_by.username }})
+                                        </label>
+                                        <input type="number" id="poster_refund_{{ dispute.id }}" name="poster_refund" min="0" max="{{ dispute.task.reward }}" step="1" required
+                                            class="w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-cyan-500 text-sm"
+                                            placeholder="e.g., 50">
+                                    </div>
+                                </div>
+                                <div class="flex justify-end">
+                                    <button type="submit"
+                                        class="bg-cyan-600 hover:bg-cyan-500 text-white font-semibold px-5 py-2 rounded-lg transition-colors text-sm shadow">
+                                        Execute Split Settlement
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="p-6 bg-gray-800/50 rounded-xl text-center text-gray-400 border border-gray-700">
+                <p>No active task disputes requiring resolution.</p>
+            </div>
+        {% endif %}
+    </div>
+
+    <!-- Resolved Disputes History Section -->
+    <div class="pt-6">
+        <h2 class="text-2xl font-semibold text-gray-300 mb-4">Resolved Disputes History</h2>
+        {% if resolved_disputes %}
+            <div class="bg-gray-800/50 rounded-xl overflow-hidden border border-gray-700">
+                <ul class="divide-y divide-gray-700">
+                    {% for dispute in resolved_disputes %}
+                        <li class="p-4 flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                            <div>
+                                <a href="{% url 'dispute_detail' dispute.id %}" class="font-semibold text-white hover:underline">
+                                    {{ dispute.task.title }}
+                                </a>
+                                <p class="text-xs text-gray-400">
+                                    Poster: {{ dispute.task.posted_by.username }} &bull; Taker: {% if dispute.task.taken_by %}{{ dispute.task.taken_by.username }}{% else %}N/A{% endif %} &bull; Escrow: {{ dispute.task.reward }} points
+                                </p>
+                            </div>
+                            <span class="px-2.5 py-1 text-xs font-medium rounded-full bg-green-500/20 text-green-300 w-max">
+                                Resolved
+                            </span>
+                        </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% else %}
+            <p class="text-gray-400 text-sm">No resolved disputes recorded yet.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
