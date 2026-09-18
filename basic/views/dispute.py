@@ -47,21 +47,15 @@ def raise_dispute(request, task_id):
             user_profile.save()
 
             if hasattr(task, 'dispute'):
-                dispute = task.dispute
-                dispute.raised_by = request.user
-                dispute.reason = reason
-                dispute.status = 'open'
-                dispute.deposit_amount = deposit_amount
-                dispute.escrow_status = 'held'
-                dispute.save()
-            else:
-                dispute = Dispute.objects.create(
-                    task=task,
-                    raised_by=request.user,
-                    reason=reason,
-                    deposit_amount=deposit_amount,
-                    escrow_status='held'
-                )
+                task.dispute.delete()
+
+            dispute = Dispute.objects.create(
+                task=task,
+                raised_by=request.user,
+                reason=reason,
+                deposit_amount=deposit_amount,
+                escrow_status='held'
+            )
 
             RewardLedger.objects.create(
                 user=request.user,
@@ -88,15 +82,17 @@ def raise_dispute(request, task_id):
 def withdraw_dispute(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user)
     task = dispute.task
+    if dispute.status != 'open' or task.status != 'disputed':
+        messages.error(request, "Cannot withdraw dispute: dispute must be open and task must be in disputed status.")
+        return redirect('my_tasks')
+
     with transaction.atomic():
         dispute.refund_deposit(
             reason_description=f"Security deposit bond refunded for withdrawn dispute on task: '{task.title}'"
         )
-        dispute.status = 'resolved'
-        dispute.save()
-
         task.status = 'in_progress'
         task.save()
+        dispute.delete()
 
         Notification.objects.create(
             recipient=task.posted_by,
