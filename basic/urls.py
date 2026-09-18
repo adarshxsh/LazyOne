@@ -1,12 +1,12 @@
 from django.urls import path
 from .views.home import home
 from .views.authentication import login_page, logout_view, register_view, verify_otp_view
-from .views.profile import profile_view, user_profile_view, update_closeness
+from .views.profile import profile_view, user_profile_view, update_closeness, verify_phone_token
 from .views.tasks import (
     add_task, take_task, complete_task, my_tasks, cancel_task, 
     request_cancellation, accept_cancellation, abandon_task
 )
-from .views.dispute import dispute_detail_view, withdraw_dispute, raise_dispute
+from .views.dispute import dispute_detail_view, withdraw_dispute, raise_dispute, resolve_dispute
 from .views.chat import start_chat, chat_view, send_message
 from .views.friends import friends_view, send_friend_request, accept_friend_request, decline_friend_request, user_list
 from .views.notifications import notifications_view
@@ -19,6 +19,7 @@ urlpatterns = [
     path('verify-otp/', verify_otp_view, name='verify_otp'), # Add this line
     path('logout/', logout_view, name='logout'),
     path('profile/', profile_view, name='profile'),
+    path('verify-phone-token/', verify_phone_token, name='verify_phone_token'),
     path('user/<int:user_id>/', user_profile_view, name='user_profile'),
     path('rewards/', rewards_view, name='rewards'),
 
@@ -36,6 +37,7 @@ urlpatterns = [
     path('task/dispute/<int:task_id>/', raise_dispute, name='raise_dispute'),
     path('dispute/<int:dispute_id>/', dispute_detail_view, name='dispute_detail'),
     path('dispute/withdraw/<int:dispute_id>/', withdraw_dispute, name='withdraw_dispute'),
+    path('dispute/resolve/<int:dispute_id>/', resolve_dispute, name='resolve_dispute'),
 
     # Chat URLs
     path('chat/start/<int:user_id>/', start_chat, name='start_chat'),
