@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from basic.models import UserProfile, Task, Dispute, RewardLedger, Notification, Conversation
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +181,204 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class PartialDisputeSettlementTestCase(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Create users
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.doer = User.objects.create_user(username='doer', password='password123')
+        self.regular_user = User.objects.create_user(username='regular', password='password123')
+        self.staff_user = User.objects.create_user(username='staff', password='password123', is_staff=True)
+
+        # Create user profiles
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+        self.doer_profile = UserProfile.objects.create(user=self.doer, rewards=500)
+        self.regular_profile = UserProfile.objects.create(user=self.regular_user, rewards=500)
+        self.staff_profile = UserProfile.objects.create(user=self.staff_user, rewards=500)
+
+        # Create a task (reward = 100)
+        self.task_reward = 100
+        # Simulating task creation reservation: poster rewards = 900
+        self.poster_profile.rewards -= self.task_reward
+        self.poster_profile.save()
+
+        self.task = Task.objects.create(
+            title="Test Partial Task",
+            description="Task to test partial escrow settlement",
+            reward=self.task_reward,
+            posted_by=self.poster,
+            taken_by=self.doer,
+            status='disputed'
+        )
+
+        self.conversation = Conversation.objects.create(task=self.task)
+        self.conversation.participants.add(self.poster, self.doer)
+
+        RewardLedger.objects.create(
+            user=self.poster,
+            task=self.task,
+            amount=-self.task_reward,
+            transaction_type='task_creation',
+            description="Reserved for task"
+        )
+
+        # Create dispute
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.doer,
+            reason="Completed 60% of work before blocker."
+        )
+
+    def test_non_staff_cannot_resolve_dispute(self):
+        self.client.login(username='regular', password='password123')
+        url = reverse('resolve_dispute', args=[self.dispute.id])
+        response = self.client.post(url, {
+            'poster_amount': 40,
+            'doer_amount': 60,
+            'resolution_notes': 'Unauthorized attempt'
+        }, follow=True)
+
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+        self.poster_profile.refresh_from_db()
+        self.doer_profile.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'open')
+        self.assertEqual(self.task.status, 'disputed')
+        self.assertEqual(self.poster_profile.rewards, 900)
+        self.assertEqual(self.doer_profile.rewards, 500)
+        self.assertFalse(RewardLedger.objects.filter(transaction_type='dispute_settlement').exists())
+
+    def test_staff_settlement_valid_split_60_40(self):
+        self.client.login(username='staff', password='password123')
+        url = reverse('resolve_dispute', args=[self.dispute.id])
+        response = self.client.post(url, {
+            'poster_amount': 40,
+            'doer_amount': 60,
+            'resolution_notes': 'Awarded 60% to doer for work completed and 40% refund to poster.'
+        }, follow=True)
+
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+        self.poster_profile.refresh_from_db()
+        self.doer_profile.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.task.status, 'completed')
+        self.assertEqual(self.dispute.poster_amount, 40)
+        self.assertEqual(self.dispute.doer_amount, 60)
+        self.assertEqual(self.dispute.resolved_by, self.staff_user)
+        self.assertIsNotNone(self.dispute.resolved_at)
+        self.assertEqual(self.dispute.resolution_notes, 'Awarded 60% to doer for work completed and 40% refund to poster.')
+
+        # Rewards updated: Poster 900 + 40 = 940, Doer 500 + 60 = 560
+        self.assertEqual(self.poster_profile.rewards, 940)
+        self.assertEqual(self.doer_profile.rewards, 560)
+
+        # Two RewardLedger entries created with dispute_settlement type
+        ledger_entries = RewardLedger.objects.filter(task=self.task, transaction_type='dispute_settlement')
+        self.assertEqual(ledger_entries.count(), 2)
+
+        poster_entry = ledger_entries.get(user=self.poster)
+        self.assertEqual(poster_entry.amount, 40)
+
+        doer_entry = ledger_entries.get(user=self.doer)
+        self.assertEqual(doer_entry.amount, 60)
+
+        # Notifications created for both poster and doer
+        poster_notifs = Notification.objects.filter(recipient=self.poster)
+        doer_notifs = Notification.objects.filter(recipient=self.doer)
+        self.assertTrue(poster_notifs.exists())
+        self.assertTrue(doer_notifs.exists())
+        self.assertIn('40', poster_notifs.first().message)
+        self.assertIn('60', doer_notifs.first().message)
+
+    def test_staff_settlement_percentage_input(self):
+        self.client.login(username='staff', password='password123')
+        url = reverse('resolve_dispute', args=[self.dispute.id])
+        response = self.client.post(url, {
+            'poster_percent': 70,
+            'resolution_notes': '70% to poster, 30% to doer'
+        }, follow=True)
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.dispute.poster_amount, 70)
+        self.assertEqual(self.dispute.doer_amount, 30)
+
+    def test_settlement_rejection_invalid_sum(self):
+        self.client.login(username='staff', password='password123')
+        url = reverse('resolve_dispute', args=[self.dispute.id])
+        # Sum is 110 != 100
+        response = self.client.post(url, {
+            'poster_amount': 50,
+            'doer_amount': 60,
+            'resolution_notes': 'Invalid total'
+        }, follow=True)
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'open')
+        self.assertEqual(self.poster_profile.rewards, 900)
+        self.assertEqual(self.doer_profile.rewards, 500)
+
+    def test_settlement_rejection_negative_amount(self):
+        self.client.login(username='staff', password='password123')
+        url = reverse('resolve_dispute', args=[self.dispute.id])
+        response = self.client.post(url, {
+            'poster_amount': -10,
+            'doer_amount': 110,
+            'resolution_notes': 'Negative poster amount'
+        }, follow=True)
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'open')
+        self.assertEqual(self.poster_profile.rewards, 900)
+        self.assertEqual(self.doer_profile.rewards, 500)
+
+    def test_settlement_rejection_already_resolved(self):
+        self.client.login(username='staff', password='password123')
+        url = reverse('resolve_dispute', args=[self.dispute.id])
+        # Settle once
+        self.client.post(url, {
+            'poster_amount': 50,
+            'doer_amount': 50,
+            'resolution_notes': 'First settlement'
+        }, follow=True)
+
+        # Try to settle again
+        response = self.client.post(url, {
+            'poster_amount': 0,
+            'doer_amount': 100,
+            'resolution_notes': 'Second settlement attempt'
+        }, follow=True)
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.poster_amount, 50)
+        self.assertEqual(self.dispute.doer_amount, 50)
+        self.assertEqual(RewardLedger.objects.filter(transaction_type='dispute_settlement').count(), 2)
+
+    def test_staff_settlement_refunds_deposit_bond(self):
+        self.dispute.deposit_amount = 50
+        self.dispute.escrow_status = 'held'
+        self.dispute.save()
+
+        self.client.login(username='staff', password='password123')
+        url = reverse('resolve_dispute', args=[self.dispute.id])
+        self.client.post(url, {
+            'poster_amount': 40,
+            'doer_amount': 60,
+            'resolution_notes': 'Settle and refund bond'
+        }, follow=True)
+
+        self.dispute.refresh_from_db()
+        self.doer_profile.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.dispute.escrow_status, 'refunded')
+        # Doer gets 500 + 60 (payout) + 50 (deposit refund) = 610
+        self.assertEqual(self.doer_profile.rewards, 610)
+        self.assertTrue(RewardLedger.objects.filter(user=self.doer, transaction_type='dispute_refund').exists())
 
