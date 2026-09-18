@@ -56,12 +56,14 @@
                                 <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-cyan-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-cyan-700 transition-colors text-sm">Go to Chat</a>
                             {% endif %}
                         {% elif task.status == 'disputed' %}
-                            <p class="text-sm text-red-600">This task is in dispute. You can end the dispute by completing the task.</p>
-                            <a href="{% url 'complete_task' task.id %}" class="inline-block bg-green-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm">Mark as Complete</a>
-                            {% if task.conversation %}
-                                <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm">Go to Chat</a>
-                            {% endif %}
-                            <a href="{% url 'dispute_detail' task.dispute.id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors text-sm">View Dispute</a>
+                            <div class="dispute-container inline-block" data-dispute-id="{{ task.dispute.id }}">
+                                <p class="text-sm text-red-600 status-text">This task is in dispute. You can end the dispute by completing the task.</p>
+                                <a href="{% url 'complete_task' task.id %}" class="inline-block bg-green-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm">Mark as Complete</a>
+                                {% if task.conversation %}
+                                    <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm">Go to Chat</a>
+                                {% endif %}
+                                <a href="{% url 'dispute_detail' task.dispute.id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors text-sm">View Dispute</a>
+                            </div>
                         {% elif task.status == 'completed' and task.conversation %}
                              <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-gray-400 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-500 transition-colors text-sm">View Chat</a>
                         {% endif %}
@@ -104,15 +106,17 @@
                                 <button onclick="openDisputeModal('{{ task.id }}', '{{ task.deposit_bond_amount }}')" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm">Raise Dispute</button>
                             {% endif %}
                         {% elif task.status == 'disputed' %}
-                            <p class="text-sm text-red-600">You have raised a dispute.</p>
-                            {% if task.conversation %}
-                                <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm">Go to Chat</a>
-                            {% endif %}
-                            <form action="{% url 'withdraw_dispute' task.dispute.id %}" method="post" class="inline">
-                                <a href="{% url 'dispute_detail' task.dispute.id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors text-sm">View Dispute</a>
-                                {% csrf_token %}
-                                <button type="submit" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm">Withdraw Dispute</button>
-                            </form>
+                            <div class="dispute-container inline-block" data-dispute-id="{{ task.dispute.id }}">
+                                <p class="text-sm text-red-600 status-text">You have raised a dispute.</p>
+                                {% if task.conversation %}
+                                    <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm">Go to Chat</a>
+                                {% endif %}
+                                <form action="{% url 'withdraw_dispute' task.dispute.id %}" method="post" class="inline withdraw-form">
+                                    <a href="{% url 'dispute_detail' task.dispute.id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors text-sm">View Dispute</a>
+                                    {% csrf_token %}
+                                    <button type="submit" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm withdraw-btn">Withdraw Dispute</button>
+                                </form>
+                            </div>
                         {% elif task.status == 'completed' %}
                             <p class="text-green-600 font-semibold">Task Completed</p>
                         {% else %}
@@ -203,5 +207,47 @@
     function closeDisputeModal() {
         disputeModal.classList.add('hidden');
     }
+</script>
+
+<!-- Firebase SDKs -->
+<script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        var firebaseConfig = {
+            apiKey: "{{ FIREBASE_API_KEY|default:'' }}",
+            authDomain: "{{ FIREBASE_AUTH_DOMAIN|default:'' }}",
+            projectId: "{{ FIREBASE_PROJECT_ID|default:'' }}",
+            storageBucket: "{{ FIREBASE_STORAGE_BUCKET|default:'' }}",
+            messagingSenderId: "{{ FIREBASE_MESSAGING_SENDER_ID|default:'' }}",
+            appId: "{{ FIREBASE_APP_ID|default:'' }}"
+        };
+
+        if (firebaseConfig.projectId) {
+            if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+            const db = firebase.firestore();
+
+            document.querySelectorAll('.dispute-container').forEach(function(container) {
+                const disputeId = container.getAttribute('data-dispute-id');
+                if (!disputeId) return;
+
+                db.collection('disputes').doc(disputeId).onSnapshot(function(snapshot) {
+                    if (!snapshot.exists || (snapshot.data() && snapshot.data().status === 'withdrawn')) {
+                        const statusText = container.querySelector('.status-text');
+                        const withdrawBtn = container.querySelector('.withdraw-btn');
+                        if (statusText) statusText.textContent = "Dispute withdrawn.";
+                        if (withdrawBtn) {
+                            withdrawBtn.disabled = true;
+                            withdrawBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                        }
+                    }
+                }, function(err) {
+                    console.error("Firestore listener error on my_tasks:", err);
+                });
+            });
+        }
+    });
 </script>
 {% endblock %}

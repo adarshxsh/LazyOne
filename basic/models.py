@@ -101,19 +101,20 @@ class Dispute(models.Model):
         return f"Dispute for task: {self.task.title}"
 
     def refund_deposit(self, reason_description=None):
-        if self.escrow_status == 'held' and self.deposit_amount > 0:
-            user_profile = self.raised_by.userprofile
-            user_profile.rewards += self.deposit_amount
-            user_profile.save()
+        if self.escrow_status == 'held':
+            if self.deposit_amount > 0:
+                user_profile = self.raised_by.userprofile
+                user_profile.rewards += self.deposit_amount
+                user_profile.save()
 
-            desc = reason_description or f"Security deposit bond refunded for dispute on task: '{self.task.title}'"
-            RewardLedger.objects.create(
-                user=self.raised_by,
-                task=self.task,
-                amount=self.deposit_amount,
-                transaction_type='dispute_refund',
-                description=desc
-            )
+                desc = reason_description or f"Security deposit bond refunded for dispute on task: '{self.task.title}'"
+                RewardLedger.objects.create(
+                    user=self.raised_by,
+                    task=self.task,
+                    amount=self.deposit_amount,
+                    transaction_type='dispute_refund',
+                    description=desc
+                )
             self.escrow_status = 'refunded'
             self.save()
 
