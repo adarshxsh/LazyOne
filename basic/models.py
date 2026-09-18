@@ -68,6 +68,8 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('dispute_resolution', 'Dispute Resolution'),
+        ('appeal_overturn', 'Appeal Overturn'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
@@ -83,6 +85,12 @@ class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
         ('resolved', 'Resolved'),
+        ('appealed', 'Appealed'),
+        ('closed', 'Closed'),
+    )
+    OUTCOME_CHOICES = (
+        ('favour_poster', 'Favour Poster'),
+        ('favour_taker', 'Favour Taker'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
@@ -96,6 +104,12 @@ class Dispute(models.Model):
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
+
+    # Resolution tracking
+    resolution_outcome = models.CharField(max_length=20, choices=OUTCOME_CHOICES, null=True, blank=True)
+    resolved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='resolved_disputes')
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolution_rationale = models.TextField(null=True, blank=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
@@ -141,6 +155,37 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+    @property
+    def is_appealable(self):
+        from django.conf import settings
+        from datetime import timedelta
+        if self.status != 'resolved' or not self.resolved_at:
+            return False
+        if hasattr(self, 'appeal'):
+            return False
+        window_days = getattr(settings, 'DISPUTE_APPEAL_WINDOW_DAYS', 7)
+        return timezone.now() <= self.resolved_at + timedelta(days=window_days)
+
+class DisputeAppeal(models.Model):
+    STATUS_CHOICES = (
+        ('pending', 'Pending Review'),
+        ('upheld', 'Upheld'),
+        ('overturned', 'Overturned'),
+    )
+    dispute = models.OneToOneField(Dispute, on_delete=models.CASCADE, related_name='appeal')
+    appealed_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_appeals')
+    reason = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # Senior staff review tracking
+    reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_appeals')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_notes = models.TextField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Appeal for dispute #{self.dispute.id} by {self.appealed_by.username}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
