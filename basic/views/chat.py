@@ -23,11 +23,17 @@ def chat_view(request, conversation_id):
         messages.error(request, "Chat not found.")
         return redirect('home')
 
-    if request.user not in conversation.participants.all():
-        logger.warning("Step 2: User is not a participant. Redirecting to home.")
-        messages.error(request, "You are not authorized to view this chat.")
-        return redirect('home') # Redirect to home page
-    logger.info("Step 2: User is a valid participant.")
+    is_participant = request.user in conversation.participants.all()
+    if not is_participant:
+        if conversation.task and conversation.task.status == 'disputed':
+            is_read_only = True
+        else:
+            logger.warning("Step 2: User is not a participant and task is not disputed. Redirecting to home.")
+            messages.error(request, "You are not authorized to view this chat.")
+            return redirect('home')
+    else:
+        is_read_only = False
+    logger.info("Step 2: Access authorized.")
 
     try:
         # This is for the Django-based message system, which we are bypassing for Firestore.
@@ -49,7 +55,7 @@ def chat_view(request, conversation_id):
     except Exception as e:
         logger.error(f"ERROR at Step 4 (Marking notifications): {e}")
 
-    context = {'conversation': conversation, 'messages': messages_list}
+    context = {'conversation': conversation, 'messages': messages_list, 'is_read_only': is_read_only}
     
     logger.info(f"--- CHAT_VIEW END: Successfully rendering template. ---")
     return render(request, 'chat.html', context)
