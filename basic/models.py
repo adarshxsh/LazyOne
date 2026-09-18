@@ -68,11 +68,18 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('dispute_settlement', 'Dispute Settlement'),
+        ('dispute_payout', 'Dispute Payout'),
+        ('dispute_settlement_poster', 'Dispute Settlement (Poster)'),
+        ('dispute_settlement_taker', 'Dispute Settlement (Taker)'),
+        ('juror_reward', 'Juror Participation Reward'),
+        ('appeal_payout', 'Appeal Payout'),
+        ('appeal_refund', 'Appeal Refund'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -80,25 +87,60 @@ class RewardLedger(models.Model):
         return f"{self.user.username}: {self.amount} points for {self.description}"
 
 class Dispute(models.Model):
+    OPEN = 'open'
+    EVIDENCE_COLLECTION = 'evidence_collection'
+    JURY_SELECTION = 'jury_selection'
+    VOTING = 'voting'
+    APPEAL = 'appeal'
+    RESOLVED_POSTER = 'resolved_poster'
+    RESOLVED_TAKER = 'resolved_taker'
+    CANCELLED = 'cancelled'
+
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('evidence_collection', 'Evidence Collection'),
+        ('jury_selection', 'Jury Selection'),
+        ('voting', 'Voting'),
+        ('appeal', 'Appeal'),
+        ('resolved_poster', 'Resolved (Poster)'),
+        ('resolved_taker', 'Resolved (Taker)'),
+        ('cancelled', 'Cancelled'),
         ('resolved', 'Resolved'),
+        ('withdrawn', 'Withdrawn'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
         ('refunded', 'Refunded'),
         ('forfeited', 'Forfeited'),
     )
+
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='evidence_collection')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    evidence_deadline = models.DateTimeField(null=True, blank=True)
+    appeal_deadline = models.DateTimeField(null=True, blank=True)
+    winning_party = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='won_disputes')
+    winning_side = models.CharField(max_length=20, null=True, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"Dispute for task: {self.task.title}"
+        return f"Dispute for task: {self.task.title} ({self.status})"
+
+    def is_evidence_collection_active(self):
+        return self.status in [self.EVIDENCE_COLLECTION, self.OPEN] and (self.evidence_deadline is None or timezone.now() <= self.evidence_deadline)
+
+    def is_voting_active(self):
+        return self.status == self.VOTING
+
+    def is_in_appeal(self):
+        return self.status == self.APPEAL
+
+    def is_resolved(self):
+        return self.status in [self.RESOLVED_POSTER, self.RESOLVED_TAKER, self.CANCELLED, 'resolved', 'withdrawn']
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -141,6 +183,47 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidence_entries')
+    submitted_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_evidence')
+    text_evidence = models.TextField(blank=True)
+    external_link = models.URLField(blank=True, null=True)
+    file_attachment = models.FileField(upload_to='dispute_evidence/', blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Evidence by {self.submitted_by.username} for dispute {self.dispute.id}"
+
+class JuryAssignment(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='jury_assignments')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jury_assignments')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Juror {self.juror.username} for dispute {self.dispute.id}"
+
+class DisputeVote(models.Model):
+    CHOICES = (
+        ('poster', 'Poster'),
+        ('taker', 'Taker'),
+        ('resolved_poster', 'Resolved (Poster)'),
+        ('resolved_taker', 'Resolved (Taker)'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    choice = models.CharField(max_length=20, choices=CHOICES)
+    voted_for = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='dispute_votes_received')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'voter')
+
+    def __str__(self):
+        return f"Vote by {self.voter.username} for dispute {self.dispute.id}: {self.choice}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
