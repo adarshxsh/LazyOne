@@ -5,6 +5,7 @@ from django.db import transaction
 from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+from django.conf import settings
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
@@ -27,6 +28,16 @@ def raise_dispute(request, task_id):
     if task.taken_by != request.user or task.status != 'in_progress':
         messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
         return redirect('my_tasks')
+
+    user_profile = request.user.userprofile
+    low_rep_threshold = getattr(settings, 'LOW_REPUTATION_THRESHOLD', 80)
+    max_active_disputes = getattr(settings, 'MAX_ACTIVE_DISPUTES_LOW_REP', 1)
+    active_disputes = Dispute.objects.filter(raised_by=request.user, status='open').count()
+
+    if user_profile.reputation_score < low_rep_threshold and active_disputes >= max_active_disputes:
+        messages.error(request, f"Your reputation score ({user_profile.reputation_score}) is below the required threshold ({low_rep_threshold}) and you have reached your active dispute limit ({max_active_disputes}).")
+        return redirect('my_tasks')
+
     if request.method == 'POST':
         reason = request.POST.get('reason')
         if not reason:
@@ -43,6 +54,7 @@ def raise_dispute(request, task_id):
             return redirect('my_tasks')
 
         with transaction.atomic():
+            user_profile.disputes_raised += 1
             user_profile.rewards -= deposit_amount
             user_profile.save()
 
@@ -94,6 +106,14 @@ def withdraw_dispute(request, dispute_id):
         )
         dispute.status = 'resolved'
         dispute.save()
+
+        raiser_profile = request.user.userprofile
+        raiser_profile.disputes_lost += 1
+        raiser_profile.save()
+
+        poster_profile = task.posted_by.userprofile
+        poster_profile.disputes_won += 1
+        poster_profile.save()
 
         task.status = 'in_progress'
         task.save()
