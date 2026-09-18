@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+
+{% block title %}Administrative Dispute Queue - {{ block.super }}{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto space-y-6 text-gray-300">
+    <div class="flex justify-between items-center border-b border-gray-700 pb-4">
+        <h2 class="text-3xl font-bold text-white">Administrative Dispute Queue</h2>
+        <div class="flex space-x-2">
+            <a href="?status=all" class="px-3 py-1.5 rounded text-sm font-medium {% if filter_status == 'all' %}bg-cyan-600 text-white{% else %}bg-gray-800 text-gray-300 hover:bg-gray-700{% endif %}">All</a>
+            <a href="?status=open" class="px-3 py-1.5 rounded text-sm font-medium {% if filter_status == 'open' %}bg-cyan-600 text-white{% else %}bg-gray-800 text-gray-300 hover:bg-gray-700{% endif %}">Open</a>
+            <a href="?status=pending_appeal" class="px-3 py-1.5 rounded text-sm font-medium {% if filter_status == 'pending_appeal' %}bg-cyan-600 text-white{% else %}bg-gray-800 text-gray-300 hover:bg-gray-700{% endif %}">Pending Appeals</a>
+            <a href="?status=resolved" class="px-3 py-1.5 rounded text-sm font-medium {% if filter_status == 'resolved' %}bg-cyan-600 text-white{% else %}bg-gray-800 text-gray-300 hover:bg-gray-700{% endif %}">Resolved</a>
+        </div>
+    </div>
+
+    <div class="bg-gray-800/60 rounded-lg border border-gray-700 overflow-hidden">
+        {% if disputes %}
+            <table class="w-full text-left text-sm text-gray-300">
+                <thead class="bg-gray-900/80 text-gray-200 uppercase text-xs font-semibold border-b border-gray-700">
+                    <tr>
+                        <th class="px-4 py-3">Task</th>
+                        <th class="px-4 py-3">Raised By</th>
+                        <th class="px-4 py-3">Status</th>
+                        <th class="px-4 py-3">Date</th>
+                        <th class="px-4 py-3 text-right">Action</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-700">
+                    {% for dispute in disputes %}
+                        <tr class="hover:bg-gray-700/40">
+                            <td class="px-4 py-3 font-medium text-white">{{ dispute.task.title }} ({{ dispute.task.reward }} pts)</td>
+                            <td class="px-4 py-3">{{ dispute.raised_by.username }}</td>
+                            <td class="px-4 py-3">
+                                <span class="px-2 py-1 text-xs rounded-full 
+                                    {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300
+                                    {% elif dispute.status == 'pending_appeal' %}bg-purple-500/20 text-purple-300
+                                    {% else %}bg-green-500/20 text-green-300{% endif %}">
+                                    {{ dispute.get_status_display }}
+                                </span>
+                            </td>
+                            <td class="px-4 py-3 text-gray-400">{{ dispute.created_at|date:"M d, Y H:i" }}</td>
+                            <td class="px-4 py-3 text-right">
+                                <a href="{% url 'dispute_detail' dispute.id %}" class="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-xs transition">
+                                    {% if dispute.status == 'open' %}Adjudicate{% elif dispute.status == 'pending_appeal' %}Review Appeal{% else %}View Details{% endif %}
+                                </a>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <div class="p-8 text-center text-gray-400">
+                No disputes found for the selected filter.
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
