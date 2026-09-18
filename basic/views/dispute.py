@@ -5,6 +5,7 @@ from django.db import transaction
 from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+from ..firebase_init import update_dispute_firestore
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
@@ -32,7 +33,6 @@ def raise_dispute(request, task_id):
         if not reason:
             messages.error(request, "A reason is required to raise a dispute.")
             return redirect('my_tasks')
-
         deposit_amount = task.deposit_bond_amount
         user_profile = request.user.userprofile
         if user_profile.rewards < deposit_amount:
@@ -74,6 +74,14 @@ def raise_dispute(request, task_id):
             task.status = 'disputed'
             task.save()
 
+            update_dispute_firestore(
+                dispute_id=dispute.id,
+                task_id=task.id,
+                status=dispute.status,
+                event_type='dispute_raised',
+                raised_by_username=request.user.username
+            )
+
             Notification.objects.create(
                 recipient=task.posted_by,
                 message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
@@ -98,6 +106,14 @@ def withdraw_dispute(request, dispute_id):
         task.status = 'in_progress'
         task.save()
 
+        update_dispute_firestore(
+            dispute_id=dispute.id,
+            task_id=task.id,
+            status='withdrawn',
+            event_type='dispute_withdrawn',
+            raised_by_username=dispute.raised_by.username
+        )
+
         Notification.objects.create(
             recipient=task.posted_by,
             message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
@@ -105,3 +121,4 @@ def withdraw_dispute(request, dispute_id):
         )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
+
