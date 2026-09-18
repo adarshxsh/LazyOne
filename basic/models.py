@@ -79,6 +79,9 @@ class RewardLedger(models.Model):
     def __str__(self):
         return f"{self.user.username}: {self.amount} points for {self.description}"
 
+def dispute_evidence_upload_path(instance, filename):
+    return f"disputes/dispute_{instance.dispute.id}/{filename}"
+
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
@@ -141,6 +144,24 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+    @property
+    def evidence(self):
+        return self.evidence_items
+
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidence_items')
+    uploader = models.ForeignKey(User, on_delete=models.CASCADE, related_name='uploaded_evidence')
+    file = models.FileField(upload_to=dispute_evidence_upload_path)
+    description = models.TextField(blank=True, default='')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Evidence by {self.uploader.username} for Dispute {self.dispute.id}"
+
+    @property
+    def created_at(self):
+        return self.uploaded_at
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
