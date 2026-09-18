@@ -130,4 +130,7 @@ print("MEDIA_FILES: OK")
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 print("DEFAULT_AUTO_FIELD: OK")
 
+# Dispute configuration
+DISPUTE_DEPOSIT = int(os.getenv('DISPUTE_DEPOSIT', 100))
+
 print("--- settings.py loaded successfully ---")
