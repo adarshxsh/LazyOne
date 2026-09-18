@@ -25,4 +25,34 @@
         </div>
     </div>
 
+    {% if request.user.is_staff %}
+    <div class="mt-8 bg-gray-800/80 p-6 rounded-lg border border-red-500/50 shadow-lg">
+        <h3 class="text-xl font-bold text-red-400 mb-3">Staff Moderation Controls</h3>
+        {% if dispute.status == 'open' %}
+        <form method="post" action="{% url 'staff_resolve_dispute' dispute.id %}" class="space-y-4">
+            {% csrf_token %}
+            <div>
+                <label for="note" class="block text-sm font-medium text-gray-300 mb-1">Staff Resolution Note (Optional)</label>
+                <textarea id="note" name="note" rows="2" class="w-full p-2 bg-gray-900 border border-gray-700 rounded-md text-white text-sm focus:ring-2 focus:ring-cyan-500" placeholder="Provide reason or context for resolution..."></textarea>
+            </div>
+            <div class="flex flex-wrap gap-3">
+                <button type="submit" name="action" value="refund_poster" class="bg-yellow-600 hover:bg-yellow-500 text-white font-semibold py-2 px-4 rounded-md text-sm transition">
+                    Force-resolve: Refund Poster
+                </button>
+                {% if task.taken_by %}
+                <button type="submit" name="action" value="award_taker" class="bg-green-600 hover:bg-green-500 text-white font-semibold py-2 px-4 rounded-md text-sm transition">
+                    Force-resolve: Award Taker
+                </button>
+                {% endif %}
+                <button type="submit" name="action" value="freeze" class="bg-gray-600 hover:bg-gray-500 text-white font-semibold py-2 px-4 rounded-md text-sm transition">
+                    Freeze Dispute
+                </button>
+            </div>
+        </form>
+        {% else %}
+        <p class="text-sm text-gray-400">This dispute has already been resolved.</p>
+        {% endif %}
+    </div>
+    {% endif %}
+
 {% endblock %}
