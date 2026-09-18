@@ -125,7 +125,7 @@ class DisputeDepositBondTests(TestCase):
         self.assertIsNotNone(ledger)
         self.assertEqual(ledger.amount, 60)
 
-    def test_complete_disputed_task_refunds_deposit(self):
+    def test_resolve_disputed_task_refunds_deposit(self):
         # Taker raises dispute (deposit 60 deducted from 100 -> 40 left)
         self.client.login(username='taker', password='password123')
         self.client.post(
@@ -133,15 +133,17 @@ class DisputeDepositBondTests(TestCase):
             {'reason': 'Dispute reason'}
         )
 
-        # Poster marks task as completed
+        dispute = Dispute.objects.get(task=self.task)
+
+        # Resolve dispute in favor of taker
         self.client.login(username='poster', password='password123')
-        response = self.client.get(reverse('complete_task', args=[self.task.id]))
-        self.assertRedirects(response, reverse('my_tasks'))
+        response = self.client.post(reverse('resolve_dispute', args=[dispute.id]), {'winner_id': self.taker.id})
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
 
         self.task.refresh_from_db()
         self.assertEqual(self.task.status, 'completed')
 
-        dispute = Dispute.objects.get(task=self.task)
+        dispute.refresh_from_db()
         self.assertEqual(dispute.escrow_status, 'refunded')
         self.assertEqual(dispute.status, 'resolved')
 
@@ -347,4 +349,3 @@ class DisputeEscrowAndJuryVotingTests(TestCase):
         types = list(RewardLedger.objects.filter(task=self.task).values_list('transaction_type', flat=True))
         self.assertIn('dispute_refund', types)
         self.assertIn('juror_reward', types)
->>>>>>> ed49df8 (feat: community jury majority voting with dispute escrow lock and juror incentive pool)
