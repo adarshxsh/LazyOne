@@ -3,26 +3,186 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
-
-    <div class="space-y-6 text-gray-300">
+<div class="max-w-4xl mx-auto space-y-8 py-6">
+    <div class="flex items-center justify-between border-b border-gray-800 pb-4">
         <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <h2 class="text-3xl font-bold text-white">Dispute Details</h2>
+            <p class="text-gray-400 text-sm mt-1">Dispute ID #{{ dispute.id }} for task: <span class="text-cyan-400 font-semibold">{{ dispute.task.title }}</span></p>
         </div>
-
         <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
-            <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+        <div>
+            {% if dispute.status == 'open' %}
+                <span class="px-3 py-1.5 text-sm font-semibold rounded-full bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">Open</span>
+            {% elif dispute.status == 'under_review' %}
+                <span class="px-3 py-1.5 text-sm font-semibold rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">Under Review</span>
+            {% elif dispute.status == 'expired' %}
+                <span class="px-3 py-1.5 text-sm font-semibold rounded-full bg-red-500/20 text-red-300 border border-red-500/30">Expired</span>
+            {% else %}
+                <span class="px-3 py-1.5 text-sm font-semibold rounded-full bg-green-500/20 text-green-300 border border-green-500/30">Resolved</span>
+            {% endif %}
         </div>
-
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
-            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
     </div>
 
+    <!-- Countdown Timer & Window Summary -->
+    <div class="bg-gray-800/80 rounded-xl p-6 border border-gray-700/60 shadow-lg grid grid-cols-1 md:grid-cols-3 gap-6 text-gray-300">
+        <div>
+            <p class="text-xs uppercase tracking-wider text-gray-400 font-semibold">Evidence Submission Deadline</p>
+            <p class="text-lg font-medium text-white mt-1">
+                {% if dispute.evidence_deadline %}
+                    {{ dispute.evidence_deadline|date:"M d, Y H:i e" }}
+                {% else %}
+                    N/A
+                {% endif %}
+            </p>
+        </div>
+        <div>
+            <p class="text-xs uppercase tracking-wider text-gray-400 font-semibold">Overall Expiration</p>
+            <p class="text-lg font-medium text-white mt-1">
+                {% if dispute.expires_at %}
+                    {{ dispute.expires_at|date:"M d, Y H:i e" }}
+                {% else %}
+                    N/A
+                {% endif %}
+            </p>
+        </div>
+        <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700 text-center flex flex-col justify-center items-center">
+            <p class="text-xs uppercase tracking-wider text-cyan-400 font-semibold">Evidence Window Countdown</p>
+            {% if is_evidence_window_active %}
+                <div id="countdown-timer" data-seconds="{{ remaining_seconds }}" class="text-2xl font-mono font-bold text-cyan-300 mt-1">
+                    Calculating...
+                </div>
+            {% else %}
+                <div class="text-sm font-semibold text-yellow-400 mt-1">
+                    Submission Window Closed
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Dispute Overview -->
+    <div class="bg-gray-800/80 rounded-xl p-6 border border-gray-700/60 shadow-lg space-y-4">
+        <h3 class="text-xl font-semibold text-cyan-400">Initial Dispute Statement</h3>
+        <div class="text-sm text-gray-400 flex flex-wrap gap-6">
+            <p><strong class="text-gray-300">Raised By:</strong> {{ dispute.raised_by.username }}</p>
+            <p><strong class="text-gray-300">Task Poster:</strong> {{ dispute.task.posted_by.username }}</p>
+            <p><strong class="text-gray-300">Task Doer:</strong> {% if dispute.task.taken_by %}{{ dispute.task.taken_by.username }}{% else %}N/A{% endif %}</p>
+            <p><strong class="text-gray-300">Date Raised:</strong> {{ dispute.created_at|date:"F d, Y H:i" }}</p>
+            <p><strong class="text-gray-300">Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
+        </div>
+        <div class="bg-gray-900/70 p-4 rounded-lg border border-gray-700/80 text-gray-200">
+            {{ dispute.reason|linebreaksbr }}
+        </div>
+    </div>
+
+    <!-- Evidence History Timeline -->
+    <div class="bg-gray-800/80 rounded-xl p-6 border border-gray-700/60 shadow-lg space-y-6">
+        <h3 class="text-xl font-semibold text-cyan-400 flex items-center gap-2">
+            <span>Evidence History Timeline</span>
+            <span class="text-xs px-2.5 py-0.5 rounded-full bg-cyan-900/50 text-cyan-300 border border-cyan-700">{{ evidence_entries|length }} entries</span>
+        </h3>
+
+        {% if evidence_entries %}
+            <div class="space-y-4 relative border-l-2 border-cyan-500/30 ml-3 pl-6">
+                {% for evidence in evidence_entries %}
+                    <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700/80 space-y-3 relative">
+                        <div class="absolute -left-[31px] top-4 w-3 h-3 rounded-full bg-cyan-400 ring-4 ring-gray-900"></div>
+                        <div class="flex items-center justify-between text-xs text-gray-400">
+                            <span class="font-semibold text-cyan-300 text-sm">
+                                {{ evidence.submitted_by.username }}
+                                {% if evidence.submitted_by == dispute.task.posted_by %}
+                                    <span class="text-xs text-gray-400 font-normal">(Task Poster)</span>
+                                {% elif evidence.submitted_by == dispute.task.taken_by %}
+                                    <span class="text-xs text-gray-400 font-normal">(Task Doer)</span>
+                                {% endif %}
+                            </span>
+                            <span>{{ evidence.created_at|date:"M d, Y H:i" }}</span>
+                        </div>
+                        <p class="text-gray-200 text-sm leading-relaxed">{{ evidence.description|linebreaksbr }}</p>
+                        {% if evidence.file %}
+                            <div class="pt-2 border-t border-gray-800">
+                                <a href="{{ evidence.file.url }}" target="_blank" download class="inline-flex items-center gap-2 text-xs font-semibold text-cyan-400 hover:text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900/60 px-3 py-1.5 rounded border border-cyan-800 transition-colors">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                                    View File Attachment
+                                </a>
+                            </div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="text-sm text-gray-400 italic bg-gray-900/40 p-4 rounded-lg border border-gray-800">No supporting evidence entries submitted yet.</p>
+        {% endif %}
+    </div>
+
+    <!-- Evidence Submission Form -->
+    <div class="bg-gray-800/80 rounded-xl p-6 border border-gray-700/60 shadow-lg space-y-4">
+        <h3 class="text-xl font-semibold text-cyan-400">Submit Supporting Evidence</h3>
+
+        {% if can_submit_evidence %}
+            <form action="{% url 'submit_evidence' dispute.id %}" method="post" enctype="multipart/form-data" class="space-y-4">
+                {% csrf_token %}
+                <div>
+                    <label for="id_description" class="block text-sm font-medium text-gray-300 mb-1">Evidence Notes / Description</label>
+                    {{ form.description }}
+                </div>
+                <div>
+                    <label for="id_file" class="block text-sm font-medium text-gray-300 mb-1">File Attachment (Optional - JPEG, PNG, PDF up to 10 MB)</label>
+                    {{ form.file }}
+                </div>
+                <div class="pt-2 flex justify-end">
+                    <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white font-semibold px-6 py-2 rounded-lg transition-colors shadow">
+                        Submit Evidence
+                    </button>
+                </div>
+            </form>
+        {% else %}
+            {% if not is_evidence_window_active %}
+                <div class="bg-yellow-900/30 border border-yellow-700 text-yellow-300 p-4 rounded-lg text-sm">
+                    The evidence submission window for this dispute has closed. No further evidence can be uploaded.
+                </div>
+            {% else %}
+                <div class="bg-gray-900/50 border border-gray-700 text-gray-400 p-4 rounded-lg text-sm">
+                    Only authorized task participants (Poster, Taker) or staff can submit evidence for this dispute.
+                </div>
+            {% endif %}
+        {% endif %}
+    </div>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const timerElement = document.getElementById("countdown-timer");
+        if (!timerElement) return;
+
+        let totalSeconds = parseInt(timerElement.getAttribute("data-seconds"), 10);
+        if (isNaN(totalSeconds) || totalSeconds <= 0) {
+            timerElement.textContent = "00h 00m 00s";
+            return;
+        }
+
+        function updateCountdown() {
+            if (totalSeconds <= 0) {
+                timerElement.textContent = "Window Closed";
+                return;
+            }
+            const days = Math.floor(totalSeconds / 86400);
+            const hours = Math.floor((totalSeconds % 86400) / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            const seconds = totalSeconds % 60;
+
+            let text = "";
+            if (days > 0) text += days + "d ";
+            text += String(hours).padStart(2, "0") + "h " +
+                    String(minutes).padStart(2, "0") + "m " +
+                    String(seconds).padStart(2, "0") + "s";
+
+            timerElement.textContent = text;
+            totalSeconds--;
+        }
+
+        updateCountdown();
+        setInterval(updateCountdown, 1000);
+    });
+</script>
 {% endblock %}

@@ -1,7 +1,19 @@
 import math
+import os
+from datetime import timedelta
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.core.exceptions import ValidationError
+
+def validate_evidence_file(file):
+    max_size = 10 * 1024 * 1024  # 10 MB limit
+    if file.size > max_size:
+        raise ValidationError("File size must not exceed 10 MB.")
+    ext = os.path.splitext(file.name)[1].lower()
+    valid_extensions = ['.jpg', '.jpeg', '.png', '.pdf']
+    if ext not in valid_extensions:
+        raise ValidationError("Unsupported file extension. Allowed formats: JPEG, PNG, PDF.")
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -82,6 +94,8 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('under_review', 'Under Review'),
+        ('expired', 'Expired'),
         ('resolved', 'Resolved'),
     )
     ESCROW_STATUS_CHOICES = (
@@ -95,7 +109,24 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    evidence_deadline = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        is_new = self.pk is None
+        super().save(*args, **kwargs)
+        if is_new or not self.evidence_deadline or not self.expires_at:
+            update_fields = []
+            base_time = self.created_at or timezone.now()
+            if not self.evidence_deadline:
+                self.evidence_deadline = base_time + timedelta(hours=24)
+                update_fields.append('evidence_deadline')
+            if not self.expires_at:
+                self.expires_at = base_time + timedelta(hours=48)
+                update_fields.append('expires_at')
+            if update_fields:
+                super().save(update_fields=update_fields)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
@@ -141,6 +172,16 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidence_entries')
+    submitted_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_evidences')
+    description = models.TextField()
+    file = models.FileField(upload_to='dispute_evidence/', validators=[validate_evidence_file], null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Evidence by {self.submitted_by.username} for Dispute #{self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
