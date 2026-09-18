@@ -54,19 +54,20 @@
     document.addEventListener('DOMContentLoaded', function() {
         // Firebase Config
         var firebaseConfig = {
-            apiKey: "{{ FIREBASE_API_KEY }}",
-            authDomain: "{{ FIREBASE_AUTH_DOMAIN }}",
-            projectId: "{{ FIREBASE_PROJECT_ID }}",
-            storageBucket: "{{ FIREBASE_STORAGE_BUCKET }}",
-            messagingSenderId: "{{ FIREBASE_MESSAGING_SENDER_ID }}",
-            appId: "{{ FIREBASE_APP_ID }}"
+            apiKey: "{{ FIREBASE_API_KEY|default:'' }}",
+            authDomain: "{{ FIREBASE_AUTH_DOMAIN|default:'' }}",
+            projectId: "{{ FIREBASE_PROJECT_ID|default:'' }}",
+            storageBucket: "{{ FIREBASE_STORAGE_BUCKET|default:'' }}",
+            messagingSenderId: "{{ FIREBASE_MESSAGING_SENDER_ID|default:'' }}",
+            appId: "{{ FIREBASE_APP_ID|default:'' }}"
         };
-        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
 
-        // Globals
-        const db = firebase.firestore();
-        const conversationId = "{{ conversation.id }}";
-        const currentUser = { id: "{{ request.user.id }}", username: "{{ request.user.username }}" };
+        const isConfigValid = firebaseConfig.apiKey && 
+                              firebaseConfig.apiKey !== "" && 
+                              !firebaseConfig.apiKey.includes("your-api-key") &&
+                              firebaseConfig.projectId && 
+                              firebaseConfig.projectId !== "" && 
+                              !firebaseConfig.projectId.includes("your-project-id");
 
         // DOM Elements
         const messageList = document.getElementById('message-list');
@@ -75,7 +76,39 @@
         const messageSubmitButton = document.getElementById('message-submit');
         const loadingIndicator = document.getElementById('loading-messages');
 
-        messageInput.focus();
+        if (!isConfigValid) {
+            console.warn("Firebase configuration is missing or invalid. Displaying fallback message.");
+            if (loadingIndicator) {
+                loadingIndicator.innerHTML = `
+                    <div class="bg-amber-500/10 border border-amber-500/20 text-amber-400 p-6 rounded-xl text-center">
+                        <p class="font-medium">Chat is temporarily unavailable because real-time services are not configured.</p>
+                    </div>
+                `;
+            }
+            if (messageInput) {
+                messageInput.disabled = true;
+                messageInput.placeholder = "Chat is temporarily unavailable";
+            }
+            if (messageSubmitButton) {
+                messageSubmitButton.disabled = true;
+                messageSubmitButton.classList.add('opacity-50', 'cursor-not-allowed');
+            }
+            if (messageForm) {
+                messageForm.addEventListener('submit', e => e.preventDefault());
+            }
+            return;
+        }
+
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+
+        // Globals
+        const db = firebase.firestore();
+        const conversationId = "{{ conversation.id }}";
+        const currentUser = { id: "{{ request.user.id }}", username: "{{ request.user.username }}" };
+
+        if (messageInput) {
+            messageInput.focus();
+        }
 
         // --- Firestore Real-Time Listener ---
         const messagesRef = db.collection('conversations').doc(conversationId).collection('messages').orderBy('timestamp');

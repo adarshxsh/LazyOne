@@ -86,15 +86,38 @@
         messagingSenderId: "{{ FIREBASE_MESSAGING_SENDER_ID|default:'' }}",
         appId: "{{ FIREBASE_APP_ID|default:'' }}"
     };
-    if (!firebase.apps.length) {
-        firebase.initializeApp(firebaseConfig);
+
+    var isFirebaseConfigValid = firebaseConfig.apiKey && 
+                                firebaseConfig.apiKey !== "" && 
+                                !firebaseConfig.apiKey.includes("your-api-key") &&
+                                firebaseConfig.projectId && 
+                                firebaseConfig.projectId !== "" && 
+                                !firebaseConfig.projectId.includes("your-project-id");
+
+    if (isFirebaseConfigValid) {
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        } else {
+            firebase.app();
+        }
     } else {
-        firebase.app();
+        console.warn("Firebase configuration is missing or invalid. Phone verification will be disabled.");
     }
 
     document.addEventListener('DOMContentLoaded', function() {
         const verifyPhoneButton = document.getElementById('verify-phone-button');
         if (verifyPhoneButton) {
+            if (!isFirebaseConfigValid) {
+                verifyPhoneButton.disabled = true;
+                verifyPhoneButton.classList.add('opacity-50', 'cursor-not-allowed');
+                
+                const alertDiv = document.createElement('div');
+                alertDiv.className = "text-amber-400 text-sm mt-2";
+                alertDiv.innerHTML = "Phone verification is temporarily unavailable because Firebase is not configured.";
+                verifyPhoneButton.parentNode.parentNode.appendChild(alertDiv);
+                return;
+            }
+
             window.recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptcha-container', {
                 'size': 'invisible'
             });
