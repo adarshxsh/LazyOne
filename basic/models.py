@@ -1,4 +1,6 @@
 import math
+import os
+import uuid
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -141,6 +143,44 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+def dispute_evidence_upload_to(instance, filename):
+    ext = os.path.splitext(filename)[1].lower()
+    safe_filename = f"{uuid.uuid4().hex}{ext}"
+    dispute_id = instance.dispute_id if instance.dispute_id else 'temp'
+    return f"disputes/{dispute_id}/evidence/{safe_filename}"
+
+class DisputeEvidence(models.Model):
+    EVIDENCE_TYPE_CHOICES = (
+        ('screenshot', 'Screenshot'),
+        ('deliverable_proof', 'Deliverable Proof'),
+        ('chat_log', 'Chat Log'),
+        ('document', 'Document'),
+        ('other', 'Other'),
+    )
+
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidence')
+    submitted_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='submitted_evidence')
+    file = models.FileField(upload_to=dispute_evidence_upload_to)
+    title = models.CharField(max_length=200, blank=True)
+    description = models.TextField(blank=True)
+    evidence_type = models.CharField(max_length=30, choices=EVIDENCE_TYPE_CHOICES, default='other')
+    file_size = models.BigIntegerField(default=0)
+    mime_type = models.CharField(max_length=100, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['uploaded_at']
+
+    def __str__(self):
+        return f"Evidence for Dispute #{self.dispute.id} - {self.title or self.file.name}"
+
+    @property
+    def is_image(self):
+        if self.mime_type and self.mime_type.startswith('image/'):
+            return True
+        ext = os.path.splitext(self.file.name)[1].lower()
+        return ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
