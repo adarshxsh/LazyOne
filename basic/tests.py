@@ -1,9 +1,10 @@
+from datetime import timedelta
 from django.test import TestCase, Client
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
-from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from django.core.management import call_command
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, Notification
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +182,130 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class ExpireOverdueTasksTest(TestCase):
+
+    def setUp(self):
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+    def test_expire_overdue_available_task(self):
+        past_deadline = timezone.now() - timedelta(hours=2)
+        task = Task.objects.create(
+            title="Overdue Available Task",
+            description="Should be cancelled",
+            reward=200,
+            posted_by=self.poster,
+            deadline=past_deadline,
+            status='available'
+        )
+
+        call_command('expire_overdue_tasks')
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'cancelled')
+
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1200)
+
+        ledger_entry = RewardLedger.objects.filter(task=task, user=self.poster).first()
+        self.assertIsNotNone(ledger_entry)
+        self.assertEqual(ledger_entry.amount, 200)
+        self.assertEqual(ledger_entry.transaction_type, 'task_cancellation')
+
+        notification = Notification.objects.filter(recipient=self.poster).first()
+        self.assertIsNotNone(notification)
+        self.assertIn("expired", notification.message)
+
+    def test_expire_overdue_in_progress_task(self):
+        past_deadline = timezone.now() - timedelta(hours=1)
+        task = Task.objects.create(
+            title="Overdue In Progress Task",
+            description="Should be cancelled and notify both users",
+            reward=300,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            deadline=past_deadline,
+            status='in_progress'
+        )
+
+        call_command('expire_overdue_tasks')
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'cancelled')
+
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1300)
+
+        ledger_entry = RewardLedger.objects.filter(task=task, user=self.poster).first()
+        self.assertIsNotNone(ledger_entry)
+        self.assertEqual(ledger_entry.amount, 300)
+
+        poster_notif = Notification.objects.filter(recipient=self.poster).first()
+        self.assertIsNotNone(poster_notif)
+
+        taker_notif = Notification.objects.filter(recipient=self.taker).first()
+        self.assertIsNotNone(taker_notif)
+        self.assertIn("expired", taker_notif.message)
+
+    def test_future_deadline_task_not_expired(self):
+        future_deadline = timezone.now() + timedelta(hours=5)
+        task = Task.objects.create(
+            title="Future Task",
+            description="Should stay available",
+            reward=150,
+            posted_by=self.poster,
+            deadline=future_deadline,
+            status='available'
+        )
+
+        call_command('expire_overdue_tasks')
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'available')
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1000)
+
+    def test_disputed_overdue_task_excluded(self):
+        past_deadline = timezone.now() - timedelta(hours=3)
+        task = Task.objects.create(
+            title="Disputed Task",
+            description="Under dispute",
+            reward=250,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            deadline=past_deadline,
+            status='disputed'
+        )
+        Dispute.objects.create(task=task, raised_by=self.taker, reason="Problem with task", status='open')
+
+        call_command('expire_overdue_tasks')
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'disputed')
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1000)
+
+    def test_completed_task_not_expired(self):
+        past_deadline = timezone.now() - timedelta(hours=10)
+        task = Task.objects.create(
+            title="Completed Task",
+            description="Already done",
+            reward=100,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            deadline=past_deadline,
+            status='completed'
+        )
+
+        call_command('expire_overdue_tasks')
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'completed')
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1000)
 
