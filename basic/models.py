@@ -2,6 +2,7 @@ import math
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.core.exceptions import ValidationError
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -82,13 +83,28 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('evidence_submission', 'Evidence Submission'),
+        ('jury_selection', 'Jury Selection'),
+        ('voting', 'Voting'),
+        ('appealed', 'Appealed'),
         ('resolved', 'Resolved'),
+        ('withdrawn', 'Withdrawn'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
         ('refunded', 'Refunded'),
         ('forfeited', 'Forfeited'),
     )
+
+    ALLOWED_TRANSITIONS = {
+        'open': {'evidence_submission', 'withdrawn'},
+        'evidence_submission': {'jury_selection', 'withdrawn'},
+        'jury_selection': {'voting', 'withdrawn'},
+        'voting': {'resolved', 'appealed', 'withdrawn'},
+        'appealed': {'evidence_submission', 'jury_selection', 'voting', 'resolved', 'withdrawn'},
+        'resolved': set(),
+        'withdrawn': set(),
+    }
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
@@ -96,6 +112,19 @@ class Dispute(models.Model):
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def can_transition_to(self, target_state):
+        allowed = self.ALLOWED_TRANSITIONS.get(self.status, set())
+        return target_state in allowed
+
+    def transition_to(self, target_state, save=False):
+        if not self.can_transition_to(target_state):
+            raise ValidationError(
+                f"Invalid state transition for dispute: cannot move from '{self.status}' to '{target_state}'."
+            )
+        self.status = target_state
+        if save:
+            self.save()
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
