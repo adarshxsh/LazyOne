@@ -142,6 +142,23 @@ class Dispute(models.Model):
             self.escrow_status = 'forfeited'
             self.save()
 
+
+class DisputeVote(models.Model):
+    CHOICES = (
+        ('poster', 'Award Poster'),
+        ('taker', 'Award Taker'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    choice = models.CharField(max_length=10, choices=CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'voter')
+
+    def __str__(self):
+        return f"Vote by {self.voter.username} on dispute #{self.dispute.id}: {self.choice}"
+
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
     to_user = models.ForeignKey(User, related_name='to_user', on_delete=models.CASCADE)
