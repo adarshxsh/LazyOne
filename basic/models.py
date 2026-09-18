@@ -1,4 +1,5 @@
 import math
+from datetime import timedelta
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -95,7 +96,30 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    voting_period_days = models.PositiveIntegerField(default=7)
+    voting_deadline = models.DateTimeField(null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if not self.voting_deadline:
+            base_time = self.created_at or timezone.now()
+            period = self.voting_period_days or 7
+            self.voting_deadline = base_time + timedelta(days=period)
+        super().save(*args, **kwargs)
+
+    @property
+    def is_expired(self):
+        if self.voting_deadline:
+            return timezone.now() >= self.voting_deadline
+        return False
+
+    @property
+    def time_remaining(self):
+        if self.voting_deadline:
+            now = timezone.now()
+            if self.voting_deadline > now:
+                return self.voting_deadline - now
+        return None
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"

@@ -1,3 +1,5 @@
+from datetime import timedelta
+from django.utils import timezone
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
@@ -15,7 +17,10 @@ def dispute_detail_view(request, dispute_id):
         return redirect('home')
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'now': timezone.now(),
+        'voting_deadline': dispute.voting_deadline,
+        'remaining_time': dispute.time_remaining,
     }
     return render(request, 'dispute_detail.html', context)
 
@@ -42,6 +47,10 @@ def raise_dispute(request, task_id):
             )
             return redirect('my_tasks')
 
+        now = timezone.now()
+        voting_period_days = 7
+        voting_deadline = now + timedelta(days=voting_period_days)
+
         with transaction.atomic():
             user_profile.rewards -= deposit_amount
             user_profile.save()
@@ -53,6 +62,8 @@ def raise_dispute(request, task_id):
                 dispute.status = 'open'
                 dispute.deposit_amount = deposit_amount
                 dispute.escrow_status = 'held'
+                dispute.voting_period_days = voting_period_days
+                dispute.voting_deadline = voting_deadline
                 dispute.save()
             else:
                 dispute = Dispute.objects.create(
@@ -60,7 +71,9 @@ def raise_dispute(request, task_id):
                     raised_by=request.user,
                     reason=reason,
                     deposit_amount=deposit_amount,
-                    escrow_status='held'
+                    escrow_status='held',
+                    voting_period_days=voting_period_days,
+                    voting_deadline=voting_deadline
                 )
 
             RewardLedger.objects.create(
