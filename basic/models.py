@@ -1,3 +1,4 @@
+import math
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -54,12 +55,19 @@ class Task(models.Model):
     def main_chat(self):
         return self.conversations.first()
 
+    @property
+    def deposit_bond_amount(self):
+        return max(50, math.ceil(self.reward * 0.20))
+
 class RewardLedger(models.Model):
     TRANSACTION_TYPES = (
         ('task_creation', 'Task Creation (Points Reserved)'),
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('dispute_deposit', 'Dispute Deposit Bond Held'),
+        ('dispute_refund', 'Dispute Deposit Bond Refunded'),
+        ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
         ('juror_stake_lock', 'Jury Stake Locked'),
         ('juror_stake_release', 'Jury Stake Released'),
     )
@@ -80,14 +88,63 @@ class Dispute(models.Model):
         ('pending-juror', 'Pending Juror'),
         ('resolved', 'Resolved'),
     )
+    ESCROW_STATUS_CHOICES = (
+        ('held', 'Held in Escrow'),
+        ('refunded', 'Refunded'),
+        ('forfeited', 'Forfeited'),
+    )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    deposit_amount = models.PositiveIntegerField(default=0)
+    escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def refund_deposit(self, reason_description=None):
+        if self.escrow_status == 'held' and self.deposit_amount > 0:
+            user_profile = self.raised_by.userprofile
+            user_profile.rewards += self.deposit_amount
+            user_profile.save()
+
+            desc = reason_description or f"Security deposit bond refunded for dispute on task: '{self.task.title}'"
+            RewardLedger.objects.create(
+                user=self.raised_by,
+                task=self.task,
+                amount=self.deposit_amount,
+                transaction_type='dispute_refund',
+                description=desc
+            )
+            self.escrow_status = 'refunded'
+            self.save()
+
+    def forfeit_deposit(self, beneficiary=None, reason_description=None):
+        if self.escrow_status == 'held' and self.deposit_amount > 0:
+            if beneficiary:
+                beneficiary_profile = beneficiary.userprofile
+                beneficiary_profile.rewards += self.deposit_amount
+                beneficiary_profile.save()
+                RewardLedger.objects.create(
+                    user=beneficiary,
+                    task=self.task,
+                    amount=self.deposit_amount,
+                    transaction_type='dispute_refund',
+                    description=f"Forfeited dispute deposit bond awarded from task: '{self.task.title}'"
+                )
+
+            desc = reason_description or f"Security deposit bond forfeited for dispute on task: '{self.task.title}'"
+            RewardLedger.objects.create(
+                user=self.raised_by,
+                task=self.task,
+                amount=0,
+                transaction_type='dispute_forfeit',
+                description=desc
+            )
+            self.escrow_status = 'forfeited'
+            self.save()
 
 class JuryAssignment(models.Model):
     STAKE_STATUS_CHOICES = (
