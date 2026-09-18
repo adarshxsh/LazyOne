@@ -1,12 +1,19 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from ..models import Task, Conversation, Notification, RewardLedger
+from ..models import Task, Conversation, Notification, RewardLedger, UserProfile
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
 from django.db.models import Q
 from datetime import datetime, timedelta
+import logging
+from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
+from django.conf import settings
+import os
+
+logger = logging.getLogger(__name__)
 
 
 @login_required(login_url='/login/')
@@ -63,6 +70,8 @@ def take_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, status='available')
     if task.posted_by == request.user:
         messages.error(request, "You cannot take your own task.")
+    elif task.deadline and task.deadline <= timezone.now():
+        messages.error(request, "This task has expired and can no longer be taken.")
     else:
         with transaction.atomic():
             task.status = 'in_progress'
@@ -176,3 +185,95 @@ def my_tasks(request):
     taken_tasks = Task.objects.filter(taken_by=request.user).order_by('-created_at')
     context = {'posted_tasks': posted_tasks, 'taken_tasks': taken_tasks}
     return render(request, 'my_tasks.html', context)
+
+
+def expire_overdue_tasks():
+    now = timezone.now()
+    overdue_tasks = Task.objects.filter(
+        deadline__lte=now,
+        status__in=['available', 'in_progress']
+    )
+
+    expired_count = 0
+    processed_task_ids = []
+
+    for task_obj in overdue_tasks:
+        try:
+            with transaction.atomic():
+                task = Task.objects.select_for_update().get(id=task_obj.id)
+                if task.status not in ('available', 'in_progress'):
+                    continue
+
+                task.status = 'cancelled'
+                task.save()
+
+                poster_profile, _ = UserProfile.objects.get_or_create(user=task.posted_by)
+                poster_profile.rewards += task.reward
+                poster_profile.save()
+
+                RewardLedger.objects.create(
+                    user=task.posted_by,
+                    task=task,
+                    amount=task.reward,
+                    transaction_type='task_cancellation',
+                    description=f"Refund for expired task: '{task.title}'"
+                )
+
+                try:
+                    link = reverse('my_tasks')
+                except Exception:
+                    link = '/my_tasks/'
+
+                Notification.objects.create(
+                    recipient=task.posted_by,
+                    message=f"Your task '{task.title}' has expired. {task.reward} points have been refunded to your account.",
+                    link=link
+                )
+
+                if task.taken_by:
+                    Notification.objects.create(
+                        recipient=task.taken_by,
+                        message=f"The task '{task.title}' has expired as the deadline passed.",
+                        link=link
+                    )
+
+                expired_count += 1
+                processed_task_ids.append(task.id)
+        except Exception as e:
+            logger.error(f"Error processing expired task {task_obj.id}: {e}", exc_info=True)
+
+    return {
+        'expired_count': expired_count,
+        'processed_task_ids': processed_task_ids
+    }
+
+
+@csrf_exempt
+def process_expired_tasks_view(request):
+    cron_secret = os.getenv('CRON_SECRET') or getattr(settings, 'CRON_SECRET', None) or getattr(settings, 'SECRET_KEY', None)
+
+    auth_header = request.headers.get('Authorization', '') or request.META.get('HTTP_AUTHORIZATION', '')
+    token_from_bearer = ''
+    if auth_header.startswith('Bearer '):
+        token_from_bearer = auth_header[7:].strip()
+
+    provided_token = (
+        token_from_bearer or
+        request.headers.get('X-Cron-Secret', '') or
+        request.META.get('HTTP_X_CRON_SECRET', '') or
+        request.GET.get('token') or
+        request.GET.get('secret') or
+        request.POST.get('token') or
+        request.POST.get('secret')
+    )
+
+    if cron_secret and provided_token != cron_secret:
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
+
+    result = expire_overdue_tasks()
+    return JsonResponse({
+        'status': 'success',
+        'expired_tasks_count': result['expired_count'],
+        'processed_task_ids': result['processed_task_ids']
+    })
+

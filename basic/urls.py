@@ -4,7 +4,8 @@ from .views.authentication import login_page, logout_view, register_view, verify
 from .views.profile import profile_view, user_profile_view, update_closeness
 from .views.tasks import (
     add_task, take_task, complete_task, my_tasks, cancel_task, 
-    request_cancellation, accept_cancellation, abandon_task
+    request_cancellation, accept_cancellation, abandon_task,
+    process_expired_tasks_view
 )
 from .views.dispute import dispute_detail_view, withdraw_dispute, raise_dispute
 from .views.chat import start_chat, chat_view, send_message
@@ -31,6 +32,7 @@ urlpatterns = [
     path('task/cancel/accept/<int:task_id>/', accept_cancellation, name='accept_cancellation'),
     path('task/abandon/<int:task_id>/', abandon_task, name='abandon_task'),
     path('my_tasks/', my_tasks, name='my_tasks'),
+    path('cron/expire-tasks/', process_expired_tasks_view, name='process_expired_tasks'),
 
     # Dispute URLs
     path('task/dispute/<int:task_id>/', raise_dispute, name='raise_dispute'),
