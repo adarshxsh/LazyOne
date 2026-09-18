@@ -17,11 +17,40 @@
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            {% if dispute.voting_deadline %}
+                <p><strong>Voting Deadline:</strong> {{ dispute.voting_deadline|date:"F d, Y H:i" }}</p>
+            {% endif %}
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+        </div>
+
+        <!-- Community Jury Arbitration Panel -->
+        <div class="bg-gray-800/80 p-5 rounded-xl border border-gray-700 space-y-3">
+            <h3 class="text-xl font-semibold text-cyan-400">Community Jury Arbitration</h3>
+            <p><strong>Peer Jurors Assigned:</strong> {{ total_jurors }}</p>
+            <p><strong>Votes Submitted:</strong> {{ voted_jurors_count }} / {{ total_jurors }}</p>
+
+            {% if show_results %}
+                <div class="bg-green-900/40 p-4 rounded-lg border border-green-700/50 mt-3 text-sm">
+                    <p class="font-bold text-green-300 text-base">Consensus Verdict: {{ dispute.winning_party|capfirst }} Wins</p>
+                    <p class="text-gray-300 mt-1">Vote Tally: Poster ({{ poster_votes }}) — Taker ({{ taker_votes }})</p>
+                </div>
+            {% else %}
+                <div class="bg-blue-900/30 p-4 rounded-lg border border-blue-700/50 mt-3 text-xs text-blue-200">
+                    🔒 <strong>Confidential Voting:</strong> Individual votes are hidden until the voting period closes or all jurors have voted.
+                </div>
+            {% endif %}
+
+            {% if is_assigned_juror and not juror_has_voted and dispute.status == 'open' %}
+                <div class="pt-3">
+                    <a href="{% url 'jury_dispute_detail' dispute.id %}" class="inline-block bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg font-medium text-sm transition">
+                        Cast Your Jury Vote →
+                    </a>
+                </div>
+            {% endif %}
         </div>
     </div>
 

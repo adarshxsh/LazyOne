@@ -1,0 +1,106 @@
+{% extends 'base.html' %}
+
+{% block title %}Jury Arbitration - {{ block.super }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex justify-between items-center border-b border-gray-700 pb-4">
+        <div>
+            <a href="{% url 'jury_dashboard' %}" class="text-xs text-cyan-400 hover:underline mb-2 inline-block">← Back to Jury Portal</a>
+            <h2 class="text-3xl font-bold text-white">Jury Arbitration Review</h2>
+        </div>
+        <div>
+            <span class="px-3 py-1 rounded-full text-xs font-semibold {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300 border border-yellow-500/30{% else %}bg-green-500/20 text-green-300 border border-green-500/30{% endif %}">
+                Dispute Status: {{ dispute.get_status_display }}
+            </span>
+        </div>
+    </div>
+
+    <!-- Task Details -->
+    <div class="bg-gray-800/80 p-6 rounded-xl border border-gray-700 space-y-3">
+        <h3 class="text-xl font-bold text-cyan-400">Task Details</h3>
+        <p class="text-lg font-semibold text-white">{{ task.title }}</p>
+        <p class="text-gray-300 text-sm">{{ task.description }}</p>
+        <div class="flex flex-wrap gap-4 text-xs text-gray-400 pt-2">
+            <span><strong>Reward:</strong> {{ task.reward }} points</span>
+            <span><strong>Posted By:</strong> {{ task.posted_by.username }}</span>
+            <span><strong>Taken By:</strong> {{ task.taken_by.username }}</span>
+        </div>
+    </div>
+
+    <!-- Dispute Evidence & Reason -->
+    <div class="bg-gray-800/80 p-6 rounded-xl border border-gray-700 space-y-3">
+        <h3 class="text-xl font-bold text-cyan-400">Dispute Evidence & Reason</h3>
+        <p class="text-sm text-gray-400"><strong>Raised by:</strong> {{ dispute.raised_by.username }} on {{ dispute.created_at|date:"F d, Y H:i" }}</p>
+        <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700 text-gray-200 text-sm">
+            {{ dispute.reason|linebreaksbr }}
+        </div>
+    </div>
+
+    <!-- Communication History (Chat) -->
+    {% if messages_list %}
+        <div class="bg-gray-800/80 p-6 rounded-xl border border-gray-700 space-y-3">
+            <h3 class="text-xl font-bold text-cyan-400">Task Chat History</h3>
+            <div class="max-h-60 overflow-y-auto space-y-2 bg-gray-900/60 p-4 rounded-lg border border-gray-700">
+                {% for msg in messages_list %}
+                    <div class="text-xs">
+                        <strong class="text-cyan-300">{{ msg.sender.username }}:</strong>
+                        <span class="text-gray-200">{{ msg.content }}</span>
+                        <span class="text-gray-500 ml-2">({{ msg.timestamp|date:"M d H:i" }})</span>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
+
+    <!-- Voting Form / Status -->
+    <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
+        <h3 class="text-xl font-bold text-cyan-400 mb-4">Cast Confidential Vote</h3>
+
+        {% if dispute.status == 'resolved' %}
+            <div class="bg-green-900/30 p-4 rounded-lg border border-green-700/50 text-green-200 text-sm">
+                This dispute has been resolved. Outcome: <strong>{{ dispute.winning_party|capfirst }} Wins</strong>.
+            </div>
+        {% elif assignment.has_voted %}
+            <div class="bg-blue-900/30 p-4 rounded-lg border border-blue-700/50 text-blue-200 text-sm">
+                You have already cast your secret vote on this dispute. Results will be finalized once all votes are collected or the voting period closes.
+                {% if vote %}
+                    <p class="mt-2 text-xs text-blue-300">Your Vote: <strong>{{ vote.get_vote_display }}</strong></p>
+                {% endif %}
+            </div>
+        {% else %}
+            <form action="{% url 'submit_jury_vote' dispute.id %}" method="POST" class="space-y-4">
+                {% csrf_token %}
+                <p class="text-sm text-gray-300">As a peer juror, select the outcome based on task details and evidence. Votes remain hidden until final aggregation.</p>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <label class="flex items-center p-4 bg-gray-900/60 rounded-lg border border-gray-700 hover:border-cyan-500 cursor-pointer">
+                        <input type="radio" name="vote" value="poster" required class="text-cyan-500 focus:ring-cyan-500">
+                        <div class="ml-3">
+                            <span class="block font-medium text-white">In Favor of Poster ({{ task.posted_by.username }})</span>
+                            <span class="block text-xs text-gray-400">Task points will be refunded to the task creator.</span>
+                        </div>
+                    </label>
+
+                    <label class="flex items-center p-4 bg-gray-900/60 rounded-lg border border-gray-700 hover:border-cyan-500 cursor-pointer">
+                        <input type="radio" name="vote" value="taker" required class="text-cyan-500 focus:ring-cyan-500">
+                        <div class="ml-3">
+                            <span class="block font-medium text-white">In Favor of Taker ({{ task.taken_by.username }})</span>
+                            <span class="block text-xs text-gray-400">Task reward points will be awarded to the task taker.</span>
+                        </div>
+                    </label>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-1">Rationale / Explanation (Optional)</label>
+                    <textarea name="rationale" rows="3" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white text-sm focus:border-cyan-500 focus:ring-cyan-500" placeholder="Provide reason for your vote decision..."></textarea>
+                </div>
+
+                <button type="submit" class="bg-cyan-500 hover:bg-cyan-600 text-white font-bold px-6 py-2.5 rounded-lg text-sm transition">
+                    Submit Secret Vote
+                </button>
+            </form>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

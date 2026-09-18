@@ -5,17 +5,35 @@ from django.db import transaction
 from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+from ..jury_utils import assign_jurors, check_and_aggregate_dispute
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+    check_and_aggregate_dispute(dispute)
+
+    is_assigned_juror = dispute.jury_assignments.filter(juror=request.user).exists()
+    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff and not is_assigned_juror:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+
+    total_jurors = dispute.jury_assignments.count()
+    voted_jurors_count = dispute.votes.count()
+    show_results = (dispute.status == 'resolved')
+    juror_assignment = dispute.jury_assignments.filter(juror=request.user).first()
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'is_assigned_juror': is_assigned_juror,
+        'juror_has_voted': juror_assignment.has_voted if juror_assignment else False,
+        'total_jurors': total_jurors,
+        'voted_jurors_count': voted_jurors_count,
+        'show_results': show_results,
+        'votes': dispute.votes.all() if show_results else None,
+        'poster_votes': dispute.votes.filter(vote='poster').count() if show_results else 0,
+        'taker_votes': dispute.votes.filter(vote='taker').count() if show_results else 0,
     }
     return render(request, 'dispute_detail.html', context)
 
@@ -32,7 +50,6 @@ def raise_dispute(request, task_id):
         if not reason:
             messages.error(request, "A reason is required to raise a dispute.")
             return redirect('my_tasks')
-
         deposit_amount = task.deposit_bond_amount
         user_profile = request.user.userprofile
         if user_profile.rewards < deposit_amount:
@@ -74,12 +91,15 @@ def raise_dispute(request, task_id):
             task.status = 'disputed'
             task.save()
 
+            # Automatically assign peer jurors to the dispute
+            assign_jurors(dispute, count=5)
+
             Notification.objects.create(
                 recipient=task.posted_by,
                 message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
                 link=reverse('dispute_detail', args=[dispute.id])
             )
-        messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
+        messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond. Peer jury assigned.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
 
