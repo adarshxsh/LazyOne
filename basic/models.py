@@ -83,6 +83,7 @@ class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
         ('resolved', 'Resolved'),
+        ('withdrawn', 'Withdrawn'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
