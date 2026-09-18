@@ -95,6 +95,11 @@ def complete_task(request, task_id):
             )
             task.dispute.status = 'resolved'
             task.dispute.save()
+            try:
+                from .dispute import sync_dispute_to_firestore
+                sync_dispute_to_firestore(task.dispute, status='resolved')
+            except Exception as e:
+                logger.error(f"Error syncing dispute resolution to Firestore: {e}")
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,
