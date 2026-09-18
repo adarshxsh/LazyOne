@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
 from ..models import Dispute, Task, Notification, RewardLedger
+from ..services.reputation import ReputationService
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -74,6 +75,8 @@ def raise_dispute(request, task_id):
             task.status = 'disputed'
             task.save()
 
+            ReputationService.record_dispute_raised(request.user.userprofile)
+
             Notification.objects.create(
                 recipient=task.posted_by,
                 message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
@@ -104,4 +107,83 @@ def withdraw_dispute(request, dispute_id):
             link=reverse('my_tasks')
         )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
+    return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def resolve_dispute(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id, status='open')
+    task = dispute.task
+
+    # Only staff/moderator or task participants can resolve
+    if not request.user.is_staff and request.user != task.posted_by and request.user != task.taken_by:
+        messages.error(request, "You are not authorized to resolve this dispute.")
+        return redirect('dispute_detail', dispute_id=dispute_id)
+
+    winner_side = request.POST.get('winner') # 'doer' or 'poster'
+    if winner_side not in ['doer', 'poster']:
+        messages.error(request, "Invalid dispute winner selection.")
+        return redirect('dispute_detail', dispute_id=dispute_id)
+
+    with transaction.atomic():
+        doer_profile = task.taken_by.userprofile
+        poster_profile = task.posted_by.userprofile
+
+        if winner_side == 'doer':
+            total_payout = task.reward + task.taker_collateral
+            doer_profile.rewards += total_payout
+            doer_profile.save()
+            
+            extra_poster_collateral = task.poster_collateral - task.reward
+            if extra_poster_collateral > 0:
+                poster_profile.rewards += extra_poster_collateral
+                poster_profile.save()
+
+            task.status = 'completed'
+            task.save()
+            dispute.status = 'resolved'
+            dispute.save()
+            dispute.refund_deposit(reason_description=f"Security deposit bond refunded for won dispute on task: '{task.title}'")
+            doer_profile.refresh_from_db()
+
+            ReputationService.record_dispute_won(doer_profile)
+            ReputationService.record_dispute_lost(poster_profile)
+
+            RewardLedger.objects.create(
+                user=task.taken_by, task=task, amount=task.reward,
+                transaction_type='task_completion', description=f"Dispute resolved in favor of doer: '{task.title}'"
+            )
+            if task.taker_collateral > 0:
+                RewardLedger.objects.create(
+                    user=task.taken_by, task=task, amount=task.taker_collateral,
+                    transaction_type='collateral_refund', description=f"Security deposit returned: '{task.title}'"
+                )
+            messages.success(request, f"Dispute resolved in favor of doer ({task.taken_by.username}).")
+
+        else: # poster wins
+            poster_refund = task.poster_collateral + task.taker_collateral
+            poster_profile.rewards += poster_refund
+            poster_profile.save()
+
+            task.status = 'cancelled'
+            task.save()
+            dispute.status = 'resolved'
+            dispute.save()
+            dispute.forfeit_deposit(beneficiary=task.posted_by, reason_description=f"Security deposit bond forfeited for lost dispute on task: '{task.title}'")
+            poster_profile.refresh_from_db()
+
+            ReputationService.record_dispute_won(poster_profile)
+            ReputationService.record_dispute_lost(doer_profile)
+
+            RewardLedger.objects.create(
+                user=task.posted_by, task=task, amount=poster_refund,
+                transaction_type='task_cancellation', description=f"Dispute resolved in favor of poster: '{task.title}'"
+            )
+            if task.taker_collateral > 0:
+                RewardLedger.objects.create(
+                    user=task.taken_by, task=task, amount=-task.taker_collateral,
+                    transaction_type='collateral_forfeit', description=f"Security deposit forfeited in dispute: '{task.title}'"
+                )
+            messages.success(request, f"Dispute resolved in favor of poster ({task.posted_by.username}).")
+
     return redirect('my_tasks')
