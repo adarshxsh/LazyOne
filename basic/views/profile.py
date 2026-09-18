@@ -4,7 +4,7 @@ from django.contrib.auth.decorators import login_required
 from ..models import UserProfile, Task, Friendship
 from django.contrib.auth.models import User
 import json
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse, HttpResponse, Http404
 from firebase_admin import auth
 from django.apps import apps # Import apps to access app config
 
@@ -122,45 +122,4 @@ def update_closeness(request, friendship_id):
 
 @login_required(login_url='/login/')
 def verify_phone_token(request):
-    db = apps.get_app_config('basic').firestore_db # Get Firestore client
-    if request.method == 'POST':
-        try:
-            data = json.loads(request.body)
-            id_token = data.get('token')
-
-            if not id_token:
-                return JsonResponse({'success': False, 'error': 'No token provided.'}, status=400)
-
-            decoded_token = auth.verify_id_token(id_token)
-            firebase_phone_number = decoded_token.get('phone_number')
-
-            if not firebase_phone_number:
-                return JsonResponse({'success': False, 'error': 'Could not verify phone number from token.'}, status=400)
-
-            user_profile = request.user.userprofile
-
-            # Trust the number from the Firebase token, since the user just verified it.
-            user_profile.is_phone_verified = True
-            user_profile.phone_number = firebase_phone_number
-            user_profile.save()
-
-            # Also update the phone number in Firestore
-            if db and user_profile.firebase_uid:
-                try:
-                    user_ref = db.collection('users').document(user_profile.firebase_uid)
-                    user_ref.set({
-                        'phone_number': firebase_phone_number,
-                        'is_phone_verified': True
-                    }, merge=True)
-                except Exception as e:
-                    print(f"Error updating phone number in Firebase: {e}") # Log error
-
-            return JsonResponse({'success': True})
-
-        except json.JSONDecodeError:
-            return JsonResponse({'success': False, 'error': 'Invalid JSON.'}, status=400)
-        except Exception as e:
-            print(f"Error in verify_phone_token: {e}") # Log error
-            return JsonResponse({'success': False, 'error': str(e)}, status=500)
-
-    return JsonResponse({'success': False, 'error': 'Invalid request method.'}, status=405)
+    raise Http404("Phone verification is currently disabled.")
