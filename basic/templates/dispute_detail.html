@@ -3,26 +3,139 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
-
-    <div class="space-y-6 text-gray-300">
+<div class="max-w-4xl mx-auto space-y-8 text-gray-300">
+    <div class="flex justify-between items-center border-b border-gray-700 pb-4">
         <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <h2 class="text-3xl font-bold text-white">Dispute Details</h2>
+            <p class="text-lg text-cyan-400 font-semibold mt-1">{{ task.title }}</p>
         </div>
+        <span class="px-3 py-1.5 text-sm font-bold rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300 border border-yellow-500/30{% else %}bg-green-500/20 text-green-300 border border-green-500/30{% endif %}">
+            Status: {{ dispute.get_status_display }}
+        </span>
+    </div>
 
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
+    <!-- Dispute Overview Card -->
+    <div class="bg-gray-800/60 rounded-xl p-6 border border-gray-700 space-y-4">
+        <h3 class="text-xl font-semibold text-cyan-400">General Information</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <p><strong>Task Reward:</strong> <span class="text-yellow-400 font-bold">{{ task.reward }}</span> points</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            <p><strong>Task Poster:</strong> {{ task.posted_by.username }}</p>
+            <p><strong>Task Worker:</strong> {% if task.taken_by %}{{ task.taken_by.username }}{% else %}Unassigned{% endif %}</p>
+            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y H:i" }}</p>
+            <p><strong>Required Per-Party Deposit Bond:</strong> {{ task.deposit_bond_amount }} points</p>
         </div>
 
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
-            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+        <div class="mt-4">
+            <h4 class="text-md font-semibold text-cyan-400 mb-1">Reason for Dispute</h4>
+            <div class="bg-gray-900/70 p-4 rounded-lg border border-gray-700 text-gray-200">
+                {{ dispute.reason|linebreaksbr }}
+            </div>
         </div>
     </div>
 
+    <!-- Symmetrical Deposit Bonds Card -->
+    <div class="bg-gray-800/60 rounded-xl p-6 border border-gray-700 space-y-4">
+        <h3 class="text-xl font-semibold text-cyan-400">Symmetrical Deposit Bonds Escrow</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+                <p class="font-bold text-gray-200 mb-1">Poster Deposit Bond ({{ task.posted_by.username }})</p>
+                <p class="text-sm">Amount: <span class="font-bold text-yellow-400">{{ dispute.poster_deposit_amount }}</span> points</p>
+                <p class="text-sm mt-1">
+                    Escrow Status: 
+                    <span class="font-semibold {% if dispute.poster_escrow_status == 'held' %}text-yellow-300{% elif dispute.poster_escrow_status == 'refunded' %}text-green-300{% elif dispute.poster_escrow_status == 'forfeited' %}text-red-400{% else %}text-gray-400{% endif %}">
+                        {{ dispute.get_poster_escrow_status_display }}
+                    </span>
+                </p>
+            </div>
+            <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+                <p class="font-bold text-gray-200 mb-1">Worker Deposit Bond ({% if task.taken_by %}{{ task.taken_by.username }}{% else %}Worker{% endif %})</p>
+                <p class="text-sm">Amount: <span class="font-bold text-yellow-400">{{ dispute.worker_deposit_amount }}</span> points</p>
+                <p class="text-sm mt-1">
+                    Escrow Status: 
+                    <span class="font-semibold {% if dispute.worker_escrow_status == 'held' %}text-yellow-300{% elif dispute.worker_escrow_status == 'refunded' %}text-green-300{% elif dispute.worker_escrow_status == 'forfeited' %}text-red-400{% else %}text-gray-400{% endif %}">
+                        {{ dispute.get_worker_escrow_status_display }}
+                    </span>
+                </p>
+            </div>
+        </div>
+
+        {% if can_contest %}
+        <div class="bg-yellow-900/30 border border-yellow-600/50 p-4 rounded-lg flex items-center justify-between mt-4">
+            <div>
+                <p class="font-bold text-yellow-300">Matching Deposit Required to Contest</p>
+                <p class="text-xs text-yellow-200/80 mt-1">To contest this dispute, you must post a matching deposit bond of {{ task.deposit_bond_amount }} points.</p>
+            </div>
+            <form action="{% url 'contest_dispute' dispute.id %}" method="post">
+                {% csrf_token %}
+                <button type="submit" class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg transition-colors text-sm">
+                    Post Deposit Bond
+                </button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Community Juror Voting & Consensus Card -->
+    <div class="bg-gray-800/60 rounded-xl p-6 border border-gray-700 space-y-4">
+        <h3 class="text-xl font-semibold text-cyan-400">Community Juror Voting & Staking</h3>
+        <p class="text-sm text-gray-400">Community jurors stake <strong>{{ juror_stake_amount }} points</strong> per vote. Slashed stakes from non-consensus voters and forfeited counterparty bonds are awarded to consensus jurors.</p>
+
+        <!-- Current Vote Tallies -->
+        <div class="grid grid-cols-2 gap-4 bg-gray-900/50 p-4 rounded-lg border border-gray-700 text-center">
+            <div>
+                <p class="text-sm text-gray-400">Votes for Poster ({{ task.posted_by.username }})</p>
+                <p class="text-3xl font-extrabold text-cyan-400 mt-1">{{ poster_vote_count }}</p>
+            </div>
+            <div>
+                <p class="text-sm text-gray-400">Votes for Worker ({% if task.taken_by %}{{ task.taken_by.username }}{% else %}Worker{% endif %})</p>
+                <p class="text-3xl font-extrabold text-cyan-400 mt-1">{{ worker_vote_count }}</p>
+            </div>
+        </div>
+
+        {% if user_vote %}
+            <div class="bg-cyan-900/30 border border-cyan-600/50 p-4 rounded-lg text-cyan-200 text-sm">
+                You cast your juror vote for <strong>{{ user_vote.voted_for.username }}</strong> with a stake of <strong>{{ user_vote.stake_amount }} points</strong>.
+            </div>
+        {% elif can_vote %}
+            <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-3">
+                <p class="font-semibold text-white">Cast Your Juror Vote</p>
+                <p class="text-xs text-yellow-300">Staking {{ juror_stake_amount }} points required. If your vote aligns with majority consensus upon settlement, your stake is returned plus reward bonuses!</p>
+                
+                <form action="{% url 'cast_vote' dispute.id %}" method="post" class="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4 mt-2">
+                    {% csrf_token %}
+                    <button type="submit" name="voted_for" value="poster" class="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors text-sm">
+                        Vote for Poster ({{ task.posted_by.username }})
+                    </button>
+                    {% if task.taken_by %}
+                    <button type="submit" name="voted_for" value="worker" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors text-sm">
+                        Vote for Worker ({{ task.taken_by.username }})
+                    </button>
+                    {% endif %}
+                </form>
+            </div>
+        {% elif is_party %}
+            <p class="text-xs text-gray-500 italic">Disputing task parties are excluded from voting as jurors.</p>
+        {% elif dispute.status == 'resolved' %}
+            <p class="text-xs text-gray-500 italic">This dispute has been resolved.</p>
+        {% endif %}
+
+        {% if user.is_staff or is_party and dispute.status == 'open' %}
+        <div class="mt-6 pt-4 border-t border-gray-700">
+            <h4 class="text-md font-semibold text-yellow-400 mb-2">Dispute Settlement Controls</h4>
+            <form action="{% url 'settle_dispute' dispute.id %}" method="post" class="flex items-center space-x-3">
+                {% csrf_token %}
+                <label for="winner-select" class="text-sm font-medium text-gray-300">Settle Dispute in Favor of:</label>
+                <select id="winner-select" name="winner" class="bg-gray-900 border border-gray-700 rounded-lg text-white px-3 py-1.5 text-sm">
+                    <option value="worker">Worker ({{ task.taken_by.username }})</option>
+                    <option value="poster">Poster ({{ task.posted_by.username }})</option>
+                </select>
+                <button type="submit" class="bg-red-600 hover:bg-red-700 text-white font-semibold py-1.5 px-4 rounded-lg text-sm transition-colors">
+                    Settle Dispute
+                </button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+</div>
 {% endblock %}

@@ -83,23 +83,19 @@ def take_task(request, task_id):
 def complete_task(request, task_id):
     task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
     with transaction.atomic():
-        task_doer_profile = task.taken_by.userprofile
-        task_doer_profile.rewards += task.reward
-        task_doer_profile.save()
-        task.status = 'completed'
-        task.save()
-
         if hasattr(task, 'dispute') and task.dispute.status == 'open':
-            task.dispute.refund_deposit(
-                reason_description=f"Security deposit bond refunded upon dispute resolution for task: '{task.title}'"
-            )
-            task.dispute.status = 'resolved'
-            task.dispute.save()
+            task.dispute.settle_dispute(winner=task.taken_by)
+        else:
+            task_doer_profile = task.taken_by.userprofile
+            task_doer_profile.rewards += task.reward
+            task_doer_profile.save()
+            task.status = 'completed'
+            task.save()
 
-        RewardLedger.objects.create(
-            user=task.taken_by, task=task, amount=task.reward,
-            transaction_type='task_completion', description=f"Completed task: '{task.title}'"
-        )
+            RewardLedger.objects.create(
+                user=task.taken_by, task=task, amount=task.reward,
+                transaction_type='task_completion', description=f"Completed task: '{task.title}'"
+            )
         messages.success(request, f"Task marked as complete! {task.reward} points transferred to {task.taken_by.username}.")
     return redirect('my_tasks')
 
