@@ -3,26 +3,84 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
+<div class="max-w-4xl mx-auto space-y-8">
     <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
 
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg"><span class="font-semibold text-white">{{ dispute.task.title }}</span></p>
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' and not is_expired %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{% if is_expired and dispute.status == 'open' %}Expired{% else %}{{ dispute.get_status_display }}{% endif %}</span></p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y, g:i a" }}</p>
+            {% if dispute.expires_at %}
+                <p><strong>Expiration SLA:</strong> {{ dispute.expires_at|date:"F d, Y, g:i a" }}</p>
+            {% endif %}
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
-    </div>
 
+        <!-- Evidence Section -->
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-3">Submitted Evidence & Counter-Evidence</h3>
+            <div class="space-y-4">
+                {% for item in evidence_list %}
+                    <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700 space-y-2">
+                        <div class="flex justify-between items-center text-sm text-gray-400">
+                            <span class="font-semibold text-cyan-300">{{ item.submitted_by.username }}</span>
+                            <span>{{ item.uploaded_at|date:"F d, Y, g:i a" }}</span>
+                        </div>
+                        {% if item.statement %}
+                            <p class="text-gray-200 whitespace-pre-line">{{ item.statement }}</p>
+                        {% endif %}
+                        {% if item.file %}
+                            <div class="mt-2">
+                                <a href="{{ item.file.url }}" target="_blank" class="inline-flex items-center space-x-1 text-sm text-cyan-400 hover:underline">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
+                                    <span>Download Attachment</span>
+                                </a>
+                            </div>
+                        {% endif %}
+                    </div>
+                {% empty %}
+                    <p class="text-gray-400 italic">No supplementary counter-evidence has been submitted yet.</p>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Submit Evidence Form -->
+        {% if is_participant and is_active %}
+            <div class="bg-gray-900/80 p-6 rounded-xl border border-cyan-500/30">
+                <h3 class="text-xl font-semibold text-cyan-400 mb-2">Submit Counter-Evidence</h3>
+                <p class="text-sm text-gray-400 mb-4">You can provide additional explanations or attach supporting documents (PNG, JPG, PDF up to 5 MB).</p>
+                <form action="{% url 'submit_dispute_evidence' dispute.id %}" method="post" enctype="multipart/form-data" class="space-y-4">
+                    {% csrf_token %}
+                    <div>
+                        <label for="statement" class="block text-sm font-medium text-gray-300 mb-1">Statement / Explanation</label>
+                        <textarea id="statement" name="statement" rows="3" class="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500" placeholder="Provide details or counter-arguments..."></textarea>
+                    </div>
+                    <div>
+                        <label for="file" class="block text-sm font-medium text-gray-300 mb-1">Attachment (PNG, JPG, PDF, Max 5MB)</label>
+                        <input type="file" id="file" name="file" accept=".png,.jpg,.jpeg,.pdf" class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-cyan-600 file:text-white hover:file:bg-cyan-700">
+                    </div>
+                    <div class="flex justify-end">
+                        <button type="submit" class="px-6 py-2 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-lg transition-colors">Submit Evidence</button>
+                    </div>
+                </form>
+            </div>
+        {% elif not is_active %}
+            <div class="p-4 bg-gray-800/50 rounded-lg border border-gray-700 text-gray-400 text-sm">
+                Evidence submission is closed for this dispute.
+            </div>
+        {% endif %}
+    </div>
+</div>
 {% endblock %}

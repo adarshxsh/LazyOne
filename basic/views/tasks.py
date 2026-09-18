@@ -82,6 +82,9 @@ def take_task(request, task_id):
 @login_required(login_url='/login/')
 def complete_task(request, task_id):
     task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
+    if hasattr(task, 'dispute') and task.dispute.status != 'open':
+        messages.error(request, "This dispute has already been resolved or expired.")
+        return redirect('my_tasks')
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
         task_doer_profile.rewards += task.reward
