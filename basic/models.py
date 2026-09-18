@@ -1,7 +1,21 @@
 import math
+import os
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.core.exceptions import ValidationError
+
+def default_dispute_expires_at():
+    return timezone.now() + timezone.timedelta(days=7)
+
+def validate_evidence_file(file):
+    max_size = 10 * 1024 * 1024  # 10 MB
+    if file.size > max_size:
+        raise ValidationError("File size cannot exceed 10 MB.")
+    ext = os.path.splitext(file.name)[1].lower()
+    valid_extensions = ['.pdf', '.png', '.jpg', '.jpeg', '.zip']
+    if ext not in valid_extensions:
+        raise ValidationError("Unsupported file format. Allowed formats: PDF, PNG, JPG, ZIP.")
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -68,11 +82,12 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('dispute_settlement', 'Dispute Settlement'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -95,6 +110,9 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    expires_at = models.DateTimeField(default=default_dispute_expires_at)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolution_reason = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -141,6 +159,24 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class DisputeEvidence(models.Model):
+    EVIDENCE_TYPE_CHOICES = (
+        ('text', 'Text'),
+        ('file', 'File'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidence')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_evidence')
+    evidence_type = models.CharField(max_length=10, choices=EVIDENCE_TYPE_CHOICES, default='text')
+    description = models.TextField(blank=True, default='')
+    attachment = models.FileField(upload_to='dispute_evidence/', null=True, blank=True, validators=[validate_evidence_file])
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"Evidence by {self.user.username} for dispute {self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
