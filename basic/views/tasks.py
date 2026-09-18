@@ -1,12 +1,16 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from ..models import Task, Conversation, Notification, RewardLedger
+from django.contrib.auth.models import User
+from ..models import Task, Conversation, Notification, RewardLedger, UserProfile
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
 from django.db.models import Q
+from django.conf import settings
 from datetime import datetime, timedelta
+import math
+from django.http import HttpRequest
 
 
 @login_required(login_url='/login/')
@@ -64,10 +68,30 @@ def take_task(request, task_id):
     if task.posted_by == request.user:
         messages.error(request, "You cannot take your own task.")
     else:
+        collateral_percentage = getattr(settings, 'TASK_COLLATERAL_PERCENTAGE', 20)
+        collateral_amount = max(20, math.floor(task.reward * collateral_percentage / 100))
+        user_profile = request.user.userprofile
+        if user_profile.rewards < collateral_amount:
+            messages.error(request, f"You need at least {collateral_amount} points as collateral to take this task.")
+            return redirect('my_tasks')
+
         with transaction.atomic():
+            user_profile.rewards -= collateral_amount
+            user_profile.save()
+
             task.status = 'in_progress'
             task.taken_by = request.user
+            task.taker_collateral = collateral_amount
             task.save()
+
+            RewardLedger.objects.create(
+                user=request.user,
+                task=task,
+                amount=-collateral_amount,
+                transaction_type='collateral_lock',
+                description=f"Collateral locked for task: '{task.title}'"
+            )
+
             conversation, created = Conversation.objects.get_or_create(task=task)
             if created:
                 conversation.participants.add(task.posted_by, task.taken_by)
@@ -85,6 +109,19 @@ def complete_task(request, task_id):
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
         task_doer_profile.rewards += task.reward
+
+        RewardLedger.objects.create(
+            user=task.taken_by, task=task, amount=task.reward,
+            transaction_type='task_completion', description=f"Completed task: '{task.title}'"
+        )
+
+        if task.taker_collateral > 0:
+            task_doer_profile.rewards += task.taker_collateral
+            RewardLedger.objects.create(
+                user=task.taken_by, task=task, amount=task.taker_collateral,
+                transaction_type='collateral_release', description=f"Collateral released for completed task: '{task.title}'"
+            )
+
         task_doer_profile.save()
         task.status = 'completed'
         task.save()
@@ -96,10 +133,6 @@ def complete_task(request, task_id):
             task.dispute.status = 'resolved'
             task.dispute.save()
 
-        RewardLedger.objects.create(
-            user=task.taken_by, task=task, amount=task.reward,
-            transaction_type='task_completion', description=f"Completed task: '{task.title}'"
-        )
         messages.success(request, f"Task marked as complete! {task.reward} points transferred to {task.taken_by.username}.")
     return redirect('my_tasks')
 
@@ -143,6 +176,17 @@ def accept_cancellation(request, task_id):
             user=task.posted_by, task=task, amount=task.reward,
             transaction_type='task_cancellation', description=f"Refund for cancelled task: '{task.title}'"
         )
+
+        if task.taker_collateral > 0:
+            taker_profile = request.user.userprofile
+            taker_profile.rewards += task.taker_collateral
+            taker_profile.save()
+            RewardLedger.objects.create(
+                user=request.user, task=task, amount=task.taker_collateral,
+                transaction_type='collateral_release', description=f"Collateral released for cancelled task: '{task.title}'"
+            )
+            task.taker_collateral = 0
+
         task.status = 'available'
         task.taken_by = None
         task.cancellation_requested = False
@@ -159,6 +203,15 @@ def accept_cancellation(request, task_id):
 def abandon_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
     with transaction.atomic():
+        if task.taker_collateral > 0:
+            taker_profile = request.user.userprofile
+            taker_profile.rewards += task.taker_collateral
+            taker_profile.save()
+            RewardLedger.objects.create(
+                user=request.user, task=task, amount=task.taker_collateral,
+                transaction_type='collateral_release', description=f"Collateral released on task abandonment: '{task.title}'"
+            )
+            task.taker_collateral = 0
         task.status = 'available'
         task.taken_by = None
         task.save()
@@ -169,6 +222,73 @@ def abandon_task(request, task_id):
         )
         messages.success(request, "You have abandoned the task. It is now available for others.")
     return redirect('my_tasks')
+
+def slash_user(user, harmed_poster=None, reason="Fraudulent activity detected"):
+    """
+    Confiscates reward balance and active staked collateral from a fraudulent user.
+    Flags account as fraudulent (userprofile.is_fraudulent = True).
+    Slashed collateral points are optionally credited to harmed poster.
+    Can also be called as a Django view handler: slash_user(request, user_id).
+    """
+    if isinstance(user, HttpRequest):
+        request = user
+        user_id = harmed_poster
+        if not request.user.is_staff:
+            messages.error(request, "Permission denied.")
+            return redirect('home')
+        target_user = get_object_or_404(User, id=user_id)
+        req_reason = request.POST.get('reason', 'Fraudulent activity detected') if request.method == 'POST' else 'Fraudulent activity detected'
+        slash_user(target_user, reason=req_reason)
+        messages.success(request, f"User {target_user.username} has been slashed for fraud.")
+        return redirect('home')
+
+    if isinstance(user, (int, str)):
+        user = User.objects.get(id=user)
+
+    with transaction.atomic():
+        profile = user.userprofile
+        profile.is_fraudulent = True
+
+        confiscated_rewards = profile.rewards
+        if confiscated_rewards > 0:
+            profile.rewards = 0
+            RewardLedger.objects.create(
+                user=user,
+                amount=-confiscated_rewards,
+                transaction_type='fraud_slashing_penalty',
+                description=f"Fraud slashing penalty: {reason}"
+            )
+        profile.save()
+
+        active_tasks = Task.objects.filter(taken_by=user, status='in_progress')
+        for task in active_tasks:
+            collateral = task.taker_collateral
+            if collateral > 0:
+                RewardLedger.objects.create(
+                    user=user,
+                    task=task,
+                    amount=-collateral,
+                    transaction_type='fraud_slashing_penalty',
+                    description=f"Collateral confiscated for task '{task.title}' due to fraud"
+                )
+                target_poster = harmed_poster or task.posted_by
+                if target_poster:
+                    poster_profile = target_poster.userprofile
+                    poster_profile.rewards += collateral
+                    poster_profile.save()
+                    RewardLedger.objects.create(
+                        user=target_poster,
+                        task=task,
+                        amount=collateral,
+                        transaction_type='collateral_slash',
+                        description=f"Slashed collateral credited from fraudulent taker: {user.username}"
+                    )
+                task.taker_collateral = 0
+            task.status = 'available'
+            task.taken_by = None
+            task.save()
+
+    return profile
 
 @login_required(login_url='/login/')
 def my_tasks(request):
