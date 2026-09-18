@@ -63,23 +63,24 @@ def profile_view(request):
 
 @login_required(login_url='/login/')
 def user_profile_view(request, user_id):
+    user_profile, _ = UserProfile.objects.get_or_create(user=request.user)
     viewed_user = get_object_or_404(User, id=user_id)
-    viewed_profile = get_object_or_404(UserProfile, user=viewed_user)
+    viewed_profile, _ = UserProfile.objects.get_or_create(user=viewed_user)
     
     posted_tasks = Task.objects.filter(posted_by=viewed_user).order_by('-created_at')
     user_friends = viewed_profile.friends.all()
 
     # Check if the viewed user is a friend of the logged-in user
-    is_friend = request.user.userprofile.friends.filter(id=viewed_profile.id).exists()
+    is_friend = user_profile.friends.filter(id=viewed_profile.id).exists()
     friendship = None
     if is_friend:
         # Get the friendship object to access the closeness value
         friendship = Friendship.objects.filter(
-            from_user=request.user.userprofile, 
+            from_user=user_profile, 
             to_user=viewed_profile
         ).first() or Friendship.objects.filter(
             from_user=viewed_profile, 
-            to_user=request.user.userprofile
+            to_user=user_profile
         ).first()
 
     context = {
@@ -93,31 +94,38 @@ def user_profile_view(request, user_id):
 
 @login_required(login_url='/login/')
 def update_closeness(request, friendship_id):
+    user_profile, _ = UserProfile.objects.get_or_create(user=request.user)
     friendship = get_object_or_404(Friendship, id=friendship_id)
     # Authorization check
-    if request.user.userprofile != friendship.from_user and request.user.userprofile != friendship.to_user:
+    if user_profile != friendship.from_user and user_profile != friendship.to_user:
         messages.error(request, "You are not authorized to change this friendship.")
         return redirect('home')
 
+    other_profile = friendship.to_user if user_profile == friendship.from_user else friendship.from_user
+
     if request.method == 'POST':
-        closeness = request.POST.get('closeness')
-        if closeness:
+        closeness_raw = request.POST.get('closeness')
+        if closeness_raw is not None:
+            try:
+                closeness = int(closeness_raw)
+            except (ValueError, TypeError):
+                closeness = 50
             friendship.closeness = closeness
             friendship.save()
-            messages.success(request, f"Closeness with {friendship.to_user.user.username} updated!")
-            # Correctly get the user id to redirect back to their profile
-            if request.user.userprofile == friendship.from_user:
-                redirect_user_id = friendship.to_user.user.id
-            else:
-                redirect_user_id = friendship.from_user.user.id
-            return redirect('user_profile', user_id=redirect_user_id)
+
+            # If reverse friendship exists, update it too
+            reverse_friendship = Friendship.objects.filter(
+                from_user=other_profile,
+                to_user=user_profile
+            ).first()
+            if reverse_friendship:
+                reverse_friendship.closeness = closeness
+                reverse_friendship.save()
+
+            messages.success(request, f"Closeness with {other_profile.user.username} updated!")
+            return redirect('user_profile', user_id=other_profile.user.id)
     
-    # Redirect back if not a POST request
-    if request.user.userprofile == friendship.from_user:
-        redirect_user_id = friendship.to_user.user.id
-    else:
-        redirect_user_id = friendship.from_user.user.id
-    return redirect('user_profile', user_id=redirect_user_id)
+    return redirect('user_profile', user_id=other_profile.user.id)
 
 
 @login_required(login_url='/login/')

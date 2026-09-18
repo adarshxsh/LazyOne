@@ -8,15 +8,16 @@ import json
 
 @login_required(login_url='/login/')
 def user_list(request):
-    user_profile = get_object_or_404(UserProfile, user=request.user)
+    user_profile, _ = UserProfile.objects.get_or_create(user=request.user)
 
     # Get Firebase UIDs of users to exclude (friends, pending requests, self)
     friend_uids = list(user_profile.friends.all().values_list('firebase_uid', flat=True))
     sent_request_uids = list(FriendRequest.objects.filter(from_user=request.user).values_list('to_user__userprofile__firebase_uid', flat=True))
     received_request_uids = list(FriendRequest.objects.filter(to_user=request.user).values_list('from_user__userprofile__firebase_uid', flat=True))
 
-    # Combine all UIDs to exclude, including the current user's
-    exclude_uids = set(friend_uids) | set(sent_request_uids) | set(received_request_uids)
+    # Combine all UIDs to exclude, including the current user's, filtering out None values
+    raw_uids = set(friend_uids) | set(sent_request_uids) | set(received_request_uids)
+    exclude_uids = {uid for uid in raw_uids if uid}
     if user_profile.firebase_uid:
         exclude_uids.add(user_profile.firebase_uid)
 
@@ -27,7 +28,7 @@ def user_list(request):
 
 @login_required(login_url='/login/')
 def friends_view(request):
-    user_profile = get_object_or_404(UserProfile, user=request.user)
+    user_profile, _ = UserProfile.objects.get_or_create(user=request.user)
     friendships = Friendship.objects.filter(from_user=user_profile).order_by('-closeness')
     friend_requests = FriendRequest.objects.filter(to_user=request.user, is_accepted=False)
     current_friends = user_profile.friends.all().values_list('user__id', flat=True)
@@ -47,7 +48,16 @@ def friends_view(request):
 def send_friend_request(request, user_id):
     if request.method == 'POST':
         to_user = get_object_or_404(User, id=user_id)
-        closeness = request.POST.get('closeness', 50)
+        if to_user == request.user:
+            messages.error(request, 'You cannot send a friend request to yourself.')
+            return redirect('friends')
+
+        closeness_raw = request.POST.get('closeness', 50)
+        try:
+            closeness = int(closeness_raw)
+        except (ValueError, TypeError):
+            closeness = 50
+
         friend_request, created = FriendRequest.objects.get_or_create(
             from_user=request.user,
             to_user=to_user,
@@ -69,20 +79,31 @@ def send_friend_request(request, user_id):
 def accept_friend_request(request, request_id):
     friend_request = get_object_or_404(FriendRequest, id=request_id)
     if friend_request.to_user == request.user:
-        from_user_profile = UserProfile.objects.get(user=friend_request.from_user)
-        to_user_profile = UserProfile.objects.get(user=request.user)
+        from_user_profile, _ = UserProfile.objects.get_or_create(user=friend_request.from_user)
+        to_user_profile, _ = UserProfile.objects.get_or_create(user=request.user)
         from_user_profile.friends.add(to_user_profile)
         to_user_profile.friends.add(from_user_profile)
-        Friendship.objects.get_or_create(
+
+        closeness = getattr(friend_request, 'closeness', 50) or 50
+
+        f1, created1 = Friendship.objects.get_or_create(
             from_user=from_user_profile,
             to_user=to_user_profile,
-            defaults={'closeness': friend_request.closeness}
+            defaults={'closeness': closeness}
         )
-        Friendship.objects.get_or_create(
+        if not created1:
+            f1.closeness = closeness
+            f1.save()
+
+        f2, created2 = Friendship.objects.get_or_create(
             from_user=to_user_profile,
             to_user=from_user_profile,
-            defaults={'closeness': friend_request.closeness}
+            defaults={'closeness': closeness}
         )
+        if not created2:
+            f2.closeness = closeness
+            f2.save()
+
         friend_request.delete()
         messages.success(request, 'Friend request accepted.')
         # Create notification for the sender
