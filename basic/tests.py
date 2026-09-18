@@ -3,7 +3,8 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from django.core.management import call_command
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, Notification
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +182,110 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+    def test_raise_dispute_populates_voting_deadline(self):
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'SLA test reason'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertIsNotNone(dispute.voting_deadline)
+        self.assertEqual(dispute.voting_period_days, 7)
+        expected_min = timezone.now() + timedelta(days=6, hours=23)
+        expected_max = timezone.now() + timedelta(days=7, hours=1)
+        self.assertTrue(expected_min <= dispute.voting_deadline <= expected_max)
+
+    def test_dispute_detail_template_renders_voting_deadline(self):
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'SLA test reason'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Voting Deadline:")
+        self.assertContains(response, "Expiration Status:")
+
+    def test_resolve_expired_disputes_command_sweeps_past_deadlines(self):
+        now = timezone.now()
+        # Expired dispute raised by taker
+        expired_dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Unresponsive poster",
+            deposit_amount=60,
+            escrow_status='held',
+            status='open',
+            voting_period_days=7,
+            voting_deadline=now - timedelta(days=1)
+        )
+        self.task.status = 'disputed'
+        self.task.save()
+
+        # Active dispute raised on small_task
+        active_dispute = Dispute.objects.create(
+            task=self.small_task,
+            raised_by=self.taker,
+            reason="Active dispute",
+            deposit_amount=50,
+            escrow_status='held',
+            status='open',
+            voting_period_days=7,
+            voting_deadline=now + timedelta(days=5)
+        )
+        self.small_task.status = 'disputed'
+        self.small_task.save()
+
+        # Execute sweep command
+        call_command('resolve_expired_disputes')
+
+        expired_dispute.refresh_from_db()
+        self.assertEqual(expired_dispute.status, 'resolved')
+        self.assertEqual(expired_dispute.escrow_status, 'refunded')
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+
+        # Taker profile: initial 100 + task reward 300 + deposit refund 60 = 460
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 460)
+
+        # Active dispute should remain open
+        active_dispute.refresh_from_db()
+        self.assertEqual(active_dispute.status, 'open')
+        self.assertEqual(active_dispute.escrow_status, 'held')
+
+        # Notifications should be dispatched
+        notifications = Notification.objects.filter(recipient=self.taker)
+        self.assertTrue(notifications.exists())
+
+    def test_resolve_expired_disputes_command_poster_raised(self):
+        now = timezone.now()
+        expired_dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.poster,
+            reason="Unresponsive taker",
+            deposit_amount=60,
+            escrow_status='held',
+            status='open',
+            voting_period_days=7,
+            voting_deadline=now - timedelta(hours=2)
+        )
+        self.task.status = 'disputed'
+        self.task.save()
+
+        call_command('resolve_expired_disputes')
+
+        expired_dispute.refresh_from_db()
+        self.assertEqual(expired_dispute.status, 'resolved')
+        self.assertEqual(expired_dispute.escrow_status, 'refunded')
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'cancelled')
+
+        # Poster profile: initial 1000 + task reward refund 300 + deposit refund 60 = 1360
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1360)
 

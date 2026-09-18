@@ -12,17 +12,19 @@ class Command(BaseCommand):
         parser.add_argument(
             '--days',
             type=int,
-            default=7,
-            help='Number of days after dispute creation before considering it expired (default: 7)'
+            default=None,
+            help='Optional override number of days after dispute creation before considering it expired'
         )
 
     def handle(self, *args, **options):
-        days = options['days']
+        days = options.get('days')
         now = timezone.now()
-        expiry_threshold = now - timedelta(days=days)
 
-        # Find open disputes created before the expiration window
-        expired_disputes = Dispute.objects.filter(status='open', created_at__lte=expiry_threshold)
+        if days is not None:
+            expiry_threshold = now - timedelta(days=days)
+            expired_disputes = Dispute.objects.filter(status='open', created_at__lte=expiry_threshold)
+        else:
+            expired_disputes = Dispute.objects.filter(status='open', voting_deadline__lte=now)
 
         count = 0
         for dispute in expired_disputes:
@@ -77,10 +79,11 @@ class Command(BaseCommand):
                     participants.append(task.taken_by)
 
                 dispute_link = reverse('dispute_detail', args=[dispute.id])
+                sla_days = days if days is not None else dispute.voting_period_days
                 for participant in participants:
                     Notification.objects.create(
                         recipient=participant,
-                        message=f"Dispute for task '{task.title}' has expired ({days}d SLA) and was automatically resolved.",
+                        message=f"Dispute for task '{task.title}' has expired ({sla_days}d SLA) and was automatically resolved.",
                         link=dispute_link
                     )
 
