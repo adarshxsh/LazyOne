@@ -1,9 +1,11 @@
-from django.test import TestCase, Client
+import os
+from datetime import timedelta
+from django.test import TestCase, Client, override_settings
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
-from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from django.core.management import call_command
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, Notification
 
 
 class DisputeDepositBondTests(TestCase):
@@ -182,3 +184,170 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+@override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
+class ExpireTasksTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile, _ = UserProfile.objects.get_or_create(user=self.poster, defaults={'rewards': 1000})
+        self.poster_profile.rewards = 1000
+        self.poster_profile.save()
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile, _ = UserProfile.objects.get_or_create(user=self.taker, defaults={'rewards': 1000})
+
+    def test_expire_available_task_past_deadline(self):
+        past_deadline = timezone.now() - timedelta(hours=2)
+        task = Task.objects.create(
+            title="Overdue Available Task",
+            description="Fix the tap",
+            reward=200,
+            posted_by=self.poster,
+            deadline=past_deadline,
+            status='available'
+        )
+        self.poster_profile.rewards -= 200
+        self.poster_profile.save()
+
+        call_command('expire_tasks')
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'cancelled')
+
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1000)
+
+        ledger_entry = RewardLedger.objects.filter(
+            user=self.poster,
+            task=task,
+            transaction_type='task_cancellation'
+        ).first()
+        self.assertIsNotNone(ledger_entry)
+        self.assertEqual(ledger_entry.amount, 200)
+        self.assertEqual(ledger_entry.description, f"Refund for expired task: '{task.title}'")
+
+        notification = Notification.objects.filter(recipient=self.poster).first()
+        self.assertIsNotNone(notification)
+        self.assertIn("Overdue Available Task", notification.message)
+        self.assertIn("expired", notification.message)
+
+    def test_expire_in_progress_task_past_deadline(self):
+        past_deadline = timezone.now() - timedelta(hours=1)
+        task = Task.objects.create(
+            title="Overdue In Progress Task",
+            description="Clean garage",
+            reward=300,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            deadline=past_deadline,
+            status='in_progress'
+        )
+        self.poster_profile.rewards -= 300
+        self.poster_profile.save()
+
+        call_command('expire_tasks')
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'cancelled')
+
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1000)
+
+        poster_notif = Notification.objects.filter(recipient=self.poster).first()
+        self.assertIsNotNone(poster_notif)
+        self.assertIn("expired", poster_notif.message)
+
+        taker_notif = Notification.objects.filter(recipient=self.taker).first()
+        self.assertIsNotNone(taker_notif)
+        self.assertIn("expired", taker_notif.message)
+
+    def test_disputed_task_not_expired(self):
+        past_deadline = timezone.now() - timedelta(hours=3)
+        task = Task.objects.create(
+            title="Disputed Task",
+            description="Paint fence",
+            reward=150,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            deadline=past_deadline,
+            status='disputed'
+        )
+
+        call_command('expire_tasks')
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'disputed')
+
+        self.assertEqual(
+            RewardLedger.objects.filter(task=task, transaction_type='task_cancellation').count(),
+            0
+        )
+
+    def test_future_deadline_task_not_expired(self):
+        future_deadline = timezone.now() + timedelta(days=1)
+        task = Task.objects.create(
+            title="Future Task",
+            description="Mow lawn",
+            reward=100,
+            posted_by=self.poster,
+            deadline=future_deadline,
+            status='available'
+        )
+
+        call_command('expire_tasks')
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'available')
+
+    def test_take_task_past_deadline_rejected(self):
+        past_deadline = timezone.now() - timedelta(hours=1)
+        task = Task.objects.create(
+            title="Expired Available Task",
+            description="Write essay",
+            reward=100,
+            posted_by=self.poster,
+            deadline=past_deadline,
+            status='available'
+        )
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.get(reverse('take_task', kwargs={'task_id': task.id}), follow=True)
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'available')
+        self.assertIsNone(task.taken_by)
+
+    def test_cron_endpoint_authentication_and_execution(self):
+        past_deadline = timezone.now() - timedelta(hours=2)
+        task = Task.objects.create(
+            title="Cron Test Task",
+            description="Test endpoint",
+            reward=250,
+            posted_by=self.poster,
+            deadline=past_deadline,
+            status='available'
+        )
+        self.poster_profile.rewards -= 250
+        self.poster_profile.save()
+
+        cron_url = reverse('process_expired_tasks')
+
+        # Test unauthorized request (no token)
+        response = self.client.get(cron_url)
+        self.assertEqual(response.status_code, 401)
+
+        # Test unauthorized request (invalid token)
+        response = self.client.get(cron_url, {'token': 'wrong-secret'})
+        self.assertEqual(response.status_code, 401)
+
+        # Test authorized request with token in GET param
+        secret = os.getenv('CRON_SECRET') or 'secret'
+        response = self.client.get(f"{cron_url}?token={secret}")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['status'], 'success')
+        self.assertGreaterEqual(data['expired_tasks_count'], 1)
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'cancelled')
