@@ -3,26 +3,203 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
-
-    <div class="space-y-6 text-gray-300">
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+<div class="max-w-4xl mx-auto space-y-8">
+    <!-- Header Card -->
+    <div class="bg-gray-800/80 border border-gray-700 rounded-2xl p-6 shadow-xl">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+                <span class="px-3 py-1 text-xs font-bold uppercase rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300 border border-yellow-500/30{% else %}bg-green-500/20 text-green-300 border border-green-500/30{% endif %}">
+                    {{ dispute.get_status_display }} Dispute
+                </span>
+                <h1 class="text-3xl font-extrabold text-white mt-2">{{ task.title }}</h1>
+                <p class="text-sm text-gray-400 mt-1">
+                    Posted by <strong class="text-cyan-400">{{ task.posted_by.username }}</strong> | 
+                    Taken by <strong class="text-cyan-400">{{ task.taken_by.username }}</strong>
+                </p>
+            </div>
+            <div class="flex flex-col items-end gap-2">
+                <div class="text-right">
+                    <span class="text-2xl font-black text-cyan-400">{{ task.reward }}</span>
+                    <span class="text-xs text-gray-400 block">Reward Points</span>
+                </div>
+                {% if task.conversation %}
+                    <a href="{% url 'chat_view' task.conversation.id %}" class="inline-flex items-center space-x-2 bg-gray-700 hover:bg-gray-600 text-white font-semibold text-xs px-4 py-2 rounded-lg transition-colors">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+                        <span>Inspect Read-Only Chat</span>
+                    </a>
+                {% endif %}
+            </div>
         </div>
 
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
-            <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+        <div class="mt-6 pt-6 border-t border-gray-700/60 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-300">
+            <div>
+                <strong class="text-gray-400 block mb-1">Raised By:</strong>
+                <span>{{ dispute.raised_by.username }}</span>
+            </div>
+            <div>
+                <strong class="text-gray-400 block mb-1">Date Raised:</strong>
+                <span>{{ dispute.created_at|date:"F d, Y H:i" }}</span>
+            </div>
+            <div>
+                <strong class="text-gray-400 block mb-1">Security Deposit Bond:</strong>
+                <span>{{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</span>
+            </div>
+        </div>
         </div>
 
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
-            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+        <div class="mt-4">
+            <strong class="text-gray-400 block mb-1 text-sm">Dispute Reason:</strong>
+            <div class="bg-gray-900/70 p-4 rounded-xl border border-gray-700 text-gray-200 text-sm whitespace-pre-line leading-relaxed">
+                {{ dispute.reason }}
+            </div>
         </div>
     </div>
 
+    <!-- Jury Voting Progress & Statistics Widget -->
+    <div class="bg-gray-800/80 border border-gray-700 rounded-2xl p-6 shadow-xl space-y-6">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-700 pb-4">
+            <div>
+                <h2 class="text-xl font-bold text-white">Community Jury Arbitration Status</h2>
+                <p class="text-xs text-gray-400 mt-0.5">Live vote tallies and quorum progress</p>
+            </div>
+            <div class="mt-2 sm:mt-0 text-left sm:text-right">
+                <span class="text-xs text-gray-400 block">Voting Deadline Countdown</span>
+                <span id="deadline-timer" class="font-mono text-sm font-bold text-cyan-400">Calculating...</span>
+            </div>
+        </div>
+
+        <!-- Quorum Progress Bar -->
+        <div>
+            <div class="flex justify-between items-center text-xs font-semibold text-gray-300 mb-2">
+                <span>Quorum Progress</span>
+                <span>{{ total_votes }} / {{ quorum_target }} Votes Needed</span>
+            </div>
+            <div class="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
+                <div class="bg-cyan-500 h-3 rounded-full transition-all duration-500" style="width: {{ quorum_percentage }}%;"></div>
+            </div>
+        </div>
+
+        <!-- Live Vote Tallies -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+            <!-- Poster Vote Card -->
+            <div class="bg-gray-900/60 border border-gray-700 p-4 rounded-xl flex items-center justify-between">
+                <div>
+                    <span class="text-xs text-gray-400 block">In favor of Poster</span>
+                    <strong class="text-lg text-white">{{ task.posted_by.username }}</strong>
+                </div>
+                <div class="text-right">
+                    <span class="text-2xl font-extrabold text-cyan-400">{{ poster_votes }}</span>
+                    <span class="text-xs text-gray-400 block">({{ poster_percentage }}%)</span>
+                </div>
+            </div>
+
+            <!-- Taker Vote Card -->
+            <div class="bg-gray-900/60 border border-gray-700 p-4 rounded-xl flex items-center justify-between">
+                <div>
+                    <span class="text-xs text-gray-400 block">In favor of Taker</span>
+                    <strong class="text-lg text-white">{{ task.taken_by.username }}</strong>
+                </div>
+                <div class="text-right">
+                    <span class="text-2xl font-extrabold text-cyan-400">{{ taker_votes }}</span>
+                    <span class="text-xs text-gray-400 block">({{ taker_percentage }}%)</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Jury Voting Actions -->
+    <div class="bg-gray-800/80 border border-gray-700 rounded-2xl p-6 shadow-xl">
+        {% if can_vote %}
+            <h2 class="text-xl font-bold text-white mb-2">Cast Your Verdict</h2>
+            <p class="text-xs text-gray-400 mb-6">As an eligible community juror, evaluate the evidence and submit your vote.</p>
+
+            <form action="{% url 'cast_dispute_vote' dispute.id %}" method="post" class="space-y-6">
+                {% csrf_token %}
+                
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <label class="relative flex flex-col p-4 bg-gray-900/60 border-2 border-gray-700 rounded-xl cursor-pointer hover:border-cyan-500 transition-colors has-[:checked]:border-cyan-400 has-[:checked]:bg-cyan-950/20">
+                        <input type="radio" name="chosen_party" value="poster" required class="sr-only">
+                        <span class="font-bold text-white">Rule in Favor of Poster</span>
+                        <span class="text-xs text-gray-400 mt-1">Task Poster: {{ task.posted_by.username }}</span>
+                    </label>
+
+                    <label class="relative flex flex-col p-4 bg-gray-900/60 border-2 border-gray-700 rounded-xl cursor-pointer hover:border-cyan-500 transition-colors has-[:checked]:border-cyan-400 has-[:checked]:bg-cyan-950/20">
+                        <input type="radio" name="chosen_party" value="taker" required class="sr-only">
+                        <span class="font-bold text-white">Rule in Favor of Taker</span>
+                        <span class="text-xs text-gray-400 mt-1">Task Taker: {{ task.taken_by.username }}</span>
+                    </label>
+                </div>
+
+                <div>
+                    <label for="rationale" class="block text-xs font-semibold text-gray-300 mb-1">Optional Rationale / Explanation:</label>
+                    <textarea id="rationale" name="rationale" rows="3" placeholder="Explain your verdict logic..." class="w-full px-4 py-3 bg-gray-900/70 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 text-sm"></textarea>
+                </div>
+
+                <button type="submit" class="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-3 rounded-xl transition-colors text-sm shadow-lg">
+                    Submit Immutable Verdict Vote
+                </button>
+            </form>
+
+        {% elif user_voted %}
+            <div class="bg-cyan-950/30 border border-cyan-500/40 p-4 rounded-xl text-center">
+                <span class="inline-block p-2 bg-cyan-500/20 text-cyan-300 rounded-full mb-2">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                </span>
+                <h3 class="text-lg font-bold text-white">Vote Submitted</h3>
+                <p class="text-sm text-gray-300 mt-1">You voted in favor of the <strong>{{ user_vote.get_chosen_party_display }}</strong>.</p>
+                {% if user_vote.rationale %}
+                    <p class="text-xs text-gray-400 mt-2 italic">"{{ user_vote.rationale }}"</p>
+                {% endif %}
+            </div>
+
+        {% elif is_participant %}
+            <div class="bg-gray-900/60 border border-gray-700 p-4 rounded-xl text-center text-gray-300">
+                <p class="text-sm font-semibold">Direct Task Participant</p>
+                <p class="text-xs text-gray-400 mt-1">You are a direct party to this task dispute. As per arbitration rules, you cannot cast jury votes on your own dispute.</p>
+            </div>
+
+        {% elif dispute.status == 'resolved' %}
+            <div class="bg-green-950/30 border border-green-500/40 p-4 rounded-xl text-center text-green-300">
+                <h3 class="text-lg font-bold">Dispute Resolution Concluded</h3>
+                <p class="text-sm text-green-200/80 mt-1">This dispute has reached quorum/deadline resolution and is closed.</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const deadlineIso = "{{ voting_deadline_iso }}";
+        const timerElement = document.getElementById('deadline-timer');
+
+        if (!timerElement || !deadlineIso) return;
+
+        const targetTime = new Date(deadlineIso).getTime();
+
+        function updateTimer() {
+            const now = new Date().getTime();
+            const distance = targetTime - now;
+
+            if (distance < 0) {
+                timerElement.textContent = "Voting Deadline Passed";
+                timerElement.classList.replace('text-cyan-400', 'text-yellow-400');
+                return;
+            }
+
+            const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+            const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+            let timeString = "";
+            if (days > 0) timeString += days + "d ";
+            timeString += hours + "h " + minutes + "m " + seconds + "s";
+
+            timerElement.textContent = timeString;
+        }
+
+        updateTimer();
+        setInterval(updateTimer, 1000);
+    });
+</script>
 {% endblock %}
