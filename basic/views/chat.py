@@ -1,6 +1,6 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
-from ..models import Conversation, Message, Notification
+from ..models import Conversation, Message, Notification, JuryAssignment
 from django.contrib.auth.models import User
 from django.http import HttpResponseForbidden, JsonResponse
 from django.urls import reverse
@@ -23,11 +23,16 @@ def chat_view(request, conversation_id):
         messages.error(request, "Chat not found.")
         return redirect('home')
 
-    if request.user not in conversation.participants.all():
-        logger.warning("Step 2: User is not a participant. Redirecting to home.")
+    is_participant = request.user in conversation.participants.all()
+    is_juror = False
+    if not is_participant and conversation.task and conversation.task.status == 'disputed':
+        is_juror = JuryAssignment.objects.filter(dispute__task=conversation.task, user=request.user).exists()
+
+    if not is_participant and not is_juror and not request.user.is_staff:
+        logger.warning("Step 2: User is not authorized to view chat. Redirecting to home.")
         messages.error(request, "You are not authorized to view this chat.")
-        return redirect('home') # Redirect to home page
-    logger.info("Step 2: User is a valid participant.")
+        return redirect('home')
+    logger.info("Step 2: User is authorized to view chat.")
 
     try:
         # This is for the Django-based message system, which we are bypassing for Firestore.

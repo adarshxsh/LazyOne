@@ -23,6 +23,34 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if is_juror %}
+        <div class="bg-cyan-900/30 p-4 rounded-lg border border-cyan-500/50">
+            <h3 class="text-xl font-semibold text-cyan-300">Jury Duty Notice</h3>
+            <p>You have been assigned as an impartial peer juror for this dispute. Your reward point stake has been reserved in escrow.</p>
+        </div>
+        {% endif %}
+
+        {% if assignments %}
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400">Jury Panel</h3>
+            <p class="text-sm text-gray-400 mb-2">Panel size: {{ assignments|length }} assigned juror(s)</p>
+            <ul class="space-y-1">
+                {% for assignment in assignments %}
+                <li class="bg-gray-800/40 p-2 rounded border border-gray-700 flex justify-between items-center">
+                    <span>
+                        {% if user.is_staff or assignment.user == user %}
+                            Juror: {{ assignment.user.username }}
+                        {% else %}
+                            Juror #{{ forloop.counter }} (Anonymized)
+                        {% endif %}
+                    </span>
+                    <span class="text-xs px-2 py-0.5 rounded bg-blue-500/20 text-blue-300">{{ assignment.get_status_display }} ({{ assignment.staked_amount }} pts staked)</span>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}
