@@ -1,9 +1,12 @@
-from django.test import TestCase, Client
+from datetime import timedelta
+from django.test import TestCase, Client, override_settings
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
-from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import (
+    UserProfile, Task, Dispute, JuryAssignment, DisputeVote,
+    Conversation, Message, Notification, RewardLedger, Friendship
+)
 
 
 class DisputeDepositBondTests(TestCase):
@@ -182,3 +185,220 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+@override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
+class PeerJuryArbitrationTests(TestCase):
+    def setUp(self):
+        # Create poster and taker
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile, _ = UserProfile.objects.get_or_create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile, _ = UserProfile.objects.get_or_create(user=self.taker, rewards=1000)
+
+        # Create poster friend and taker friend
+        self.poster_friend = User.objects.create_user(username='poster_friend', password='password123')
+        self.poster_friend_profile, _ = UserProfile.objects.get_or_create(user=self.poster_friend)
+        self.poster_profile.friends.add(self.poster_friend_profile)
+
+        self.taker_friend = User.objects.create_user(username='taker_friend', password='password123')
+        self.taker_friend_profile, _ = UserProfile.objects.get_or_create(user=self.taker_friend)
+        Friendship.objects.create(from_user=self.taker_profile, to_user=self.taker_friend_profile)
+
+        # Create neutral community users
+        self.neutral1 = User.objects.create_user(username='neutral1', password='password123')
+        UserProfile.objects.get_or_create(user=self.neutral1)
+
+        self.neutral2 = User.objects.create_user(username='neutral2', password='password123')
+        UserProfile.objects.get_or_create(user=self.neutral2)
+
+        self.neutral3 = User.objects.create_user(username='neutral3', password='password123')
+        UserProfile.objects.get_or_create(user=self.neutral3)
+
+        self.neutral4 = User.objects.create_user(username='neutral4', password='password123')
+        UserProfile.objects.get_or_create(user=self.neutral4)
+
+        # Create staff user
+        self.staff_user = User.objects.create_user(username='staff_user', password='password123', is_staff=True)
+        UserProfile.objects.get_or_create(user=self.staff_user)
+
+        # Create task and conversation
+        self.task = Task.objects.create(
+            title='Test Task for Arbitration',
+            description='Do something lazy',
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress'
+        )
+        self.conversation = Conversation.objects.create(task=self.task)
+        self.conversation.participants.add(self.poster, self.taker)
+
+    def test_raising_dispute_generates_odd_jury_excluding_counterparties_and_friends(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work not as requested'}
+        )
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertEqual(dispute.raised_by, self.taker)
+
+        jury_members = list(User.objects.filter(jury_assignments__dispute=dispute))
+        self.assertEqual(len(jury_members), 3)
+        self.assertTrue(len(jury_members) % 2 == 1)
+
+        # Exclude poster, taker, and their friends
+        for member in jury_members:
+            self.assertNotIn(member, [self.poster, self.taker, self.poster_friend, self.taker_friend])
+            self.assertIn(member, [self.neutral1, self.neutral2, self.neutral3, self.neutral4, self.staff_user])
+
+    def test_impaneled_juror_chat_read_only_access(self):
+        # Raise dispute and impanel jurors
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.taker, reason='Disputed task')
+        self.task.status = 'disputed'
+        self.task.save()
+
+        # Impanel neutral1, neutral2, neutral3
+        JuryAssignment.objects.create(dispute=dispute, juror=self.neutral1)
+        JuryAssignment.objects.create(dispute=dispute, juror=self.neutral2)
+        JuryAssignment.objects.create(dispute=dispute, juror=self.neutral3)
+
+        # Impaneled juror neutral1 accesses chat
+        self.client.login(username='neutral1', password='password123')
+        response = self.client.get(reverse('chat_view', args=[self.conversation.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['is_read_only'])
+
+        # Juror tries sending message -> Forbidden
+        send_response = self.client.post(
+            reverse('send_message', args=[self.conversation.id]),
+            {'content': 'Hello from juror'}
+        )
+        self.assertEqual(send_response.status_code, 403)
+
+    def test_unassigned_non_participant_blocked(self):
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.taker, reason='Disputed task')
+        self.task.status = 'disputed'
+        self.task.save()
+
+        # neutral1 is not impaneled
+        self.client.login(username='neutral1', password='password123')
+        chat_resp = self.client.get(reverse('chat_view', args=[self.conversation.id]))
+        self.assertEqual(chat_resp.status_code, 302)
+
+        detail_resp = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertEqual(detail_resp.status_code, 302)
+
+    def test_secret_voting_and_results_visibility(self):
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.taker, reason='Disputed task')
+        self.task.status = 'disputed'
+        self.task.save()
+
+        JuryAssignment.objects.create(dispute=dispute, juror=self.neutral1)
+        JuryAssignment.objects.create(dispute=dispute, juror=self.neutral2)
+        JuryAssignment.objects.create(dispute=dispute, juror=self.neutral3)
+
+        # Before voting, neutral1 cannot see results
+        self.client.login(username='neutral1', password='password123')
+        resp = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context['can_vote'])
+        self.assertFalse(resp.context['show_results'])
+
+        # neutral1 votes poster
+        vote_resp = self.client.post(
+            reverse('submit_dispute_vote', args=[dispute.id]),
+            {'choice': 'poster', 'reason': 'Poster is right'}
+        )
+        self.assertEqual(vote_resp.status_code, 302)
+
+        # Now neutral1 can see results
+        resp_after = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertEqual(resp_after.status_code, 200)
+        self.assertTrue(resp_after.context['has_voted'])
+        self.assertTrue(resp_after.context['show_results'])
+        self.assertEqual(resp_after.context['poster_votes'], 1)
+
+    def test_majority_consensus_payout_for_poster(self):
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.taker, reason='Disputed task')
+        self.task.status = 'disputed'
+        self.task.save()
+
+        JuryAssignment.objects.create(dispute=dispute, juror=self.neutral1)
+        JuryAssignment.objects.create(dispute=dispute, juror=self.neutral2)
+        JuryAssignment.objects.create(dispute=dispute, juror=self.neutral3)
+
+        initial_poster_rewards = self.poster_profile.rewards
+
+        # Vote 1: neutral1 votes poster
+        self.client.login(username='neutral1', password='password123')
+        self.client.post(reverse('submit_dispute_vote', args=[dispute.id]), {'choice': 'poster'})
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'open')
+
+        # Vote 2: neutral2 votes poster -> Majority reached!
+        self.client.login(username='neutral2', password='password123')
+        self.client.post(reverse('submit_dispute_vote', args=[dispute.id]), {'choice': 'poster'})
+
+        dispute.refresh_from_db()
+        self.task.refresh_from_db()
+        self.poster_profile.refresh_from_db()
+
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(self.task.status, 'cancelled')
+        self.assertEqual(self.poster_profile.rewards, initial_poster_rewards + self.task.reward)
+
+        # Check RewardLedger
+        ledger = RewardLedger.objects.filter(user=self.poster, task=self.task, transaction_type='task_cancellation').first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, self.task.reward)
+
+    def test_majority_consensus_payout_for_taker(self):
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.taker, reason='Disputed task')
+        self.task.status = 'disputed'
+        self.task.save()
+
+        JuryAssignment.objects.create(dispute=dispute, juror=self.neutral1)
+        JuryAssignment.objects.create(dispute=dispute, juror=self.neutral2)
+        JuryAssignment.objects.create(dispute=dispute, juror=self.neutral3)
+
+        initial_taker_rewards = self.taker_profile.rewards
+
+        # Vote 1 & 2 for taker
+        self.client.login(username='neutral1', password='password123')
+        self.client.post(reverse('submit_dispute_vote', args=[dispute.id]), {'choice': 'taker'})
+
+        self.client.login(username='neutral2', password='password123')
+        self.client.post(reverse('submit_dispute_vote', args=[dispute.id]), {'choice': 'taker'})
+
+        dispute.refresh_from_db()
+        self.task.refresh_from_db()
+        self.taker_profile.refresh_from_db()
+
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(self.task.status, 'completed')
+        self.assertEqual(self.taker_profile.rewards, initial_taker_rewards + self.task.reward)
+
+        ledger = RewardLedger.objects.filter(user=self.taker, task=self.task, transaction_type='task_completion').first()
+        self.assertIsNotNone(ledger)
+
+    def test_expired_voting_window_triggers_staff_escalation(self):
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.taker, reason='Expired dispute')
+        dispute.created_at = timezone.now() - timedelta(hours=50)
+        dispute.save()
+
+        JuryAssignment.objects.create(dispute=dispute, juror=self.neutral1)
+
+        self.client.login(username='neutral1', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['is_expired'])
+
+        # Staff notification created
+        staff_notif = Notification.objects.filter(recipient=self.staff_user).first()
+        self.assertIsNotNone(staff_notif)
+        self.assertIn("expired without jury quorum", staff_notif.message)
