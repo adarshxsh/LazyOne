@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
 from ..models import Dispute, Task, Notification, RewardLedger
+from ..forms import DisputeForm
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -28,59 +29,63 @@ def raise_dispute(request, task_id):
         messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
         return redirect('my_tasks')
     if request.method == 'POST':
-        reason = request.POST.get('reason')
-        if not reason:
-            messages.error(request, "A reason is required to raise a dispute.")
-            return redirect('my_tasks')
+        form = DisputeForm(request.POST)
+        if form.is_valid():
+            deposit_amount = task.deposit_bond_amount
+            user_profile = request.user.userprofile
+            if user_profile.rewards < deposit_amount:
+                messages.error(
+                    request,
+                    f"Insufficient reward points balance. You need at least {deposit_amount} points as a deposit bond to raise a dispute, but you only have {user_profile.rewards} points."
+                )
+                return redirect('my_tasks')
 
-        deposit_amount = task.deposit_bond_amount
-        user_profile = request.user.userprofile
-        if user_profile.rewards < deposit_amount:
-            messages.error(
-                request,
-                f"Insufficient reward points balance. You need at least {deposit_amount} points as a deposit bond to raise a dispute, but you only have {user_profile.rewards} points."
-            )
-            return redirect('my_tasks')
+            with transaction.atomic():
+                user_profile.rewards -= deposit_amount
+                user_profile.save()
 
-        with transaction.atomic():
-            user_profile.rewards -= deposit_amount
-            user_profile.save()
+                if hasattr(task, 'dispute'):
+                    dispute = task.dispute
+                    dispute.raised_by = request.user
+                    dispute.category = form.cleaned_data['category']
+                    dispute.reason = form.cleaned_data['reason']
+                    dispute.evidence_url = form.cleaned_data.get('evidence_url') or ''
+                    dispute.evidence_details = form.cleaned_data['evidence_details']
+                    dispute.status = 'open'
+                    dispute.deposit_amount = deposit_amount
+                    dispute.escrow_status = 'held'
+                    dispute.save()
+                else:
+                    dispute = form.save(commit=False)
+                    dispute.task = task
+                    dispute.raised_by = request.user
+                    dispute.deposit_amount = deposit_amount
+                    dispute.escrow_status = 'held'
+                    dispute.save()
 
-            if hasattr(task, 'dispute'):
-                dispute = task.dispute
-                dispute.raised_by = request.user
-                dispute.reason = reason
-                dispute.status = 'open'
-                dispute.deposit_amount = deposit_amount
-                dispute.escrow_status = 'held'
-                dispute.save()
-            else:
-                dispute = Dispute.objects.create(
+                RewardLedger.objects.create(
+                    user=request.user,
                     task=task,
-                    raised_by=request.user,
-                    reason=reason,
-                    deposit_amount=deposit_amount,
-                    escrow_status='held'
+                    amount=-deposit_amount,
+                    transaction_type='dispute_deposit',
+                    description=f"Security deposit bond held for dispute on task: '{task.title}'"
                 )
 
-            RewardLedger.objects.create(
-                user=request.user,
-                task=task,
-                amount=-deposit_amount,
-                transaction_type='dispute_deposit',
-                description=f"Security deposit bond held for dispute on task: '{task.title}'"
-            )
+                task.status = 'disputed'
+                task.save()
 
-            task.status = 'disputed'
-            task.save()
-
-            Notification.objects.create(
-                recipient=task.posted_by,
-                message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
-                link=reverse('dispute_detail', args=[dispute.id])
-            )
-        messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
-        return redirect('dispute_detail', dispute_id=dispute.id)
+                Notification.objects.create(
+                    recipient=task.posted_by,
+                    message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
+                    link=reverse('dispute_detail', args=[dispute.id])
+                )
+            messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+        else:
+            for field, errors in form.errors.items():
+                for error in errors:
+                    messages.error(request, error)
+            return redirect('my_tasks')
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
