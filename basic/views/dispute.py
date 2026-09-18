@@ -2,7 +2,8 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, Task, Notification, RewardLedger, DisputeEvidence
+from ..forms import DisputeEvidenceForm
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -13,11 +14,44 @@ def dispute_detail_view(request, dispute_id):
     if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+    
+    evidences = dispute.evidences.all().order_by('created_at')
+    form = DisputeEvidenceForm()
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'evidences': evidences,
+        'form': form,
     }
     return render(request, 'dispute_detail.html', context)
+
+@login_required(login_url='/login/')
+@require_POST
+def upload_dispute_evidence(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+        messages.error(request, "You are not authorized to upload evidence for this dispute.")
+        return redirect('home')
+
+    if dispute.status in ['resolved', 'expired']:
+        messages.error(request, "Evidence cannot be uploaded after a dispute enters resolved or expired status.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    form = DisputeEvidenceForm(request.POST, request.FILES)
+    if form.is_valid():
+        evidence = form.save(commit=False)
+        evidence.dispute = dispute
+        evidence.uploaded_by = request.user
+        evidence.save()
+        messages.success(request, "Evidence uploaded successfully.")
+    else:
+        for field, errors in form.errors.items():
+            for error in errors:
+                messages.error(request, error)
+
+    return redirect('dispute_detail', dispute_id=dispute.id)
 
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):

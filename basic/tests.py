@@ -1,9 +1,12 @@
+from datetime import timedelta
 from django.test import TestCase, Client
 from django.contrib.auth.models import User
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 from django.urls import reverse
 from django.utils import timezone
-from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, DisputeEvidence, RewardLedger, Conversation, Notification
+from .forms import DisputeEvidenceForm
 
 
 class DisputeDepositBondTests(TestCase):
@@ -182,3 +185,244 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class DisputeEvidenceModelAndFormTests(TestCase):
+    def setUp(self):
+        self.user_poster = User.objects.create_user(username='poster', password='password123')
+        UserProfile.objects.create(user=self.user_poster, rewards=1000)
+        self.user_taker = User.objects.create_user(username='taker', password='password123')
+        UserProfile.objects.create(user=self.user_taker, rewards=1500)
+
+        self.task = Task.objects.create(
+            title='Test Task',
+            description='Task Description',
+            reward=100,
+            posted_by=self.user_poster,
+            taken_by=self.user_taker,
+            status='disputed'
+        )
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.user_taker,
+            reason='Poster did not confirm task completion.'
+        )
+
+    def test_form_valid_image_upload(self):
+        image = SimpleUploadedFile("screenshot.jpg", b"fake_image_bytes", content_type="image/jpeg")
+        form = DisputeEvidenceForm(data={}, files={'file': image})
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_form_valid_pdf_upload(self):
+        pdf = SimpleUploadedFile("receipt.pdf", b"%PDF-1.4 fake_pdf_bytes", content_type="application/pdf")
+        form = DisputeEvidenceForm(data={'description': 'PDF receipt'}, files={'file': pdf})
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_form_valid_url_only(self):
+        form = DisputeEvidenceForm(data={'url': 'https://example.com/proof'})
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_form_invalid_empty(self):
+        form = DisputeEvidenceForm(data={})
+        self.assertFalse(form.is_valid())
+        self.assertIn("Please provide at least a file, URL, or description", str(form.errors))
+
+    def test_form_invalid_file_format(self):
+        exe = SimpleUploadedFile("malware.exe", b"binary_data", content_type="application/octet-stream")
+        form = DisputeEvidenceForm(data={}, files={'file': exe})
+        self.assertFalse(form.is_valid())
+        self.assertIn("Invalid file format", str(form.errors))
+
+    def test_form_invalid_file_size_exceeds_10mb(self):
+        oversized_data = b"x" * (10 * 1024 * 1024 + 100)
+        big_file = SimpleUploadedFile("large_image.png", oversized_data, content_type="image/png")
+        form = DisputeEvidenceForm(data={}, files={'file': big_file})
+        self.assertFalse(form.is_valid())
+        self.assertIn("File size must be under 10MB", str(form.errors))
+
+    def test_evidence_model_properties(self):
+        image_file = SimpleUploadedFile("photo.png", b"img_data", content_type="image/png")
+        evidence_img = DisputeEvidence.objects.create(
+            dispute=self.dispute,
+            uploaded_by=self.user_taker,
+            file=image_file,
+            description="Screenshot"
+        )
+        self.assertTrue(evidence_img.is_image)
+        self.assertFalse(evidence_img.is_pdf)
+
+        pdf_file = SimpleUploadedFile("doc.pdf", b"%PDF-1.4 doc", content_type="application/pdf")
+        evidence_pdf = DisputeEvidence.objects.create(
+            dispute=self.dispute,
+            uploaded_by=self.user_poster,
+            file=pdf_file,
+            description="Doc"
+        )
+        self.assertFalse(evidence_pdf.is_image)
+        self.assertTrue(evidence_pdf.is_pdf)
+
+
+class DisputeEvidenceViewTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.user_poster = User.objects.create_user(username='poster', password='password123')
+        UserProfile.objects.create(user=self.user_poster, rewards=1000)
+
+        self.user_taker = User.objects.create_user(username='taker', password='password123')
+        UserProfile.objects.create(user=self.user_taker, rewards=1500)
+
+        self.user_other = User.objects.create_user(username='other', password='password123')
+        UserProfile.objects.create(user=self.user_other, rewards=500)
+
+        self.task = Task.objects.create(
+            title='Sample Task',
+            description='Sample Task Description',
+            reward=200,
+            posted_by=self.user_poster,
+            taken_by=self.user_taker,
+            status='disputed'
+        )
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.user_taker,
+            reason='Delivery dispute'
+        )
+
+    def test_upload_evidence_success(self):
+        self.client.login(username='taker', password='password123')
+        url = reverse('upload_dispute_evidence', args=[self.dispute.id])
+        data = {
+            'url': 'https://example.com/delivery-proof',
+            'description': 'Submitted delivery proof link'
+        }
+        response = self.client.post(url, data)
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(DisputeEvidence.objects.filter(dispute=self.dispute).count(), 1)
+        evidence = DisputeEvidence.objects.first()
+        self.assertEqual(evidence.uploaded_by, self.user_taker)
+        self.assertEqual(evidence.url, 'https://example.com/delivery-proof')
+
+    def test_upload_evidence_unauthorized_user(self):
+        self.client.login(username='other', password='password123')
+        url = reverse('upload_dispute_evidence', args=[self.dispute.id])
+        data = {'description': 'Unauthorized evidence'}
+        response = self.client.post(url, data)
+        self.assertRedirects(response, reverse('home'), fetch_redirect_response=False)
+        self.assertEqual(DisputeEvidence.objects.filter(dispute=self.dispute).count(), 0)
+
+    def test_upload_evidence_on_resolved_dispute_fails(self):
+        self.dispute.status = 'resolved'
+        self.dispute.save()
+
+        self.client.login(username='taker', password='password123')
+        url = reverse('upload_dispute_evidence', args=[self.dispute.id])
+        data = {'description': 'Late evidence'}
+        response = self.client.post(url, data)
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(DisputeEvidence.objects.filter(dispute=self.dispute).count(), 0)
+
+    def test_upload_evidence_on_expired_dispute_fails(self):
+        self.dispute.status = 'expired'
+        self.dispute.save()
+
+        self.client.login(username='poster', password='password123')
+        url = reverse('upload_dispute_evidence', args=[self.dispute.id])
+        data = {'description': 'Late evidence after expiration'}
+        response = self.client.post(url, data)
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(DisputeEvidence.objects.filter(dispute=self.dispute).count(), 0)
+
+
+class ExpireStaleDisputesCommandTests(TestCase):
+    def setUp(self):
+        self.poster = User.objects.create_user(username='poster_exp', password='password123')
+        UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker_exp', password='password123')
+        UserProfile.objects.create(user=self.taker, rewards=1500)
+
+    def test_expire_stale_dispute_unresponsive_poster(self):
+        # Taker raised dispute 8 days ago, poster never responded
+        task = Task.objects.create(
+            title='Stale Task Taker Favored',
+            description='Test',
+            reward=300,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed'
+        )
+        dispute = Dispute.objects.create(
+            task=task,
+            raised_by=self.taker,
+            reason='Poster ignored completed work'
+        )
+        # Backdate dispute creation to 8 days ago
+        Dispute.objects.filter(id=dispute.id).update(created_at=timezone.now() - timedelta(days=8))
+
+        call_command('expire_stale_disputes', days=7)
+
+        dispute.refresh_from_db()
+        task.refresh_from_db()
+        taker_profile = UserProfile.objects.get(user=self.taker)
+
+        self.assertEqual(dispute.status, 'expired')
+        self.assertEqual(task.status, 'completed')
+        self.assertEqual(taker_profile.rewards, 1800)  # 1500 + 300
+        self.assertTrue(
+            RewardLedger.objects.filter(user=self.taker, task=task, transaction_type='task_completion').exists()
+        )
+        self.assertTrue(
+            Notification.objects.filter(recipient=self.taker).exists()
+        )
+
+    def test_expire_stale_dispute_unresponsive_taker(self):
+        # Poster raised dispute 8 days ago, taker never responded
+        task = Task.objects.create(
+            title='Stale Task Poster Favored',
+            description='Test',
+            reward=250,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed'
+        )
+        dispute = Dispute.objects.create(
+            task=task,
+            raised_by=self.poster,
+            reason='Taker abandoned work'
+        )
+        # Backdate dispute creation to 8 days ago
+        Dispute.objects.filter(id=dispute.id).update(created_at=timezone.now() - timedelta(days=8))
+
+        call_command('expire_stale_disputes', days=7)
+
+        dispute.refresh_from_db()
+        task.refresh_from_db()
+        poster_profile = UserProfile.objects.get(user=self.poster)
+
+        self.assertEqual(dispute.status, 'expired')
+        self.assertEqual(task.status, 'cancelled')
+        self.assertEqual(poster_profile.rewards, 1250)  # 1000 + 250
+        self.assertTrue(
+            RewardLedger.objects.filter(user=self.poster, task=task, transaction_type='task_cancellation').exists()
+        )
+
+    def test_recent_dispute_does_not_expire(self):
+        # Dispute raised 3 days ago should remain open
+        task = Task.objects.create(
+            title='Recent Task',
+            description='Test',
+            reward=100,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed'
+        )
+        dispute = Dispute.objects.create(
+            task=task,
+            raised_by=self.taker,
+            reason='Recent issue'
+        )
+        Dispute.objects.filter(id=dispute.id).update(created_at=timezone.now() - timedelta(days=3))
+
+        call_command('expire_stale_disputes', days=7)
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'open')
