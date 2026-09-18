@@ -1,9 +1,10 @@
-from django.test import TestCase, Client
+from django.test import TestCase, Client, override_settings
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from basic.models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from basic.views.dispute import resolve_dispute_outcome
 
 
 class DisputeDepositBondTests(TestCase):
@@ -182,3 +183,122 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+@override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
+class ReputationScoreAndDisputeTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.user1 = User.objects.create_user(username='poster', password='password123')
+        self.profile1 = UserProfile.objects.get_or_create(user=self.user1)[0]
+        self.profile1.rewards = 1000
+        self.profile1.save()
+
+        self.user2 = User.objects.create_user(username='taker', password='password123')
+        self.profile2 = UserProfile.objects.get_or_create(user=self.user2)[0]
+        self.profile2.rewards = 500
+        self.profile2.save()
+
+        self.task = Task.objects.create(
+            title='Test Task',
+            description='Test Description',
+            reward=100,
+            posted_by=self.user1,
+            taken_by=self.user2,
+            status='in_progress'
+        )
+
+    def test_user_profile_defaults_and_properties(self):
+        self.assertEqual(self.profile1.reputation_score, 100)
+        self.assertEqual(self.profile1.total_disputes, 0)
+        self.assertEqual(self.profile1.disputes_won, 0)
+        self.assertEqual(self.profile1.disputes_lost, 0)
+        self.assertEqual(self.profile1.dispute_count, 0)
+        self.assertEqual(self.profile1.trust_level, 'High Trust')
+        self.assertEqual(self.profile1.trust_badge, 'High Trust (100/100)')
+
+        self.profile1.reputation_score = 65
+        self.assertEqual(self.profile1.trust_level, 'Medium Trust')
+        self.assertEqual(self.profile1.trust_badge, 'Medium Trust (65/100)')
+
+        self.profile1.reputation_score = 20
+        self.assertEqual(self.profile1.trust_level, 'Low Trust')
+        self.assertEqual(self.profile1.trust_badge, 'Low Trust (20/100)')
+
+    def test_raise_dispute_updates_total_disputes(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Task incomplete'})
+        self.assertEqual(response.status_code, 302)
+
+        self.profile1.refresh_from_db()
+        self.profile2.refresh_from_db()
+
+        self.assertEqual(self.profile1.total_disputes, 1)
+        self.assertEqual(self.profile2.total_disputes, 1)
+
+    def test_withdraw_dispute_penalizes_raiser(self):
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.user2, reason='Issue', deposit_amount=50, escrow_status='held')
+        self.task.status = 'disputed'
+        self.task.save()
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+        self.assertEqual(response.status_code, 302)
+
+        self.profile2.refresh_from_db()
+        self.assertEqual(self.profile2.reputation_score, 85)  # 100 - 15
+
+    def test_resolve_dispute_outcome_helper(self):
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.user2, reason='Issue', deposit_amount=50, escrow_status='held')
+        resolve_dispute_outcome(dispute, winner_user=self.user2, loser_user=self.user1, is_frivolous=False)
+
+        self.profile1.refresh_from_db()
+        self.profile2.refresh_from_db()
+
+        self.assertEqual(self.profile2.disputes_won, 1)
+        self.assertEqual(self.profile2.reputation_score, 100)  # clamped max 100
+        self.assertEqual(self.profile1.reputation_score, 90)  # 100 - 10
+
+    def test_complete_disputed_task_updates_scores(self):
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.user2, reason='Issue', deposit_amount=50, escrow_status='held')
+        self.task.status = 'disputed'
+        self.task.save()
+
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(reverse('complete_task', args=[self.task.id]))
+        self.assertEqual(response.status_code, 302)
+
+        self.profile1.refresh_from_db()
+        self.profile2.refresh_from_db()
+
+        self.assertEqual(self.profile2.disputes_won, 1)
+        self.assertEqual(self.profile1.reputation_score, 90)
+
+    def test_low_trust_user_restricted_from_taking_tasks(self):
+        self.profile2.reputation_score = 25
+        self.profile2.save()
+
+        task2 = Task.objects.create(
+            title='Another Task',
+            description='Desc',
+            reward=50,
+            posted_by=self.user1,
+            status='available'
+        )
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.get(reverse('take_task', args=[task2.id]))
+        self.assertEqual(response.status_code, 302)
+
+        task2.refresh_from_db()
+        self.assertEqual(task2.status, 'available')
+        self.assertIsNone(task2.taken_by)
+
+    def test_profile_views_render_reputation(self):
+        self.client.login(username='poster', password='password123')
+        res_self = self.client.get(reverse('profile'))
+        self.assertEqual(res_self.status_code, 200)
+        self.assertContains(res_self, 'High Trust (100/100)')
+
+        res_other = self.client.get(reverse('user_profile', args=[self.user2.id]))
+        self.assertEqual(res_other.status_code, 200)
+        self.assertContains(res_other, 'High Trust (100/100)')

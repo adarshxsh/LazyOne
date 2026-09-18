@@ -2,6 +2,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from ..models import Task, Conversation, Notification, RewardLedger
+from .dispute import resolve_dispute_outcome
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
@@ -63,6 +64,8 @@ def take_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, status='available')
     if task.posted_by == request.user:
         messages.error(request, "You cannot take your own task.")
+    elif hasattr(request.user, 'userprofile') and request.user.userprofile.reputation_score < 30:
+        messages.error(request, "Your trust score is too low (< 30) to take tasks. Please resolve open disputes or contact support.")
     else:
         with transaction.atomic():
             task.status = 'in_progress'
@@ -89,12 +92,9 @@ def complete_task(request, task_id):
         task.status = 'completed'
         task.save()
 
-        if hasattr(task, 'dispute') and task.dispute.status == 'open':
-            task.dispute.refund_deposit(
-                reason_description=f"Security deposit bond refunded upon dispute resolution for task: '{task.title}'"
-            )
-            task.dispute.status = 'resolved'
-            task.dispute.save()
+        if hasattr(task, 'dispute'):
+            is_frivolous = (task.dispute.raised_by == task.posted_by)
+            resolve_dispute_outcome(task.dispute, winner_user=task.taken_by, loser_user=task.posted_by, is_frivolous=is_frivolous)
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,

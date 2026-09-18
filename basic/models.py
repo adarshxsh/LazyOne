@@ -26,6 +26,36 @@ class UserProfile(models.Model):
     email_otp = models.CharField(max_length=6, blank=True, null=True)
     email_otp_created_at = models.DateTimeField(blank=True, null=True)
 
+    # Reputation Scoring & Dispute Metrics
+    reputation_score = models.IntegerField(default=100)
+    total_disputes = models.IntegerField(default=0)
+    disputes_won = models.IntegerField(default=0)
+
+    @property
+    def disputes_lost(self):
+        return max(0, self.total_disputes - self.disputes_won)
+
+    @property
+    def dispute_count(self):
+        return self.total_disputes
+
+    @property
+    def trust_level(self):
+        if self.reputation_score >= 80:
+            return "High Trust"
+        elif self.reputation_score >= 50:
+            return "Medium Trust"
+        else:
+            return "Low Trust"
+
+    @property
+    def trust_badge(self):
+        return f"{self.trust_level} ({self.reputation_score}/100)"
+
+    def update_reputation(self, delta):
+        self.reputation_score = max(0, min(100, self.reputation_score + delta))
+        self.save()
+
     def __str__(self):
         return self.user.username
 
@@ -102,7 +132,8 @@ class Dispute(models.Model):
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
-            user_profile = self.raised_by.userprofile
+            user_profile, _ = UserProfile.objects.get_or_create(user=self.raised_by)
+            user_profile.refresh_from_db()
             user_profile.rewards += self.deposit_amount
             user_profile.save()
 
@@ -120,7 +151,8 @@ class Dispute(models.Model):
     def forfeit_deposit(self, beneficiary=None, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
             if beneficiary:
-                beneficiary_profile = beneficiary.userprofile
+                beneficiary_profile, _ = UserProfile.objects.get_or_create(user=beneficiary)
+                beneficiary_profile.refresh_from_db()
                 beneficiary_profile.rewards += self.deposit_amount
                 beneficiary_profile.save()
                 RewardLedger.objects.create(
