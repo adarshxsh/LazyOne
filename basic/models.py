@@ -25,6 +25,7 @@ class UserProfile(models.Model):
     # Fields for Email OTP Verification
     email_otp = models.CharField(max_length=6, blank=True, null=True)
     email_otp_created_at = models.DateTimeField(blank=True, null=True)
+    voting_suspended = models.BooleanField(default=False)
 
     def __str__(self):
         return self.user.username
@@ -68,6 +69,9 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('appeal_bond', 'Appeal Bond'),
+        ('juror_reward', 'Juror Governance Reward'),
+        ('slashing_penalty', 'Slashing Penalty'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
@@ -82,6 +86,7 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('appealed', 'Appealed'),
         ('resolved', 'Resolved'),
     )
     ESCROW_STATUS_CHOICES = (
@@ -141,6 +146,38 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+
+class DisputeAppeal(models.Model):
+    STATUS_CHOICES = (
+        ('voting', 'Voting Open'),
+        ('resolved', 'Resolved'),
+        ('escalated', 'Escalated to Admin'),
+    )
+    dispute = models.OneToOneField(Dispute, on_delete=models.CASCADE, related_name='appeal')
+    appellant = models.ForeignKey(User, on_delete=models.CASCADE, related_name='appeals')
+    bond_amount = models.PositiveIntegerField(default=100)
+    jurors = models.ManyToManyField(User, related_name='assigned_jury_appeals', blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='voting')
+    winner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='won_appeals')
+    created_at = models.DateTimeField(auto_now_add=True)
+    voting_deadline = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Appeal for {self.dispute.task.title} by {self.appellant.username}"
+
+
+class JuryVote(models.Model):
+    appeal = models.ForeignKey(DisputeAppeal, on_delete=models.CASCADE, related_name='votes')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jury_votes')
+    voted_for = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jury_votes_received')
+    voted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('appeal', 'juror')
+
+    def __str__(self):
+        return f"Vote by {self.juror.username} for {self.voted_for.username} in {self.appeal}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
