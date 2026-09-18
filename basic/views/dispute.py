@@ -86,7 +86,7 @@ def raise_dispute(request, task_id):
 @login_required(login_url='/login/')
 @require_POST
 def withdraw_dispute(request, dispute_id):
-    dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user)
+    dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user, status='open', task__status='disputed')
     task = dispute.task
     with transaction.atomic():
         dispute.refund_deposit(
