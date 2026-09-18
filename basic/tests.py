@@ -1,4 +1,4 @@
-from django.test import TestCase, Client
+from django.test import TestCase, Client, override_settings
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
@@ -182,3 +182,181 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+@override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
+class AdminDisputeDashboardTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Regular poster user
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile, _ = UserProfile.objects.get_or_create(user=self.poster, defaults={'rewards': 1000})
+
+        # Regular taker user
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile, _ = UserProfile.objects.get_or_create(user=self.taker, defaults={'rewards': 500})
+
+        # Non-staff user
+        self.regular = User.objects.create_user(username='regular', password='password123')
+        self.regular_profile, _ = UserProfile.objects.get_or_create(user=self.regular, defaults={'rewards': 500})
+
+        # Staff user
+        self.staff_user = User.objects.create_user(username='staff_mod', password='password123', is_staff=True)
+        self.staff_profile, _ = UserProfile.objects.get_or_create(user=self.staff_user)
+
+        # Superuser
+        self.superuser = User.objects.create_superuser(username='admin_boss', password='password123')
+        self.superuser_profile, _ = UserProfile.objects.get_or_create(user=self.superuser)
+
+        # Create tasks and disputes
+        deadline = timezone.now() + timedelta(days=1)
+        self.task1 = Task.objects.create(
+            title='Fix Bug in Backend',
+            description='Need python bug fix',
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            deadline=deadline,
+            status='disputed'
+        )
+        self.conversation1 = Conversation.objects.create(task=self.task1)
+        self.conversation1.participants.add(self.poster, self.taker)
+
+        self.dispute1 = Dispute.objects.create(
+            task=self.task1,
+            raised_by=self.taker,
+            reason='Poster did not approve completion despite submitted work.',
+            priority='high',
+            status='open'
+        )
+
+        self.task2 = Task.objects.create(
+            title='Design Logo',
+            description='Design a clean logo',
+            reward=150,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            deadline=deadline,
+            status='disputed'
+        )
+        self.conversation2 = Conversation.objects.create(task=self.task2)
+        self.conversation2.participants.add(self.poster, self.taker)
+
+        self.dispute2 = Dispute.objects.create(
+            task=self.task2,
+            raised_by=self.poster,
+            reason='Taker submitted low quality logo',
+            priority='low',
+            status='resolved'
+        )
+
+    def test_unauthenticated_access_redirects(self):
+        url = reverse('admin_dispute_dashboard')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/login/', response.url)
+
+    def test_non_staff_access_redirects(self):
+        self.client.login(username='regular', password='password123')
+        url = reverse('admin_dispute_dashboard')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/login/', response.url)
+
+    def test_staff_access_successful(self):
+        self.client.login(username='staff_mod', password='password123')
+        url = reverse('admin_dispute_dashboard')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'admin_dispute_dashboard.html')
+        self.assertContains(response, 'Admin Dispute Dashboard')
+        self.assertContains(response, 'Fix Bug in Backend')
+        self.assertContains(response, 'Design Logo')
+
+    def test_dashboard_filtering_by_status_and_priority(self):
+        self.client.login(username='staff_mod', password='password123')
+
+        # Filter status=open
+        response = self.client.get(reverse('admin_dispute_dashboard') + '?status=open')
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Fix Bug in Backend')
+        self.assertNotContains(response, 'Design Logo')
+
+        # Filter priority=high
+        response = self.client.get(reverse('admin_dispute_dashboard') + '?priority=high')
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Fix Bug in Backend')
+        self.assertNotContains(response, 'Design Logo')
+
+    def test_dashboard_search(self):
+        self.client.login(username='staff_mod', password='password123')
+        response = self.client.get(reverse('admin_dispute_dashboard') + '?q=Logo')
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Design Logo')
+        self.assertNotContains(response, 'Fix Bug in Backend')
+
+    def test_staff_override_force_resolve_poster_wins(self):
+        self.client.login(username='staff_mod', password='password123')
+        initial_rewards = self.poster_profile.rewards
+
+        override_url = reverse('admin_override_dispute', args=[self.dispute1.id])
+        response = self.client.post(override_url, {
+            'action': 'poster_wins',
+            'notes': 'Resolved in favor of poster after reviewing work.'
+        })
+        self.assertRedirects(response, reverse('admin_dispute_dashboard'))
+
+        self.dispute1.refresh_from_db()
+        self.task1.refresh_from_db()
+        self.poster_profile.refresh_from_db()
+
+        self.assertEqual(self.dispute1.status, 'resolved')
+        self.assertEqual(self.task1.status, 'cancelled')
+        self.assertEqual(self.poster_profile.rewards, initial_rewards + self.task1.reward)
+
+        ledger_entry = RewardLedger.objects.filter(task=self.task1, user=self.poster).last()
+        self.assertIsNotNone(ledger_entry)
+        self.assertIn(str(self.staff_user.id), ledger_entry.description)
+
+    def test_staff_override_force_resolve_taker_wins(self):
+        self.client.login(username='staff_mod', password='password123')
+        initial_rewards = self.taker_profile.rewards
+
+        override_url = reverse('admin_override_dispute', args=[self.dispute1.id])
+        response = self.client.post(override_url, {
+            'action': 'taker_wins',
+            'notes': 'Taker provided valid evidence.'
+        })
+        self.assertRedirects(response, reverse('admin_dispute_dashboard'))
+
+        self.dispute1.refresh_from_db()
+        self.task1.refresh_from_db()
+        self.taker_profile.refresh_from_db()
+
+        self.assertEqual(self.dispute1.status, 'resolved')
+        self.assertEqual(self.task1.status, 'completed')
+        self.assertEqual(self.taker_profile.rewards, initial_rewards + self.task1.reward)
+
+        ledger_entry = RewardLedger.objects.filter(task=self.task1, user=self.taker).last()
+        self.assertIsNotNone(ledger_entry)
+        self.assertIn(str(self.staff_user.id), ledger_entry.description)
+
+    def test_staff_override_dismiss_dispute(self):
+        self.client.login(username='staff_mod', password='password123')
+
+        override_url = reverse('admin_override_dispute', args=[self.dispute1.id])
+        response = self.client.post(override_url, {
+            'action': 'dismiss',
+            'notes': 'Dispute dismissed by staff.'
+        })
+        self.assertRedirects(response, reverse('admin_dispute_dashboard'))
+
+        self.dispute1.refresh_from_db()
+        self.task1.refresh_from_db()
+
+        self.assertEqual(self.dispute1.status, 'resolved')
+        self.assertEqual(self.task1.status, 'in_progress')
+
+        ledger_entry = RewardLedger.objects.filter(task=self.task1).last()
+        self.assertIsNotNone(ledger_entry)
+        self.assertIn(str(self.staff_user.id), ledger_entry.description)

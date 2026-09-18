@@ -1,0 +1,167 @@
+{% extends 'base.html' %}
+
+{% block title %}Admin Dispute Dashboard - LazyOne{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 border-b border-gray-200 dark:border-gray-700">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Admin Dispute Dashboard</h1>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Monitor, inspect, and execute staff overrides on escalated disputes.</p>
+        </div>
+        <div class="mt-4 sm:mt-0 flex space-x-2">
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300">
+                Staff Moderation Controls Active
+            </span>
+        </div>
+    </div>
+
+    <!-- Queue Statistics Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-white/60 dark:bg-gray-800/60 p-4 rounded-xl border border-gray-200/60 dark:border-gray-700/60 shadow-sm">
+            <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Disputes</p>
+            <p class="text-2xl font-extrabold text-gray-900 dark:text-white mt-1">{{ total_disputes_count }}</p>
+        </div>
+        <div class="bg-white/60 dark:bg-gray-800/60 p-4 rounded-xl border border-gray-200/60 dark:border-gray-700/60 shadow-sm">
+            <p class="text-xs font-semibold text-yellow-600 dark:text-yellow-400 uppercase tracking-wider">Open Disputes</p>
+            <p class="text-2xl font-extrabold text-yellow-600 dark:text-yellow-400 mt-1">{{ open_disputes_count }}</p>
+        </div>
+        <div class="bg-white/60 dark:bg-gray-800/60 p-4 rounded-xl border border-gray-200/60 dark:border-gray-700/60 shadow-sm">
+            <p class="text-xs font-semibold text-green-600 dark:text-green-400 uppercase tracking-wider">Resolved</p>
+            <p class="text-2xl font-extrabold text-green-600 dark:text-green-400 mt-1">{{ resolved_disputes_count }}</p>
+        </div>
+        <div class="bg-white/60 dark:bg-gray-800/60 p-4 rounded-xl border border-gray-200/60 dark:border-gray-700/60 shadow-sm">
+            <p class="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wider">High Priority</p>
+            <p class="text-2xl font-extrabold text-red-600 dark:text-red-400 mt-1">{{ high_priority_count }}</p>
+        </div>
+    </div>
+
+    <!-- Filterable Queue Controls -->
+    <form method="get" class="bg-gray-50/80 dark:bg-gray-900/40 p-4 rounded-xl border border-gray-200 dark:border-gray-700 space-y-3 sm:space-y-0 sm:flex sm:items-center sm:space-x-4">
+        <div class="flex-1">
+            <label for="q" class="sr-only">Search</label>
+            <input type="text" name="q" id="q" value="{{ search_query }}" placeholder="Search by task title, reason, or username..." class="w-full px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-800 dark:text-gray-200 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-500">
+        </div>
+        <div class="flex space-x-2">
+            <div>
+                <label for="status" class="sr-only">Status Filter</label>
+                <select name="status" id="status" class="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                    <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All Statuses</option>
+                    <option value="open" {% if status_filter == 'open' %}selected{% endif %}>Open</option>
+                    <option value="resolved" {% if status_filter == 'resolved' %}selected{% endif %}>Resolved</option>
+                </select>
+            </div>
+            <div>
+                <label for="priority" class="sr-only">Priority Filter</label>
+                <select name="priority" id="priority" class="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                    <option value="all" {% if priority_filter == 'all' %}selected{% endif %}>All Priorities</option>
+                    <option value="high" {% if priority_filter == 'high' %}selected{% endif %}>High</option>
+                    <option value="medium" {% if priority_filter == 'medium' %}selected{% endif %}>Medium</option>
+                    <option value="low" {% if priority_filter == 'low' %}selected{% endif %}>Low</option>
+                </select>
+            </div>
+            <button type="submit" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white font-medium rounded-lg text-sm transition-colors duration-200">
+                Filter
+            </button>
+            {% if status_filter != 'all' or priority_filter != 'all' or search_query %}
+                <a href="{% url 'admin_dispute_dashboard' %}" class="px-3 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-lg text-sm transition-colors duration-200">
+                    Reset
+                </a>
+            {% endif %}
+        </div>
+    </form>
+
+    <!-- Queue Table / List -->
+    {% if disputes %}
+        <div class="space-y-4">
+            {% for dispute in disputes %}
+                <div class="bg-white/80 dark:bg-gray-800/80 p-5 rounded-xl border border-gray-200/80 dark:border-gray-700/80 shadow-md transition hover:shadow-lg">
+                    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <!-- Left Info -->
+                        <div class="space-y-2 flex-1">
+                            <div class="flex items-center space-x-3">
+                                <span class="text-xs font-mono font-bold text-gray-500 dark:text-gray-400">Dispute #{{ dispute.id }}</span>
+                                <span class="px-2.5 py-0.5 text-xs font-semibold rounded-full 
+                                    {% if dispute.status == 'open' %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300
+                                    {% else %}bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300{% endif %}">
+                                    {{ dispute.get_status_display }}
+                                </span>
+                                <span class="px-2.5 py-0.5 text-xs font-semibold rounded-full 
+                                    {% if dispute.priority == 'high' %}bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300
+                                    {% elif dispute.priority == 'medium' %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300
+                                    {% else %}bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300{% endif %}">
+                                    {{ dispute.get_priority_display }} Priority
+                                </span>
+                                <span class="text-xs text-gray-400 dark:text-gray-500">{{ dispute.created_at|date:"M d, Y H:i" }}</span>
+                            </div>
+
+                            <h3 class="text-lg font-bold text-gray-900 dark:text-white">
+                                <a href="{% url 'dispute_detail' dispute.id %}" class="hover:underline hover:text-cyan-600 dark:hover:text-cyan-400">
+                                    {{ dispute.task.title }}
+                                </a>
+                                <span class="ml-2 text-sm font-normal text-cyan-600 dark:text-cyan-400">({{ dispute.task.reward }} Points)</span>
+                            </h3>
+
+                            <div class="text-xs text-gray-600 dark:text-gray-400 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                <div><strong class="text-gray-700 dark:text-gray-300">Posted by:</strong> {{ dispute.task.posted_by.username }}</div>
+                                <div><strong class="text-gray-700 dark:text-gray-300">Taken by:</strong> {% if dispute.task.taken_by %}{{ dispute.task.taken_by.username }}{% else %}<em>None</em>{% endif %}</div>
+                                <div><strong class="text-gray-700 dark:text-gray-300">Raised by:</strong> {{ dispute.raised_by.username }}</div>
+                            </div>
+
+                            <div class="bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg border border-gray-200/50 dark:border-gray-700/50 text-sm text-gray-700 dark:text-gray-300">
+                                <strong class="text-xs text-gray-500 dark:text-gray-400 block mb-1 uppercase tracking-wider">Dispute Reason:</strong>
+                                {{ dispute.reason|linebreaksbr }}
+                            </div>
+                        </div>
+
+                        <!-- Right Actions / Controls -->
+                        <div class="md:w-72 flex flex-col justify-between space-y-3 pt-4 md:pt-0 border-t md:border-t-0 md:border-l border-gray-200 dark:border-gray-700 md:pl-4">
+                            <a href="{% url 'dispute_detail' dispute.id %}" class="w-full text-center px-3 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 text-xs font-semibold rounded-lg transition-colors duration-200">
+                                Inspect Evidence & Chat
+                            </a>
+
+                            {% if dispute.status == 'open' %}
+                                <form action="{% url 'admin_override_dispute' dispute.id %}" method="post" class="space-y-2">
+                                    {% csrf_token %}
+                                    <div>
+                                        <input type="text" name="notes" placeholder="Optional staff ledger notes..." class="w-full px-2.5 py-1.5 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded text-xs text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-cyan-500">
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-1.5">
+                                        <button type="submit" name="action" value="poster_wins" class="px-2.5 py-1.5 bg-green-600 hover:bg-green-700 text-white font-semibold text-xs rounded transition-colors duration-200" title="Refund points to poster and cancel task">
+                                            Force Resolve (Poster Wins)
+                                        </button>
+                                        <button type="submit" name="action" value="taker_wins" class="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded transition-colors duration-200" title="Award points to taker and complete task">
+                                            Force Resolve (Taker Wins)
+                                        </button>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-1.5">
+                                        <button type="submit" name="action" value="dismiss" class="px-2.5 py-1.5 bg-yellow-600 hover:bg-yellow-700 text-white font-semibold text-xs rounded transition-colors duration-200" title="Dismiss dispute and restore task status">
+                                            Dismiss Dispute
+                                        </button>
+                                        <button type="submit" name="action" value="cancel_task" class="px-2.5 py-1.5 bg-red-600 hover:bg-red-700 text-white font-semibold text-xs rounded transition-colors duration-200" title="Force cancel task and refund poster">
+                                            Cancel Task
+                                        </button>
+                                    </div>
+                                </form>
+                            {% else %}
+                                <div class="bg-gray-50 dark:bg-gray-900/50 p-2 rounded text-center text-xs text-gray-500 dark:text-gray-400">
+                                    Resolved Dispute
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="text-center py-12 bg-white/60 dark:bg-gray-800/60 rounded-xl border border-gray-200/60 dark:border-gray-700/60">
+            <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <h3 class="mt-2 text-sm font-medium text-gray-900 dark:text-white">No disputes found</h3>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">No disputes match your active status or priority filter criteria.</p>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
