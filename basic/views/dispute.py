@@ -2,9 +2,9 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+from ..models import Dispute, Task, Notification, RewardLedger
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
@@ -72,6 +72,7 @@ def raise_dispute(request, task_id):
             )
 
             task.status = 'disputed'
+            task.cancellation_requested = False
             task.save()
 
             Notification.objects.create(
@@ -88,6 +89,11 @@ def raise_dispute(request, task_id):
 def withdraw_dispute(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user)
     task = dispute.task
+
+    if dispute.status != 'open' or task.status != 'disputed':
+        messages.error(request, "Cannot withdraw dispute unless the dispute is open and the task is disputed.")
+        return redirect('my_tasks')
+
     with transaction.atomic():
         dispute.refund_deposit(
             reason_description=f"Security deposit bond refunded for withdrawn dispute on task: '{task.title}'"
