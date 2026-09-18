@@ -5,12 +5,40 @@
 {% block content %}
 <div class="max-w-4xl mx-auto">
     <!-- Profile Header -->
-    <div class="text-center mb-12">
+    <div class="text-center mb-8">
         <h1 class="text-4xl font-bold text-gray-800 dark:text-white">{{ viewed_profile.user.username }}</h1>
         <p class="text-lg text-gray-600 dark:text-gray-400 mt-2">{{ viewed_profile.college }}</p>
+        <div class="mt-4 inline-flex items-center space-x-3">
+            <span class="px-4 py-1.5 rounded-full font-semibold text-sm 
+                {% if viewed_profile.trust_badge == 'Low Risk' or viewed_profile.risk_tier == 'Trusted' %}bg-green-500/20 text-green-600 dark:text-green-400 border border-green-500/30{% elif viewed_profile.risk_tier == 'High Risk' %}bg-red-500/20 text-red-600 dark:text-red-400 border border-red-500/30{% else %}bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 border border-yellow-500/30{% endif %}">
+                Trust Tier: {{ viewed_profile.trust_badge }}
+            </span>
+        </div>
     </div>
 
     <div class="space-y-8">
+        <!-- Trust & Reputation Metrics Card -->
+        <div>
+            <h2 class="text-2xl font-bold text-gray-800 dark:text-white mb-4">Reputation & Trust</h2>
+            <div class="bg-white/50 border border-gray-200 rounded-xl p-6 dark:bg-gray-800/50 dark:border-gray-700/50 grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                <div class="p-4 bg-gray-100/50 dark:bg-gray-700/50 rounded-lg">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider font-semibold">Trust Score</p>
+                    <p class="text-2xl font-bold text-cyan-600 dark:text-cyan-400 mt-1">{{ viewed_profile.trust_score }}</p>
+                </div>
+                <div class="p-4 bg-gray-100/50 dark:bg-gray-700/50 rounded-lg">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider font-semibold">Completion Rate</p>
+                    <p class="text-2xl font-bold text-green-600 dark:text-green-400 mt-1">{{ viewed_profile.completion_percentage }}%</p>
+                </div>
+                <div class="p-4 bg-gray-100/50 dark:bg-gray-700/50 rounded-lg">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider font-semibold">Completed / Abandoned</p>
+                    <p class="text-xl font-bold text-gray-800 dark:text-white mt-1">{{ viewed_profile.completed_tasks }} / {{ viewed_profile.abandoned_tasks }}</p>
+                </div>
+                <div class="p-4 bg-gray-100/50 dark:bg-gray-700/50 rounded-lg">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider font-semibold">Disputes (W / L)</p>
+                    <p class="text-xl font-bold text-gray-800 dark:text-white mt-1">{{ viewed_profile.dispute_wins }} / {{ viewed_profile.dispute_losses }}</p>
+                </div>
+            </div>
+        </div>
         <!-- Bio Section -->
         <div>
             <h2 class="text-2xl font-bold text-gray-800 dark:text-white mb-4">About Me</h2>
