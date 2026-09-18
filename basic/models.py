@@ -68,11 +68,17 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('slash_penalty', 'Slash Penalty'),
+        ('appeal_fee', 'Appeal Fee'),
+        ('appeal_refund', 'Appeal Refund'),
+        ('juror_reward', 'Juror Reward'),
+        ('juror_slash', 'Juror Slash Penalty'),
+        ('dispute_payout', 'Dispute Payout'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -82,7 +88,11 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('in_jury_review', 'In Jury Review'),
+        ('appealed', 'Appealed'),
+        ('appeal_review', 'Appeal Review'),
         ('resolved', 'Resolved'),
+        ('slashed', 'Slashed'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
@@ -92,10 +102,21 @@ class Dispute(models.Model):
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolution_winner = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='won_disputes')
+    initial_winner = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='initial_won_disputes')
+    appellant = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='appealed_disputes')
+    appeal_bond_amount = models.IntegerField(default=0)
+
+    def is_appealable(self):
+        from datetime import timedelta
+        if self.status != 'resolved' or not self.resolved_at:
+            return False
+        return (timezone.now() - self.resolved_at) <= timedelta(hours=48)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
@@ -141,6 +162,31 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class JuryAssignment(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='jury_assignments')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jury_assignments')
+    tier = models.IntegerField(default=1) # 1 for initial, 2 for appeal
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror', 'tier')
+
+    def __str__(self):
+        return f"Juror {self.juror.username} assigned to dispute {self.dispute.id} (Tier {self.tier})"
+
+class DisputeVote(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    choice = models.CharField(max_length=10) # 'poster' or 'taker'
+    tier = models.IntegerField(default=1) # 1 for initial, 2 for appeal
+    voted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'voter', 'tier')
+
+    def __str__(self):
+        return f"{self.voter.username} voted {self.choice} on dispute {self.dispute.id} (Tier {self.tier})"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)

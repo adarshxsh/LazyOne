@@ -13,16 +13,83 @@
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Status:</strong> 
+                <span class="px-2 py-1 text-sm rounded-full 
+                    {% if dispute.status == 'open' or dispute.status == 'in_jury_review' %}bg-yellow-500/20 text-yellow-300
+                    {% elif dispute.status == 'appealed' or dispute.status == 'appeal_review' %}bg-blue-500/20 text-blue-300
+                    {% elif dispute.status == 'resolved' %}bg-green-500/20 text-green-300
+                    {% elif dispute.status == 'slashed' %}bg-red-500/20 text-red-300
+                    {% else %}bg-gray-500/20 text-gray-300{% endif %}">
+                    {{ dispute.get_status_display }}
+                </span>
+            </p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y H:i" }}</p>
+            {% if dispute.resolved_at %}
+                <p><strong>Initial Ruling Resolved At:</strong> {{ dispute.resolved_at|date:"F d, Y H:i" }}</p>
+            {% endif %}
+            {% if dispute.resolution_winner %}
+                <p><strong>Resolution Winner:</strong> {{ dispute.resolution_winner.username }}</p>
+            {% endif %}
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <!-- Voting Status / Results -->
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Jury Voting Status</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+                <div>
+                    <h4 class="font-bold text-gray-200 mb-1">Tier 1 (Initial Jury Review)</h4>
+                    <p>Votes for Task Poster ({{ task.posted_by.username }}): {{ tier1_votes_poster }}</p>
+                    <p>Votes for Task Worker ({{ task.taken_by.username }}): {{ tier1_votes_taker }}</p>
+                </div>
+                <div>
+                    <h4 class="font-bold text-gray-200 mb-1">Tier 2 (Appeal Jury Review)</h4>
+                    <p>Votes for Task Poster ({{ task.posted_by.username }}): {{ tier2_votes_poster }}</p>
+                    <p>Votes for Task Worker ({{ task.taken_by.username }}): {{ tier2_votes_taker }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Juror Voting Form -->
+        {% if can_vote %}
+            <div class="bg-cyan-950/40 p-5 rounded-xl border border-cyan-500/30">
+                <h3 class="text-xl font-semibold text-cyan-300 mb-2">Cast Juror Vote (Tier {{ active_tier }})</h3>
+                <p class="text-sm text-gray-400 mb-4">You have been selected as an impartial peer juror. Please review the dispute and cast your vote.</p>
+                <form method="POST" action="{% url 'submit_dispute_vote' dispute.id %}" class="flex gap-4">
+                    {% csrf_token %}
+                    <button type="submit" name="choice" value="poster" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold transition">
+                        Vote for Poster ({{ task.posted_by.username }})
+                    </button>
+                    <button type="submit" name="choice" value="taker" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold transition">
+                        Vote for Worker ({{ task.taken_by.username }})
+                    </button>
+                </form>
+            </div>
+        {% elif has_voted %}
+            <div class="bg-gray-800/50 p-4 rounded-lg border border-gray-700 text-cyan-400">
+                ✓ You have cast your juror vote for Tier {{ active_tier }}.
+            </div>
+        {% endif %}
+
+        <!-- Appeal Form -->
+        {% if is_appealable %}
+            <div class="bg-yellow-950/30 p-5 rounded-xl border border-yellow-500/30">
+                <h3 class="text-xl font-semibold text-yellow-300 mb-2">Appeal Initial Ruling</h3>
+                <p class="text-sm text-gray-300 mb-3">You can appeal this initial ruling within 48 hours. An appeal requires depositing an appeal bond of <strong>{{ appeal_bond_amount }} points</strong>. If your appeal succeeds, your bond is refunded and the opposing party is slashed.</p>
+                <form method="POST" action="{% url 'appeal_dispute' dispute.id %}">
+                    {% csrf_token %}
+                    <button type="submit" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg font-semibold transition">
+                        Deposit {{ appeal_bond_amount }} Points & File Appeal
+                    </button>
+                </form>
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}
