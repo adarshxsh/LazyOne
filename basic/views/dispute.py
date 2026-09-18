@@ -47,21 +47,14 @@ def raise_dispute(request, task_id):
             user_profile.save()
 
             if hasattr(task, 'dispute'):
-                dispute = task.dispute
-                dispute.raised_by = request.user
-                dispute.reason = reason
-                dispute.status = 'open'
-                dispute.deposit_amount = deposit_amount
-                dispute.escrow_status = 'held'
-                dispute.save()
-            else:
-                dispute = Dispute.objects.create(
-                    task=task,
-                    raised_by=request.user,
-                    reason=reason,
-                    deposit_amount=deposit_amount,
-                    escrow_status='held'
-                )
+                task.dispute.delete()
+            dispute = Dispute.objects.create(
+                task=task,
+                raised_by=request.user,
+                reason=reason,
+                deposit_amount=deposit_amount,
+                escrow_status='held'
+            )
 
             RewardLedger.objects.create(
                 user=request.user,
@@ -86,7 +79,7 @@ def raise_dispute(request, task_id):
 @login_required(login_url='/login/')
 @require_POST
 def withdraw_dispute(request, dispute_id):
-    dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user)
+    dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user, status='open', task__status='disputed')
     task = dispute.task
     with transaction.atomic():
         dispute.refund_deposit(
