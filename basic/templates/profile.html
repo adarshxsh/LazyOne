@@ -3,7 +3,37 @@
 {% block title %}Profile{% endblock %}
 
 {% block content %}
-<h2 class="text-3xl font-bold text-white mb-8 text-center">Edit Your Profile</h2>
+<div class="max-w-2xl mx-auto mb-8">
+    <div class="text-center mb-6">
+        <h2 class="text-3xl font-bold text-white">Your Profile & Reputation</h2>
+        <div class="mt-3 inline-flex items-center space-x-3">
+            <span class="px-4 py-1.5 rounded-full font-semibold text-sm 
+                {% if profile.trust_badge == 'Low Risk' or profile.risk_tier == 'Trusted' %}bg-green-500/20 text-green-400 border border-green-500/30{% elif profile.risk_tier == 'High Risk' %}bg-red-500/20 text-red-400 border border-red-500/30{% else %}bg-yellow-500/20 text-yellow-400 border border-yellow-500/30{% endif %}">
+                Trust Tier: {{ profile.trust_badge }}
+            </span>
+        </div>
+    </div>
+
+    <!-- Trust Overview Grid -->
+    <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-6 grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+        <div class="p-3 bg-gray-700/50 rounded-lg">
+            <p class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Trust Score</p>
+            <p class="text-2xl font-bold text-cyan-400 mt-1">{{ profile.trust_score }}</p>
+        </div>
+        <div class="p-3 bg-gray-700/50 rounded-lg">
+            <p class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Completion</p>
+            <p class="text-2xl font-bold text-green-400 mt-1">{{ profile.completion_percentage }}%</p>
+        </div>
+        <div class="p-3 bg-gray-700/50 rounded-lg">
+            <p class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Done / Abandoned</p>
+            <p class="text-xl font-bold text-white mt-1">{{ profile.completed_tasks }} / {{ profile.abandoned_tasks }}</p>
+        </div>
+        <div class="p-3 bg-gray-700/50 rounded-lg">
+            <p class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Disputes (W/L)</p>
+            <p class="text-xl font-bold text-white mt-1">{{ profile.dispute_wins }} / {{ profile.dispute_losses }}</p>
+        </div>
+    </div>
+</div>
 
 <form method="post" class="space-y-6 max-w-2xl mx-auto">
     {% csrf_token %}

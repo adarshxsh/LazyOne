@@ -16,9 +16,11 @@ def add_task(request):
         description = request.POST.get('description')
         reward_str = request.POST.get('reward')
         deadline_str = request.POST.get('deadline') # Expecting YYYY-MM-DDTHH:MM format
+        min_trust_score_str = request.POST.get('min_trust_score', '0')
 
         try:
             reward = int(reward_str)
+            min_trust_score = int(min_trust_score_str) if min_trust_score_str else 0
             if reward <= 0:
                 messages.error(request, "Reward must be a positive number.")
                 default_deadline = (timezone.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
@@ -41,7 +43,8 @@ def add_task(request):
                 user_profile.save()
                 new_task = Task.objects.create(
                     title=title, description=description, reward=reward,
-                    posted_by=request.user, deadline=deadline, status='available'
+                    posted_by=request.user, deadline=deadline, status='available',
+                    min_trust_score=min_trust_score
                 )
                 RewardLedger.objects.create(
                     user=request.user, task=new_task, amount=-reward,
@@ -63,20 +66,26 @@ def take_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, status='available')
     if task.posted_by == request.user:
         messages.error(request, "You cannot take your own task.")
-    else:
-        with transaction.atomic():
-            task.status = 'in_progress'
-            task.taken_by = request.user
-            task.save()
-            conversation, created = Conversation.objects.get_or_create(task=task)
-            if created:
-                conversation.participants.add(task.posted_by, task.taken_by)
-            Notification.objects.create(
-                recipient=task.posted_by,
-                message=f"{request.user.username} has taken your task: {task.title}",
-                link=reverse('my_tasks')
-            )
-            messages.success(request, "Task has been assigned to you. A chat has been created.")
+        return redirect('my_tasks')
+
+    taker_profile = request.user.userprofile
+    if taker_profile.trust_score < task.min_trust_score:
+        messages.error(request, f"Task assignment denied: Your trust score ({taker_profile.trust_score}) does not meet the minimum requirement ({task.min_trust_score}) for this task.")
+        return redirect('home')
+
+    with transaction.atomic():
+        task.status = 'in_progress'
+        task.taken_by = request.user
+        task.save()
+        conversation, created = Conversation.objects.get_or_create(task=task)
+        if created:
+            conversation.participants.add(task.posted_by, task.taken_by)
+        Notification.objects.create(
+            recipient=task.posted_by,
+            message=f"{request.user.username} has taken your task: {task.title}",
+            link=reverse('my_tasks')
+        )
+        messages.success(request, "Task has been assigned to you. A chat has been created.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
@@ -85,6 +94,8 @@ def complete_task(request, task_id):
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
         task_doer_profile.rewards += task.reward
+        task_doer_profile.completed_tasks += 1
+        task_doer_profile.trust_score += 10
         task_doer_profile.save()
         task.status = 'completed'
         task.save()
@@ -159,6 +170,11 @@ def accept_cancellation(request, task_id):
 def abandon_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
     with transaction.atomic():
+        taker_profile = request.user.userprofile
+        taker_profile.abandoned_tasks += 1
+        taker_profile.trust_score = max(0, taker_profile.trust_score - 20)
+        taker_profile.save()
+
         task.status = 'available'
         task.taken_by = None
         task.save()

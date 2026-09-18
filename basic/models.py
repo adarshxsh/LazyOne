@@ -26,6 +26,46 @@ class UserProfile(models.Model):
     email_otp = models.CharField(max_length=6, blank=True, null=True)
     email_otp_created_at = models.DateTimeField(blank=True, null=True)
 
+    # Reputation & Trust Fields
+    trust_score = models.IntegerField(default=100)
+    completed_tasks = models.IntegerField(default=0)
+    abandoned_tasks = models.IntegerField(default=0)
+    dispute_wins = models.IntegerField(default=0)
+    dispute_losses = models.IntegerField(default=0)
+
+    @property
+    def reputation_score(self):
+        return self.trust_score
+
+    @property
+    def completion_rate(self):
+        total = self.completed_tasks + self.abandoned_tasks
+        if total == 0:
+            return 100.0
+        return round((self.completed_tasks / total) * 100, 1)
+
+    @property
+    def completion_percentage(self):
+        return self.completion_rate
+
+    @property
+    def risk_tier(self):
+        if self.trust_score < 70:
+            return 'High Risk'
+        elif self.trust_score >= 120:
+            return 'Trusted'
+        else:
+            return 'Standard'
+
+    @property
+    def trust_badge(self):
+        if self.trust_score < 70:
+            return 'High Risk'
+        elif self.trust_score >= 120:
+            return 'Low Risk'
+        else:
+            return 'Standard'
+
     def __str__(self):
         return self.user.username
 
@@ -47,6 +87,7 @@ class Task(models.Model):
     deadline = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='available')
     cancellation_requested = models.BooleanField(default=False)
+    min_trust_score = models.IntegerField(default=0)
 
     def __str__(self):
         return self.title

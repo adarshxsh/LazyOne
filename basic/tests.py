@@ -1,9 +1,9 @@
-from django.test import TestCase, Client
+from django.test import TestCase, Client, override_settings
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from basic.models import UserProfile, Task, Dispute, RewardLedger, Conversation
 
 
 class DisputeDepositBondTests(TestCase):
@@ -182,3 +182,142 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+@override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
+class ReputationSystemTests(TestCase):
+    def setUp(self):
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.poster_profile, _ = UserProfile.objects.get_or_create(user=self.poster)
+        self.taker_profile, _ = UserProfile.objects.get_or_create(user=self.taker)
+
+    def test_user_profile_reputation_fields_defaults_and_properties(self):
+        """Verify UserProfile schema contains reputation fields with appropriate defaults and helper properties."""
+        profile = self.poster_profile
+        self.assertEqual(profile.trust_score, 100)
+        self.assertEqual(profile.completed_tasks, 0)
+        self.assertEqual(profile.abandoned_tasks, 0)
+        self.assertEqual(profile.dispute_wins, 0)
+        self.assertEqual(profile.dispute_losses, 0)
+
+        self.assertEqual(profile.reputation_score, 100)
+        self.assertEqual(profile.completion_percentage, 100.0)
+        self.assertEqual(profile.risk_tier, 'Standard')
+        self.assertEqual(profile.trust_badge, 'Standard')
+
+        profile.trust_score = 130
+        self.assertEqual(profile.risk_tier, 'Trusted')
+        self.assertEqual(profile.trust_badge, 'Low Risk')
+
+        profile.trust_score = 50
+        self.assertEqual(profile.risk_tier, 'High Risk')
+        self.assertEqual(profile.trust_badge, 'High Risk')
+
+    def test_task_completion_increments_completed_tasks_and_trust_score(self):
+        """Completing a task automatically increments completed_tasks and adds reputation points to the taker."""
+        task = Task.objects.create(
+            title='Test Task', description='Desc', reward=100,
+            posted_by=self.poster, taken_by=self.taker, status='in_progress',
+            deadline=timezone.now() + timedelta(days=1)
+        )
+        self.client.login(username='poster', password='password123')
+        response = self.client.get(reverse('complete_task', args=[task.id]))
+        self.assertEqual(response.status_code, 302)
+
+        self.taker_profile.refresh_from_db()
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'completed')
+        self.assertEqual(self.taker_profile.completed_tasks, 1)
+        self.assertEqual(self.taker_profile.trust_score, 110)
+
+    def test_task_abandonment_increments_abandoned_tasks_and_deducts_trust_score(self):
+        """Abandoning a task automatically increments abandoned_tasks and deducts trust score with floor 0."""
+        task = Task.objects.create(
+            title='Test Task', description='Desc', reward=100,
+            posted_by=self.poster, taken_by=self.taker, status='in_progress',
+            deadline=timezone.now() + timedelta(days=1)
+        )
+        self.client.login(username='taker', password='password123')
+        response = self.client.get(reverse('abandon_task', args=[task.id]))
+        self.assertEqual(response.status_code, 302)
+
+        self.taker_profile.refresh_from_db()
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'available')
+        self.assertIsNone(task.taken_by)
+        self.assertEqual(self.taker_profile.abandoned_tasks, 1)
+        self.assertEqual(self.taker_profile.trust_score, 80)
+
+        # Verify minimum floor bound of 0
+        self.taker_profile.trust_score = 10
+        self.taker_profile.save()
+        task.taken_by = self.taker
+        task.status = 'in_progress'
+        task.save()
+
+        self.client.get(reverse('abandon_task', args=[task.id]))
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.trust_score, 0)
+
+    def test_dispute_resolution_updates_participant_reputation(self):
+        """Resolving a dispute updates dispute_wins, dispute_losses, and trust scores for participants."""
+        task = Task.objects.create(
+            title='Disputed Task', description='Desc', reward=100,
+            posted_by=self.poster, taken_by=self.taker, status='disputed',
+            deadline=timezone.now() + timedelta(days=1)
+        )
+        dispute = Dispute.objects.create(task=task, raised_by=self.poster, reason='Unfinished work')
+
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(reverse('resolve_dispute', args=[dispute.id]), {'winner': 'taker'})
+        self.assertEqual(response.status_code, 302)
+
+        self.poster_profile.refresh_from_db()
+        self.taker_profile.refresh_from_db()
+        dispute.refresh_from_db()
+
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(self.taker_profile.dispute_wins, 1)
+        self.assertEqual(self.taker_profile.trust_score, 115)
+        self.assertEqual(self.poster_profile.dispute_losses, 1)
+        self.assertEqual(self.poster_profile.trust_score, 85)
+
+    def test_profile_views_display_reputation_metrics(self):
+        """User profile views present trust badge, completion percentage, and dispute statistics."""
+        self.taker_profile.trust_score = 125
+        self.taker_profile.completed_tasks = 8
+        self.taker_profile.abandoned_tasks = 2
+        self.taker_profile.dispute_wins = 3
+        self.taker_profile.dispute_losses = 1
+        self.taker_profile.save()
+
+        self.client.login(username='poster', password='password123')
+        response = self.client.get(reverse('user_profile', args=[self.taker.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Trust Score')
+        self.assertContains(response, '125')
+        self.assertContains(response, '80.0%')  # Completion percentage (8 / 10)
+        self.assertContains(response, '8 / 2')   # Completed / Abandoned
+        self.assertContains(response, '3 / 1')   # Dispute W/L
+
+    def test_high_risk_or_low_reputation_blocked_from_claiming_task(self):
+        """Users with trust score lower than task.min_trust_score are blocked from taking tasks."""
+        task = Task.objects.create(
+            title='High Requirement Task', description='Desc', reward=100,
+            posted_by=self.poster, status='available', min_trust_score=110,
+            deadline=timezone.now() + timedelta(days=1)
+        )
+        self.taker_profile.trust_score = 90
+        self.taker_profile.save()
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.get(reverse('take_task', args=[task.id]))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse('home'))
+
+        messages_list = list(response.wsgi_request._messages)
+        self.assertTrue(any("Task assignment denied" in str(m) for m in messages_list))
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'available')
+        self.assertIsNone(task.taken_by)

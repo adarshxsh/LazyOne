@@ -24,8 +24,8 @@ def raise_dispute(request, task_id):
     task = get_object_or_404(Task, id=task_id)
     if hasattr(task, 'dispute') and task.dispute.status == 'open':
         return redirect('dispute_detail', dispute_id=task.dispute.id)
-    if task.taken_by != request.user or task.status != 'in_progress':
-        messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
+    if (task.taken_by != request.user and task.posted_by != request.user) or task.status != 'in_progress':
+        messages.error(request, "You can only raise a dispute for a task in progress that you posted or took.")
         return redirect('my_tasks')
     if request.method == 'POST':
         reason = request.POST.get('reason')
@@ -74,8 +74,9 @@ def raise_dispute(request, task_id):
             task.status = 'disputed'
             task.save()
 
+            recipient = task.posted_by if request.user == task.taken_by else task.taken_by
             Notification.objects.create(
-                recipient=task.posted_by,
+                recipient=recipient,
                 message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
                 link=reverse('dispute_detail', args=[dispute.id])
             )
@@ -98,10 +99,77 @@ def withdraw_dispute(request, dispute_id):
         task.status = 'in_progress'
         task.save()
 
+        recipient = task.posted_by if request.user == task.taken_by else task.taken_by
         Notification.objects.create(
-            recipient=task.posted_by,
+            recipient=recipient,
             message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
             link=reverse('my_tasks')
         )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def resolve_dispute(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+        messages.error(request, "You are not authorized to resolve this dispute.")
+        return redirect('home')
+
+    winner = request.POST.get('winner')  # 'poster' or 'taker'
+    if winner not in ['poster', 'taker']:
+        messages.error(request, "Invalid resolution winner choice.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    with transaction.atomic():
+        poster_profile = task.posted_by.userprofile
+        taker_profile = task.taken_by.userprofile if task.taken_by else None
+
+        if winner == 'taker' and taker_profile:
+            taker_profile.dispute_wins += 1
+            taker_profile.trust_score += 15
+            taker_profile.completed_tasks += 1
+            poster_profile.dispute_losses += 1
+            poster_profile.trust_score = max(0, poster_profile.trust_score - 15)
+
+            taker_profile.rewards += task.reward
+            task.status = 'completed'
+            RewardLedger.objects.create(
+                user=task.taken_by, task=task, amount=task.reward,
+                transaction_type='task_completion', description=f"Dispute payout for task: '{task.title}'"
+            )
+
+            if dispute.raised_by == task.taken_by:
+                dispute.refund_deposit()
+            else:
+                dispute.forfeit_deposit(beneficiary=task.taken_by)
+        else:
+            poster_profile.dispute_wins += 1
+            poster_profile.trust_score += 15
+            if taker_profile:
+                taker_profile.dispute_losses += 1
+                taker_profile.trust_score = max(0, taker_profile.trust_score - 15)
+
+            poster_profile.rewards += task.reward
+            task.status = 'cancelled'
+            RewardLedger.objects.create(
+                user=task.posted_by, task=task, amount=task.reward,
+                transaction_type='task_cancellation', description=f"Dispute refund for task: '{task.title}'"
+            )
+
+            if dispute.raised_by == task.posted_by:
+                dispute.refund_deposit()
+            else:
+                dispute.forfeit_deposit(beneficiary=task.posted_by)
+
+        poster_profile.save()
+        if taker_profile:
+            taker_profile.save()
+        task.save()
+
+        dispute.status = 'resolved'
+        dispute.save()
+
+        messages.success(request, f"Dispute resolved in favor of {winner}.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
