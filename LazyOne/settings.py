@@ -130,4 +130,7 @@ print("MEDIA_FILES: OK")
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 print("DEFAULT_AUTO_FIELD: OK")
 
+TASK_COLLATERAL_PERCENTAGE = int(os.getenv('TASK_COLLATERAL_PERCENTAGE', '20'))
+DISPUTE_EXPIRATION_HOURS = int(os.getenv('DISPUTE_EXPIRATION_HOURS', '72'))
+
 print("--- settings.py loaded successfully ---")
