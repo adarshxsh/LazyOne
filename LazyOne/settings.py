@@ -76,6 +76,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'basic.context_processors.unread_notifications_count',
+                'basic.context_processors.firebase_keys',
             ],
         },
     },
@@ -129,5 +130,28 @@ print("MEDIA_FILES: OK")
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 print("DEFAULT_AUTO_FIELD: OK")
+
+# --- Firebase Client-Side Config ---
+FIREBASE_API_KEY = os.getenv('FIREBASE_API_KEY', '')
+FIREBASE_AUTH_DOMAIN = os.getenv('FIREBASE_AUTH_DOMAIN', '')
+FIREBASE_PROJECT_ID = os.getenv('FIREBASE_PROJECT_ID', '')
+FIREBASE_STORAGE_BUCKET = os.getenv('FIREBASE_STORAGE_BUCKET', '')
+FIREBASE_MESSAGING_SENDER_ID = os.getenv('FIREBASE_MESSAGING_SENDER_ID', '')
+FIREBASE_APP_ID = os.getenv('FIREBASE_APP_ID', '')
+
+# Startup verification check for Firebase client-side variables
+firebase_keys_list = [
+    ('FIREBASE_API_KEY', FIREBASE_API_KEY),
+    ('FIREBASE_AUTH_DOMAIN', FIREBASE_AUTH_DOMAIN),
+    ('FIREBASE_PROJECT_ID', FIREBASE_PROJECT_ID),
+    ('FIREBASE_STORAGE_BUCKET', FIREBASE_STORAGE_BUCKET),
+    ('FIREBASE_MESSAGING_SENDER_ID', FIREBASE_MESSAGING_SENDER_ID),
+    ('FIREBASE_APP_ID', FIREBASE_APP_ID),
+]
+
+missing_keys = [name for name, val in firebase_keys_list if not val or val.strip() == "" or "your-" in val]
+if missing_keys:
+    import sys
+    print(f"WARNING: Missing or incomplete Firebase client configuration parameters: {', '.join(missing_keys)}", file=sys.stderr)
 
 print("--- settings.py loaded successfully ---")
