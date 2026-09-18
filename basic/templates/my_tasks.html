@@ -131,17 +131,39 @@
 
 <!-- Dispute Modal -->
 <div id="dispute-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 hidden">
-    <div class="bg-gray-100 rounded-2xl shadow-2xl p-8 max-w-md w-full border border-gray-300">
+    <div class="bg-gray-100 rounded-2xl shadow-2xl p-8 max-w-lg w-full border border-gray-300 max-h-[90vh] overflow-y-auto">
         <h3 class="text-2xl font-bold text-gray-800 mb-4">Raise a Dispute</h3>
-        <p class="text-gray-600 mb-3">Please explain why you are raising a dispute. This will be visible to the task poster.</p>
+        <p class="text-gray-600 mb-3">Please categorize your issue and provide structured details and evidence to support your dispute.</p>
         <div class="bg-yellow-50 border-l-4 border-yellow-400 p-3 mb-4 rounded text-sm text-yellow-800">
             <p><strong>Required Security Deposit Bond:</strong> <span id="modal-deposit-amount">50</span> points</p>
             <p><strong>Your Current Reward Balance:</strong> <span id="modal-user-balance">{{ user.userprofile.rewards }}</span> points</p>
             <p id="modal-insufficient-warning" class="text-red-600 font-semibold hidden mt-1">Warning: You do not have enough reward points to post this deposit bond!</p>
         </div>
-        <form id="dispute-form" method="post">
+        <form id="dispute-form" method="post" class="space-y-4">
             {% csrf_token %}
-            <textarea id="dispute-reason" name="reason" rows="4" required class="w-full px-4 py-3 bg-white border border-gray-300 rounded-lg text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-600"></textarea>
+            <div>
+                <label for="dispute-category" class="block text-sm font-medium text-gray-700 mb-1">Dispute Category</label>
+                <select id="dispute-category" name="category" required class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-cyan-600">
+                    <option value="" disabled selected>Select a category</option>
+                    <option value="incomplete_requirements">Incomplete Requirements</option>
+                    <option value="unresponsive_counterparty">Unresponsive Counterparty</option>
+                    <option value="deliverable_issue">Deliverable Issue</option>
+                    <option value="payment_points_dispute">Payment/Points Dispute</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+            <div>
+                <label for="dispute-reason" class="block text-sm font-medium text-gray-700 mb-1">Reason for Dispute</label>
+                <textarea id="dispute-reason" name="reason" rows="3" required class="w-full px-4 py-3 bg-white border border-gray-300 rounded-lg text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-600" placeholder="Explain why you are raising this dispute..."></textarea>
+            </div>
+            <div>
+                <label for="dispute-evidence-url" class="block text-sm font-medium text-gray-700 mb-1">Evidence URL (Optional)</label>
+                <input type="url" id="dispute-evidence-url" name="evidence_url" class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-cyan-600" placeholder="https://example.com/evidence">
+            </div>
+            <div>
+                <label for="dispute-evidence-details" class="block text-sm font-medium text-gray-700 mb-1">Evidence Details</label>
+                <textarea id="dispute-evidence-details" name="evidence_details" rows="3" required minlength="20" class="w-full px-4 py-3 bg-white border border-gray-300 rounded-lg text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-600" placeholder="Provide detailed evidence explanation (at least 20 characters)..."></textarea>
+            </div>
             <div class="mt-6 flex justify-end space-x-4">
                 <button type="button" onclick="closeDisputeModal()" class="px-6 py-2 rounded-lg text-white bg-gray-600 hover:bg-gray-700 transition-colors">Cancel</button>
                 <button id="dispute-submit-btn" type="submit" class="px-6 py-2 rounded-lg text-white font-semibold bg-red-600 hover:bg-red-700 transition-colors">Submit Dispute</button>

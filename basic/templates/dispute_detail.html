@@ -15,7 +15,10 @@
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
             <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
-            <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
+            {% if dispute.category %}
+                <p class="mt-2"><strong>Category:</strong> <span id="dispute-category-badge" class="inline-block px-3 py-1 text-sm font-semibold rounded-full bg-cyan-900/50 text-cyan-300 border border-cyan-500/30">{{ dispute.get_category_display }}</span></p>
+            {% endif %}
+            <p class="mt-1"><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
         </div>
 
@@ -23,6 +26,23 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if dispute.evidence_url or dispute.evidence_details %}
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400">Evidence Section</h3>
+            <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-3">
+                {% if dispute.evidence_url %}
+                    <p><strong>Evidence Link:</strong> <a href="{{ dispute.evidence_url }}" target="_blank" rel="noopener noreferrer" class="text-cyan-400 hover:underline break-all">{{ dispute.evidence_url }}</a></p>
+                {% endif %}
+                {% if dispute.evidence_details %}
+                    <div>
+                        <strong class="block text-gray-300 mb-1">Evidence Details:</strong>
+                        <p class="text-gray-300 whitespace-pre-line">{{ dispute.evidence_details|linebreaksbr }}</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}
