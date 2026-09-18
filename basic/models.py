@@ -53,7 +53,7 @@ class Task(models.Model):
 
     @property
     def main_chat(self):
-        return self.conversations.first()
+        return getattr(self, 'conversation', None)
 
     @property
     def deposit_bond_amount(self):
