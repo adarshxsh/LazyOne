@@ -38,6 +38,8 @@ print(f"ALLOWED_HOSTS: {ALLOWED_HOSTS}")
 
 # Application definition
 INSTALLED_APPS = [
+    'daphne',
+    'channels',
     'basic.apps.BasicConfig',
     'django.contrib.admin',
     'django.contrib.auth',
@@ -48,6 +50,14 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
 ]
 print("INSTALLED_APPS: OK")
+
+ASGI_APPLICATION = 'LazyOne.asgi.application'
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',

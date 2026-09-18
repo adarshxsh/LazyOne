@@ -13,7 +13,7 @@
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Status:</strong> <span id="dispute-status" class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
@@ -25,4 +25,44 @@
         </div>
     </div>
 
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const disputeId = "{{ dispute.id }}";
+            const statusBadge = document.getElementById('dispute-status');
+            if (!statusBadge || !disputeId) return;
+
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+            const wsUrl = wsProtocol + window.location.host + '/ws/dispute/' + disputeId + '/';
+            const socket = new WebSocket(wsUrl);
+
+            socket.onmessage = function(e) {
+                try {
+                    const data = JSON.parse(e.data);
+                    if (data.status_display) {
+                        statusBadge.textContent = data.status_display;
+                    } else if (data.status) {
+                        statusBadge.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+                    }
+
+                    const status = (data.status || '').toLowerCase();
+                    statusBadge.className = 'px-2 py-1 text-sm rounded-full ';
+                    if (status === 'open') {
+                        statusBadge.className += 'bg-yellow-500/20 text-yellow-300';
+                    } else if (status === 'resolved') {
+                        statusBadge.className += 'bg-green-500/20 text-green-300';
+                    } else if (status === 'withdrawn') {
+                        statusBadge.className += 'bg-gray-500/20 text-gray-300';
+                    } else {
+                        statusBadge.className += 'bg-cyan-500/20 text-cyan-300';
+                    }
+                } catch (err) {
+                    console.error('Error handling WebSocket message:', err);
+                }
+            };
+
+            socket.onclose = function(e) {
+                console.log('Dispute WebSocket closed.');
+            };
+        });
+    </script>
 {% endblock %}

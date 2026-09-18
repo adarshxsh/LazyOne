@@ -5,6 +5,25 @@ from django.db import transaction
 from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
+
+def broadcast_dispute_update(dispute_id, status, status_display=None):
+    try:
+        channel_layer = get_channel_layer()
+        if channel_layer is not None:
+            async_to_sync(channel_layer.group_send)(
+                f"dispute_{dispute_id}",
+                {
+                    "type": "dispute_update",
+                    "status": status,
+                    "status_display": status_display or status.capitalize(),
+                    "dispute_id": dispute_id,
+                }
+            )
+    except Exception:
+        # Graceful fallback if Channel Layer is temporarily unreachable
+        pass
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
@@ -32,7 +51,6 @@ def raise_dispute(request, task_id):
         if not reason:
             messages.error(request, "A reason is required to raise a dispute.")
             return redirect('my_tasks')
-
         deposit_amount = task.deposit_bond_amount
         user_profile = request.user.userprofile
         if user_profile.rewards < deposit_amount:
@@ -74,6 +92,8 @@ def raise_dispute(request, task_id):
             task.status = 'disputed'
             task.save()
 
+            broadcast_dispute_update(dispute.id, status='open', status_display='Open')
+
             Notification.objects.create(
                 recipient=task.posted_by,
                 message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
@@ -98,6 +118,8 @@ def withdraw_dispute(request, dispute_id):
         task.status = 'in_progress'
         task.save()
 
+        broadcast_dispute_update(dispute.id, status='withdrawn', status_display='Withdrawn')
+
         Notification.objects.create(
             recipient=task.posted_by,
             message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
@@ -105,3 +127,17 @@ def withdraw_dispute(request, dispute_id):
         )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def resolve_dispute(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+    if request.user != task.posted_by and not request.user.is_staff:
+        messages.error(request, "You are not authorized to resolve this dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+    dispute.status = 'resolved'
+    dispute.save()
+    broadcast_dispute_update(dispute.id, status='resolved', status_display='Resolved')
+    messages.success(request, "Dispute has been resolved.")
+    return redirect('dispute_detail', dispute_id=dispute.id)

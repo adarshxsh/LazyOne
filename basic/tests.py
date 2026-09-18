@@ -3,7 +3,13 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from unittest.mock import patch
+from channels.db import database_sync_to_async
+from channels.testing import WebsocketCommunicator
+from channels.layers import get_channel_layer
+from LazyOne.asgi import application
+from basic.models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from basic.views.dispute import broadcast_dispute_update
 
 
 class DisputeDepositBondTests(TestCase):
@@ -182,3 +188,110 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class DisputeWebSocketTests(TestCase):
+    def setUp(self):
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        UserProfile.objects.create(user=self.poster, rewards=100)
+        UserProfile.objects.create(user=self.taker, rewards=100)
+
+        self.task = Task.objects.create(
+            title="Test Task",
+            description="Test Description",
+            reward=10,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            deadline=timezone.now() + timedelta(days=1),
+            status='in_progress'
+        )
+
+    async def test_dispute_consumer_connect_and_receive_broadcast(self):
+        communicator = WebsocketCommunicator(application, f"ws/dispute/{self.task.id}/")
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+
+        channel_layer = get_channel_layer()
+        await channel_layer.group_send(
+            f"dispute_{self.task.id}",
+            {
+                "type": "dispute_update",
+                "status": "withdrawn",
+                "status_display": "Withdrawn",
+                "dispute_id": self.task.id
+            }
+        )
+
+        response = await communicator.receive_json_from()
+        self.assertEqual(response.get("status"), "withdrawn")
+        self.assertEqual(response.get("status_display"), "Withdrawn")
+        self.assertEqual(response.get("dispute_id"), self.task.id)
+
+        await communicator.disconnect()
+
+    def test_raise_dispute_broadcasts_update(self):
+        client = Client()
+        client.login(username='taker', password='password123')
+        response = client.post(f'/task/dispute/{self.task.id}/', {'reason': 'Unfair conditions'})
+        self.assertEqual(response.status_code, 302)
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertEqual(dispute.status, 'open')
+
+    def test_withdraw_dispute_broadcasts_update(self):
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.taker, reason='Mistake', deposit_amount=50, escrow_status='held')
+        client = Client()
+        client.login(username='taker', password='password123')
+        response = client.post(f'/dispute/withdraw/{dispute.id}/')
+        self.assertEqual(response.status_code, 302)
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+
+    def test_resolve_dispute_broadcasts_update(self):
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.taker, reason='Issue', deposit_amount=50, escrow_status='held')
+        client = Client()
+        client.login(username='poster', password='password123')
+        response = client.post(f'/dispute/resolve/{dispute.id}/')
+        self.assertEqual(response.status_code, 302)
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+
+    def test_complete_task_broadcasts_dispute_resolution(self):
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.taker, reason='Issue', deposit_amount=50, escrow_status='held')
+        client = Client()
+        client.login(username='poster', password='password123')
+        response = client.get(f'/task/complete/{self.task.id}/')
+        self.assertEqual(response.status_code, 302)
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+
+    async def test_withdraw_dispute_broadcasts_to_websocket_subscriber(self):
+        dispute = await database_sync_to_async(Dispute.objects.create)(task=self.task, raised_by=self.taker, reason='Mistake', deposit_amount=50, escrow_status='held')
+        communicator = WebsocketCommunicator(application, f"ws/dispute/{dispute.id}/")
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+
+        client = Client()
+        await database_sync_to_async(client.login)(username='taker', password='password123')
+        response = await database_sync_to_async(client.post)(f'/dispute/withdraw/{dispute.id}/')
+        self.assertEqual(response.status_code, 302)
+
+        msg = await communicator.receive_json_from()
+        self.assertEqual(msg.get("status"), "withdrawn")
+        self.assertEqual(msg.get("status_display"), "Withdrawn")
+        self.assertEqual(msg.get("dispute_id"), dispute.id)
+
+        await communicator.disconnect()
+
+    @patch('basic.views.dispute.get_channel_layer')
+    def test_broadcast_dispute_update_channel_layer_error_fallback(self, mock_get_channel_layer):
+        mock_get_channel_layer.side_effect = Exception("Channel Layer Down")
+        # Should not raise exception
+        broadcast_dispute_update(1, status='open')
