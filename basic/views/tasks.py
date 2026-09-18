@@ -159,6 +159,20 @@ def accept_cancellation(request, task_id):
 def abandon_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
     with transaction.atomic():
+        user_profile = request.user.userprofile
+        penalty_calculated = int(task.reward * 0.2)
+        penalty_deducted = min(penalty_calculated, max(0, user_profile.rewards))
+        user_profile.rewards -= penalty_deducted
+        user_profile.save()
+
+        RewardLedger.objects.create(
+            user=request.user,
+            task=task,
+            amount=-penalty_deducted,
+            transaction_type='task_abandonment',
+            description=f"Penalty for abandoning task: '{task.title}'"
+        )
+
         task.status = 'available'
         task.taken_by = None
         task.save()
