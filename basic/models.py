@@ -68,11 +68,16 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('juror_reward', 'Juror Reward Bonus'),
+        ('dispute_settlement_poster', 'Dispute Settlement (In Favor of Poster)'),
+        ('dispute_settlement_taker', 'Dispute Settlement (In Favor of Taker)'),
+        ('dispute_split', 'Dispute Settlement (Split Refund)'),
+        ('dispute_payout', 'Dispute Payout'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -141,6 +146,53 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class JuryPanel(models.Model):
+    STATUS_CHOICES = (
+        ('active', 'Active'),
+        ('resolved', 'Resolved'),
+        ('expired', 'Expired'),
+    )
+    dispute = models.OneToOneField(Dispute, on_delete=models.CASCADE, related_name='jury_panel')
+    jurors = models.ManyToManyField(User, related_name='juror_panels', blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+
+    def __str__(self):
+        return f"Jury Panel for Dispute #{self.dispute.id} ({self.status})"
+
+    def is_expired(self):
+        return timezone.now() > self.expires_at
+
+    def vote_counts(self):
+        from collections import Counter
+        choices = self.votes.values_list('vote_choice', flat=True)
+        return Counter(choices)
+
+    def get_quorum_winner(self, quorum_threshold=3):
+        counts = self.vote_counts()
+        for choice, count in counts.items():
+            if count >= quorum_threshold:
+                return choice
+        return None
+
+class DisputeVote(models.Model):
+    VOTE_CHOICES = (
+        ('poster', 'In Favor of Poster'),
+        ('taker', 'In Favor of Taker'),
+        ('split', 'Refund Both'),
+    )
+    panel = models.ForeignKey(JuryPanel, on_delete=models.CASCADE, related_name='votes')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    vote_choice = models.CharField(max_length=20, choices=VOTE_CHOICES)
+    voted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('panel', 'juror')
+
+    def __str__(self):
+        return f"Vote by {self.juror.username} on Panel #{self.panel.id}: {self.vote_choice}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
