@@ -8,7 +8,8 @@
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a> (Reward: {{ task.reward }} points)</p>
+            <p><strong>Poster:</strong> {{ task.posted_by.username }} | <strong>Doer:</strong> {{ task.taken_by.username }}</p>
         </div>
 
         <div>
@@ -23,6 +24,84 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if dispute.status == 'resolved' %}
+        <div class="bg-gray-900/80 p-6 rounded-xl border border-green-500/40 space-y-3">
+            <h3 class="text-xl font-semibold text-green-400">Settlement Details</h3>
+            <p><strong>Poster Refund:</strong> {{ dispute.poster_amount }} points</p>
+            <p><strong>Doer Payout:</strong> {{ dispute.doer_amount }} points</p>
+            {% if dispute.resolved_by %}
+            <p><strong>Mediated By:</strong> {{ dispute.resolved_by.username }}</p>
+            {% endif %}
+            {% if dispute.resolved_at %}
+            <p><strong>Resolved Date:</strong> {{ dispute.resolved_at|date:"F d, Y H:i" }}</p>
+            {% endif %}
+            {% if dispute.resolution_notes %}
+            <div>
+                <strong>Resolution Notes:</strong>
+                <p class="mt-1 bg-gray-800 p-3 rounded text-gray-200">{{ dispute.resolution_notes|linebreaksbr }}</p>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if request.user.is_staff or request.user.is_superuser %}
+        {% if dispute.status == 'open' %}
+        <div class="bg-gray-800/90 p-6 rounded-xl border border-cyan-500/50 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Staff Dispute Mediation</h3>
+            <p class="text-sm text-gray-300">Allocate escrowed reward of <strong>{{ task.reward }} points</strong> between Poster ({{ task.posted_by.username }}) and Doer ({{ task.taken_by.username }}).</p>
+
+            <div class="flex flex-wrap gap-2 my-2">
+                <button type="button" onclick="setSplit(50, 50)" class="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded">50 / 50</button>
+                <button type="button" onclick="setSplit(70, 30)" class="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded">70 / 30 (Poster/Doer)</button>
+                <button type="button" onclick="setSplit(30, 70)" class="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded">30 / 70 (Poster/Doer)</button>
+                <button type="button" onclick="setSplit(100, 0)" class="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded">100% Poster</button>
+                <button type="button" onclick="setSplit(0, 100)" class="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded">100% Doer</button>
+            </div>
+
+            <form action="{% url 'resolve_dispute' dispute.id %}" method="POST" class="space-y-4">
+                {% csrf_token %}
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="poster_amount" class="block text-sm font-medium text-gray-300 mb-1">Poster Refund Amount (Pts)</label>
+                        <input type="number" name="poster_amount" id="poster_amount" min="0" max="{{ task.reward }}" required class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white" oninput="updateDoerFromPoster(this.value)">
+                    </div>
+                    <div>
+                        <label for="doer_amount" class="block text-sm font-medium text-gray-300 mb-1">Doer Payout Amount (Pts)</label>
+                        <input type="number" name="doer_amount" id="doer_amount" min="0" max="{{ task.reward }}" required class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white" oninput="updatePosterFromDoer(this.value)">
+                    </div>
+                </div>
+
+                <div>
+                    <label for="resolution_notes" class="block text-sm font-medium text-gray-300 mb-1">Resolution Notes / Explanation</label>
+                    <textarea name="resolution_notes" id="resolution_notes" rows="3" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white" placeholder="Explain the rationale for this dispute settlement..."></textarea>
+                </div>
+
+                <button type="submit" class="w-full py-3 bg-cyan-600 hover:bg-cyan-500 font-bold text-white rounded-lg transition-colors">
+                    Execute Dispute Settlement
+                </button>
+            </form>
+
+            <script>
+                const totalReward = {{ task.reward }};
+                function updateDoerFromPoster(val) {
+                    const p = parseInt(val) || 0;
+                    document.getElementById('doer_amount').value = Math.max(0, totalReward - p);
+                }
+                function updatePosterFromDoer(val) {
+                    const d = parseInt(val) || 0;
+                    document.getElementById('poster_amount').value = Math.max(0, totalReward - d);
+                }
+                function setSplit(posterPct, doerPct) {
+                    const p = Math.round(totalReward * (posterPct / 100));
+                    const d = totalReward - p;
+                    document.getElementById('poster_amount').value = p;
+                    document.getElementById('doer_amount').value = d;
+                }
+            </script>
+        </div>
+        {% endif %}
+        {% endif %}
     </div>
 
 {% endblock %}
