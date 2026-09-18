@@ -2,9 +2,20 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, DisputeEvidence, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf', 'txt', 'zip', 'doc', 'docx', 'gif', 'webp'}
+
+def validate_evidence_file(file):
+    if file.size > MAX_FILE_SIZE:
+        return f"File '{file.name}' exceeds the maximum allowed size limit of 10 MB."
+    ext = file.name.split('.')[-1].lower() if '.' in file.name else ''
+    if ext not in ALLOWED_EXTENSIONS:
+        return f"File '{file.name}' has an invalid format. Allowed file extensions: {', '.join(sorted(ALLOWED_EXTENSIONS))}."
+    return None
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
@@ -13,9 +24,12 @@ def dispute_detail_view(request, dispute_id):
     if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+    
+    evidences = dispute.evidences.all().order_by('-uploaded_at')
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'evidences': evidences
     }
     return render(request, 'dispute_detail.html', context)
 
@@ -32,6 +46,15 @@ def raise_dispute(request, task_id):
         if not reason:
             messages.error(request, "A reason is required to raise a dispute.")
             return redirect('my_tasks')
+
+        evidence_files = request.FILES.getlist('evidence_files') or request.FILES.getlist('files')
+        evidence_desc = request.POST.get('evidence_description', '') or request.POST.get('description', '')
+
+        for f in evidence_files:
+            err = validate_evidence_file(f)
+            if err:
+                messages.error(request, err)
+                return redirect('my_tasks')
 
         deposit_amount = task.deposit_bond_amount
         user_profile = request.user.userprofile
@@ -63,6 +86,14 @@ def raise_dispute(request, task_id):
                     escrow_status='held'
                 )
 
+            for f in evidence_files:
+                DisputeEvidence.objects.create(
+                    dispute=dispute,
+                    uploaded_by=request.user,
+                    file=f,
+                    description=evidence_desc
+                )
+
             RewardLedger.objects.create(
                 user=request.user,
                 task=task,
@@ -82,6 +113,43 @@ def raise_dispute(request, task_id):
         messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def upload_dispute_evidence(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+        messages.error(request, "You are not authorized to upload evidence for this dispute.")
+        return redirect('home')
+
+    if dispute.status != 'open':
+        messages.error(request, "Cannot upload evidence to a closed or resolved dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    files = request.FILES.getlist('evidence_files') or request.FILES.getlist('files')
+    if not files:
+        messages.error(request, "Please select at least one file to upload.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    description = request.POST.get('description', '') or request.POST.get('evidence_description', '')
+
+    for f in files:
+        err = validate_evidence_file(f)
+        if err:
+            messages.error(request, err)
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+    for f in files:
+        DisputeEvidence.objects.create(
+            dispute=dispute,
+            uploaded_by=request.user,
+            file=f,
+            description=description
+        )
+
+    messages.success(request, f"Successfully uploaded {len(files)} evidence file(s).")
+    return redirect('dispute_detail', dispute_id=dispute.id)
 
 @login_required(login_url='/login/')
 @require_POST

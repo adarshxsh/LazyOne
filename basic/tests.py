@@ -2,8 +2,9 @@ from django.test import TestCase, Client
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
+from django.core.files.uploadedfile import SimpleUploadedFile
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, DisputeEvidence, RewardLedger, Conversation
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +182,158 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class DisputeEvidenceTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        UserProfile.objects.create(user=self.taker, rewards=500)
+
+        self.other_user = User.objects.create_user(username='other', password='password123')
+        UserProfile.objects.create(user=self.other_user, rewards=500)
+
+        self.task = Task.objects.create(
+            title="Evidence Test Task",
+            description="Testing evidence attachments",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress'
+        )
+
+    def test_raise_dispute_with_valid_evidence(self):
+        self.client.login(username='taker', password='password123')
+        file1 = SimpleUploadedFile("screenshot.png", b"file_content_1", content_type="image/png")
+        file2 = SimpleUploadedFile("log.txt", b"file_content_2", content_type="text/plain")
+
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {
+                'reason': 'Work delivered as requested',
+                'evidence_files': [file1, file2],
+                'evidence_description': 'Initial work proof'
+            }
+        )
+
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+        evidences = dispute.evidences.all().order_by('id')
+        self.assertEqual(evidences.count(), 2)
+        self.assertEqual(evidences[0].filename, 'screenshot.png')
+        self.assertEqual(evidences[0].uploaded_by, self.taker)
+        self.assertEqual(evidences[0].description, 'Initial work proof')
+        self.assertEqual(evidences[1].filename, 'log.txt')
+
+    def test_raise_dispute_rejects_invalid_extension(self):
+        self.client.login(username='taker', password='password123')
+        bad_file = SimpleUploadedFile("script.sh", b"echo hello", content_type="text/x-sh")
+
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {
+                'reason': 'Work rejected',
+                'evidence_files': [bad_file]
+            }
+        )
+
+        self.assertRedirects(response, reverse('my_tasks'))
+        self.assertFalse(Dispute.objects.filter(task=self.task).exists())
+
+    def test_raise_dispute_rejects_oversized_file(self):
+        self.client.login(username='taker', password='password123')
+        large_content = b"a" * (10 * 1024 * 1024 + 10)
+        large_file = SimpleUploadedFile("big_file.zip", large_content, content_type="application/zip")
+
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {
+                'reason': 'Too big proof',
+                'evidence_files': [large_file]
+            }
+        )
+
+        self.assertRedirects(response, reverse('my_tasks'))
+        self.assertFalse(Dispute.objects.filter(task=self.task).exists())
+
+    def test_upload_evidence_to_open_dispute(self):
+        # Taker raises dispute
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Need review',
+            deposit_amount=50,
+            status='open'
+        )
+        self.task.status = 'disputed'
+        self.task.save()
+
+        # Poster uploads counter-evidence
+        self.client.login(username='poster', password='password123')
+        doc_file = SimpleUploadedFile("counter_proof.pdf", b"%PDF-1.4...", content_type="application/pdf")
+
+        response = self.client.post(
+            reverse('upload_dispute_evidence', args=[dispute.id]),
+            {
+                'evidence_files': [doc_file],
+                'description': 'Poster counter proof'
+            }
+        )
+
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+        evidence = dispute.evidences.first()
+        self.assertIsNotNone(evidence)
+        self.assertEqual(evidence.filename, 'counter_proof.pdf')
+        self.assertEqual(evidence.uploaded_by, self.poster)
+        self.assertEqual(evidence.description, 'Poster counter proof')
+
+    def test_non_participant_cannot_view_or_upload_evidence(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Private dispute',
+            deposit_amount=50,
+            status='open'
+        )
+
+        self.client.login(username='other', password='password123')
+
+        # Try to view dispute detail
+        view_resp = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertRedirects(view_resp, reverse('home'))
+
+        # Try to upload evidence
+        doc_file = SimpleUploadedFile("intruder.png", b"intruder", content_type="image/png")
+        upload_resp = self.client.post(
+            reverse('upload_dispute_evidence', args=[dispute.id]),
+            {'evidence_files': [doc_file]}
+        )
+        self.assertRedirects(upload_resp, reverse('home'))
+        self.assertEqual(dispute.evidences.count(), 0)
+
+    def test_upload_evidence_rejected_when_dispute_closed(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Closed dispute',
+            deposit_amount=50,
+            status='resolved'
+        )
+
+        self.client.login(username='taker', password='password123')
+        doc_file = SimpleUploadedFile("late.png", b"late", content_type="image/png")
+
+        response = self.client.post(
+            reverse('upload_dispute_evidence', args=[dispute.id]),
+            {'evidence_files': [doc_file]}
+        )
+
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+        self.assertEqual(dispute.evidences.count(), 0)
+
 
