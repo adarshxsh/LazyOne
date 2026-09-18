@@ -3,12 +3,20 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
+        <h2 class="text-3xl font-bold text-white mb-2 md:mb-0">Dispute Details</h2>
+        {% if task.conversation %}
+            <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-cyan-600 hover:bg-cyan-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors text-sm">
+                View Disputed Chat
+            </a>
+        {% endif %}
+    </div>
 
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg font-bold text-white">{{ dispute.task.title }}</p>
+            <p class="text-sm text-gray-400">Reward: <span class="text-cyan-400 font-semibold">{{ dispute.task.reward }} points</span> | Poster: <span class="text-white">{{ dispute.task.posted_by.username }}</span> | Worker: <span class="text-white">{{ dispute.task.taken_by.username }}</span></p>
         </div>
 
         <div>
@@ -16,13 +24,68 @@
             <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y H:i" }}</p>
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
-    </div>
 
+        <!-- Jury Arbitration & Voting Status -->
+        <div class="bg-gray-800/60 p-5 rounded-xl border border-gray-700 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Community Jury Status</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="bg-gray-900/50 p-3 rounded-lg border border-gray-700">
+                    <p class="text-sm text-gray-400">Assigned Jurors</p>
+                    <p class="text-2xl font-bold text-white">{{ total_jurors }}</p>
+                </div>
+                <div class="bg-gray-900/50 p-3 rounded-lg border border-gray-700">
+                    <p class="text-sm text-gray-400">Votes Submitted</p>
+                    <p class="text-2xl font-bold text-cyan-400">{{ votes_cast }} / {{ total_jurors }}</p>
+                </div>
+            </div>
+
+            {% if is_resolved or request.user.is_staff %}
+                <div class="mt-4 p-4 bg-gray-900/80 rounded-lg border border-gray-700">
+                    <h4 class="font-semibold text-white mb-2">Final Vote Tally</h4>
+                    <p>Poster ({{ dispute.task.posted_by.username }}): <span class="font-bold text-cyan-400">{{ poster_votes }}</span> votes</p>
+                    <p>Worker ({{ dispute.task.taken_by.username }}): <span class="font-bold text-cyan-400">{{ worker_votes }}</span> votes</p>
+                </div>
+            {% endif %}
+
+            <!-- Voting Section for Assigned Juror -->
+            {% if is_juror and dispute.status == 'open' %}
+                <div class="mt-6 p-5 bg-cyan-950/40 border border-cyan-500/50 rounded-xl">
+                    <h4 class="text-lg font-bold text-cyan-300 mb-2">Cast Your Juror Vote</h4>
+                    <p class="text-sm text-gray-300 mb-4">Review the task details and conversation, then vote for the party you believe is in the right. Votes are final and immutable once submitted.</p>
+
+                    {% if has_voted %}
+                        <div class="p-3 bg-green-900/40 border border-green-500/50 rounded-lg text-green-300 text-sm font-medium">
+                            ✓ You have cast your vote for: <strong>{% if user_vote == 'posted_by' %}Poster ({{ dispute.task.posted_by.username }}){% else %}Worker ({{ dispute.task.taken_by.username }}){% endif %}</strong>.
+                        </div>
+                    {% else %}
+                        <form action="{% url 'vote_on_dispute' dispute.id %}" method="post" class="flex flex-col sm:flex-row gap-4 mt-2">
+                            {% csrf_token %}
+                            <button type="submit" name="vote" value="posted_by" class="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors text-center">
+                                Vote for Poster ({{ dispute.task.posted_by.username }})
+                            </button>
+                            <button type="submit" name="vote" value="taken_by" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors text-center">
+                                Vote for Worker ({{ dispute.task.taken_by.username }})
+                            </button>
+                        </form>
+                    {% endif %}
+                </div>
+            {% endif %}
+
+            {% if dispute.raised_by == request.user and dispute.status == 'open' %}
+                <form action="{% url 'withdraw_dispute' dispute.id %}" method="post" class="mt-4">
+                    {% csrf_token %}
+                    <button type="submit" class="bg-red-600 hover:bg-red-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors text-sm">
+                        Withdraw Dispute
+                    </button>
+                </form>
+            {% endif %}
+        </div>
+    </div>
 {% endblock %}
