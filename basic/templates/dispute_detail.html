@@ -8,7 +8,8 @@
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a> (Reward: {{ dispute.task.reward }} points)</p>
+            <p><strong>Poster:</strong> {{ dispute.task.posted_by.username }} | <strong>Taker:</strong> {{ dispute.task.taken_by.username|default:"Unassigned" }}</p>
         </div>
 
         <div>
@@ -23,6 +24,58 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if dispute.status == 'resolved' and dispute.taker_payout_amount is not None %}
+        <div class="bg-gray-800/80 p-6 rounded-xl border border-green-500/30">
+            <h3 class="text-xl font-semibold text-green-400 mb-3">Settlement Outcome</h3>
+            <p><strong>Taker Payout ({{ dispute.task.taken_by.username }}):</strong> {{ dispute.taker_payout_amount }} points</p>
+            <p><strong>Poster Refund ({{ dispute.task.posted_by.username }}):</strong> {{ dispute.poster_refund_amount }} points</p>
+            {% if dispute.resolved_by %}
+            <p><strong>Resolved By:</strong> {{ dispute.resolved_by.username }}</p>
+            {% endif %}
+            {% if dispute.resolution_notes %}
+            <div class="mt-2">
+                <strong>Resolution Notes:</strong>
+                <p class="bg-gray-900/50 p-3 rounded mt-1 border border-gray-700 text-sm">{{ dispute.resolution_notes|linebreaksbr }}</p>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if request.user.is_staff and dispute.status == 'open' %}
+        <div class="bg-gray-800 p-6 rounded-xl border border-cyan-500/30 mt-8">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Staff Proportional Settlement Panel</h3>
+            <p class="text-sm text-gray-400 mb-4">Divide the {{ dispute.task.reward }} escrowed task points between taker ({{ dispute.task.taken_by.username }}) and poster ({{ dispute.task.posted_by.username }}). The sum of payout and refund must equal {{ dispute.task.reward }}.</p>
+
+            <form method="POST" action="{% url 'settle_partial_dispute' dispute.id %}" class="space-y-4">
+                {% csrf_token %}
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-1">Taker Payout Amount (Points)</label>
+                        <input type="number" name="taker_payout_amount" min="0" max="{{ dispute.task.reward }}" placeholder="e.g. 60" required
+                               class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-1">Poster Refund Amount (Points)</label>
+                        <input type="number" name="poster_refund_amount" min="0" max="{{ dispute.task.reward }}" placeholder="e.g. 40" required
+                               class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-1">Resolution Rationale / Notes</label>
+                    <textarea name="resolution_notes" rows="3" placeholder="Explain rationale for this split resolution..."
+                              class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500"></textarea>
+                </div>
+
+                <div>
+                    <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-2 px-6 rounded-lg transition-colors">
+                        Execute Proportional Settlement
+                    </button>
+                </div>
+            </form>
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}
