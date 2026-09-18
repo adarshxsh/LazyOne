@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("basic", "0042_remove_dispute_dispute_type_and_more"),
+        ("basic", "0043_dispute_deposit_amount_dispute_escrow_status_and_more"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
@@ -42,6 +42,9 @@ class Migration(migrations.Migration):
                     ("task_completion", "Task Completion (Points Awarded)"),
                     ("task_cancellation", "Task Cancellation (Points Refunded)"),
                     ("initial_points", "Initial Points"),
+                    ("dispute_deposit", "Dispute Deposit Bond Held"),
+                    ("dispute_refund", "Dispute Deposit Bond Refunded"),
+                    ("dispute_forfeit", "Dispute Deposit Bond Forfeited"),
                     ("juror_stake_lock", "Juror Stake Lock"),
                     ("juror_stake_return", "Juror Stake Return"),
                     ("juror_reward", "Juror Reward Share"),
