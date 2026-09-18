@@ -79,6 +79,9 @@
                             {% endif %}
                         </a>
                         <a href="{% url 'profile' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'profile' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">Profile</a>
+                        {% if user.is_staff or user.is_superuser %}
+                            <a href="{% url 'admin_dispute_dashboard' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'admin_dispute_dashboard' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">Admin Disputes</a>
+                        {% endif %}
                         <a href="{% url 'logout' %}" class="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 ml-4">Logout</a>
                     {% else %}
                         <a href="{% url 'login_page' %}" class="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors duration-200 ml-4">Login</a>
