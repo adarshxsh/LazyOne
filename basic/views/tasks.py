@@ -82,6 +82,12 @@ def take_task(request, task_id):
 @login_required(login_url='/login/')
 def complete_task(request, task_id):
     task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
+    if hasattr(task, 'dispute'):
+        dispute = task.dispute
+        if dispute.status in ['open', 'voting_primary', 'appeal_window', 'appeal_pending', 'escalated_staff']:
+            messages.error(request, "Cannot complete task while a dispute is active, in appeal window, or escalated.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
         task_doer_profile.rewards += task.reward
