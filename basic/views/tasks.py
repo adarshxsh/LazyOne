@@ -82,6 +82,10 @@ def take_task(request, task_id):
 @login_required(login_url='/login/')
 def complete_task(request, task_id):
     task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
+    if hasattr(task, 'dispute') and task.dispute.status == 'open' and task.dispute.proposal_status == 'pending':
+        messages.error(request, "Cannot complete task while a settlement proposal is pending. Please resolve or respond to the settlement proposal first.")
+        return redirect('dispute_detail', dispute_id=task.dispute.id)
+
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
         task_doer_profile.rewards += task.reward
