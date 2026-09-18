@@ -23,6 +23,26 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if dispute.is_escalated_to_staff %}
+        <div class="bg-red-900/30 border border-red-500/50 p-4 rounded-lg">
+            <h3 class="text-xl font-semibold text-red-400">Escalated to Staff</h3>
+            <p class="text-sm text-gray-300">This dispute has been escalated to staff resolution due to an insufficient pool of eligible peer jurors.</p>
+        </div>
+        {% endif %}
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400">Assigned Peer Jurors</h3>
+            {% if assigned_jurors %}
+                <ul class="list-disc list-inside bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+                    {% for juror in assigned_jurors %}
+                        <li>{{ juror.username }}</li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="text-gray-400 italic">No peer jurors assigned{% if dispute.is_escalated_to_staff %} (Escalated to staff){% endif %}.</p>
+            {% endif %}
+        </div>
     </div>
 
 {% endblock %}
