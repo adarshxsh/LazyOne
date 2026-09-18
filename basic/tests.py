@@ -1,165 +1,184 @@
-from django.test import TestCase, override_settings
+from django.test import TestCase, Client
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from basic.models import Task, Dispute, UserProfile, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
 
-@override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
-class DisputeDepositTests(TestCase):
+
+class DisputeDepositBondTests(TestCase):
     def setUp(self):
+        self.client = Client()
+
+        # Task poster
         self.poster = User.objects.create_user(username='poster', password='password123')
-        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1500)
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
 
+        # Task taker
         self.taker = User.objects.create_user(username='taker', password='password123')
-        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=1500)
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=100)
 
+        # Create task: reward = 300, 20% = 60 (> 50 minimum)
+        self.deadline = timezone.now() + timedelta(days=2)
         self.task = Task.objects.create(
-            title='Test Task',
-            description='Test Description',
-            reward=500,
+            title="Test Task",
+            description="Test Description",
+            reward=300,
             posted_by=self.poster,
             taken_by=self.taker,
             status='in_progress',
-            deadline=timezone.now() + timedelta(days=1)
+            deadline=self.deadline
         )
-        self.conversation = Conversation.objects.create(task=self.task)
-        self.conversation.participants.add(self.poster, self.taker)
+        Conversation.objects.create(task=self.task)
+
+        # Create small reward task: reward = 100, 20% = 20 (min 50 applies)
+        self.small_task = Task.objects.create(
+            title="Small Task",
+            description="Small Description",
+            reward=100,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=self.deadline
+        )
+        Conversation.objects.create(task=self.small_task)
+
+    def test_deposit_bond_calculation(self):
+        # 20% of 300 = 60 (> 50)
+        self.assertEqual(self.task.deposit_bond_amount, 60)
+        # 20% of 100 = 20 (< 50, so minimum 50 applies)
+        self.assertEqual(self.small_task.deposit_bond_amount, 50)
 
     def test_raise_dispute_insufficient_rewards(self):
-        self.taker_profile.rewards = 50
+        # Set taker rewards to 30 (less than 60 required)
+        self.taker_profile.rewards = 30
         self.taker_profile.save()
 
         self.client.login(username='taker', password='password123')
         response = self.client.post(
             reverse('raise_dispute', args=[self.task.id]),
-            {'reason': 'Work not clear'},
-            follow=True
+            {'reason': 'Work not clear'}
         )
 
         self.assertRedirects(response, reverse('my_tasks'))
-        self.assertEqual(Dispute.objects.count(), 0)
         self.task.refresh_from_db()
         self.assertEqual(self.task.status, 'in_progress')
-        self.taker_profile.refresh_from_db()
-        self.assertEqual(self.taker_profile.rewards, 50)
+        self.assertFalse(Dispute.objects.filter(task=self.task).exists())
 
-    def test_raise_dispute_success_reserves_deposit_and_logs_ledger(self):
+        # Balance should remain unchanged
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 30)
+
+    def test_raise_dispute_success(self):
         self.client.login(username='taker', password='password123')
         response = self.client.post(
             reverse('raise_dispute', args=[self.task.id]),
-            {'reason': 'Poster is unresponsive'},
-            follow=True
+            {'reason': 'Unreasonable request'}
         )
 
-        self.assertEqual(Dispute.objects.count(), 1)
-        dispute = Dispute.objects.get(task=self.task)
-        self.assertEqual(dispute.raised_by, self.taker)
-        self.assertEqual(dispute.deposit_amount, 100)
+        # Deposit bond is 60. Taker balance was 100 -> now 40
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 40)
 
         self.task.refresh_from_db()
         self.assertEqual(self.task.status, 'disputed')
 
-        self.taker_profile.refresh_from_db()
-        self.assertEqual(self.taker_profile.rewards, 1400) # 1500 - 100
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertEqual(dispute.deposit_amount, 60)
+        self.assertEqual(dispute.escrow_status, 'held')
+        self.assertEqual(dispute.status, 'open')
+        self.assertEqual(dispute.raised_by, self.taker)
 
-        ledger_entry = RewardLedger.objects.filter(
-            user=self.taker,
-            transaction_type='dispute_deposit_reserved'
-        ).first()
-        self.assertIsNotNone(ledger_entry)
-        self.assertEqual(ledger_entry.amount, -100)
-        self.assertEqual(ledger_entry.task, self.task)
+        # Check ledger
+        ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_deposit').first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, -60)
 
-    def test_withdraw_dispute_refunds_deposit(self):
+    def test_withdraw_dispute_success(self):
+        # First raise dispute
         self.client.login(username='taker', password='password123')
         self.client.post(
             reverse('raise_dispute', args=[self.task.id]),
-            {'reason': 'Need clarification'},
-            follow=True
+            {'reason': 'Dispute reason'}
         )
 
         dispute = Dispute.objects.get(task=self.task)
-        self.taker_profile.refresh_from_db()
-        self.assertEqual(self.taker_profile.rewards, 1400)
 
-        withdraw_response = self.client.post(
-            reverse('withdraw_dispute', args=[dispute.id]),
-            follow=True
-        )
-
-        self.assertRedirects(withdraw_response, reverse('my_tasks'))
-        self.assertEqual(Dispute.objects.count(), 0)
+        # Withdraw dispute
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
 
         self.task.refresh_from_db()
         self.assertEqual(self.task.status, 'in_progress')
 
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.escrow_status, 'refunded')
+        self.assertEqual(dispute.status, 'resolved')
+
+        # Balance restored: 40 + 60 = 100
         self.taker_profile.refresh_from_db()
-        self.assertEqual(self.taker_profile.rewards, 1500) # 1400 + 100
+        self.assertEqual(self.taker_profile.rewards, 100)
 
-        refund_entry = RewardLedger.objects.filter(
-            user=self.taker,
-            transaction_type='dispute_deposit_refund'
-        ).first()
-        self.assertIsNotNone(refund_entry)
-        self.assertEqual(refund_entry.amount, 100)
+        # Check refund ledger
+        ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_refund').first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, 60)
 
-    def test_resolve_dispute_on_task_completion_refunds_deposit(self):
+    def test_complete_disputed_task_refunds_deposit(self):
+        # Taker raises dispute (deposit 60 deducted from 100 -> 40 left)
         self.client.login(username='taker', password='password123')
         self.client.post(
             reverse('raise_dispute', args=[self.task.id]),
-            {'reason': 'Waiting for approval'},
-            follow=True
+            {'reason': 'Dispute reason'}
         )
 
+        # Poster marks task as completed
         self.client.login(username='poster', password='password123')
-        response = self.client.post(
-            reverse('complete_task', args=[self.task.id]),
-            follow=True
-        )
+        response = self.client.get(reverse('complete_task', args=[self.task.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
 
         self.task.refresh_from_db()
         self.assertEqual(self.task.status, 'completed')
 
         dispute = Dispute.objects.get(task=self.task)
+        self.assertEqual(dispute.escrow_status, 'refunded')
         self.assertEqual(dispute.status, 'resolved')
 
+        # Taker balance: 40 + 300 (task reward) + 60 (deposit refund) = 400
         self.taker_profile.refresh_from_db()
-        # Initial 1500 - 100 deposit + 500 reward + 100 deposit refund = 2000
-        self.assertEqual(self.taker_profile.rewards, 2000)
+        self.assertEqual(self.taker_profile.rewards, 400)
 
-        refund_entry = RewardLedger.objects.filter(
-            user=self.taker,
-            transaction_type='dispute_deposit_refund'
-        ).first()
-        self.assertIsNotNone(refund_entry)
-        self.assertEqual(refund_entry.amount, 100)
+        # Check ledger entries for taker
+        refund_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_refund').first()
+        self.assertIsNotNone(refund_ledger)
+        self.assertEqual(refund_ledger.amount, 60)
 
-    @override_settings(DISPUTE_DEPOSIT=150)
-    def test_configurable_dispute_deposit(self):
-        self.client.login(username='taker', password='password123')
-        self.client.post(
-            reverse('raise_dispute', args=[self.task.id]),
-            {'reason': 'Testing custom deposit'},
-            follow=True
+    def test_forfeit_deposit_method(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='False dispute',
+            deposit_amount=60,
+            escrow_status='held'
         )
+        self.taker_profile.rewards = 40
+        self.taker_profile.save()
 
+        # Forfeit deposit bond to poster
+        dispute.forfeit_deposit(beneficiary=self.poster)
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.escrow_status, 'forfeited')
+
+        # Taker rewards remain 40 (already deducted when raised)
         self.taker_profile.refresh_from_db()
-        self.assertEqual(self.taker_profile.rewards, 1350) # 1500 - 150
+        self.assertEqual(self.taker_profile.rewards, 40)
 
-        dispute = Dispute.objects.get(task=self.task)
-        self.assertEqual(dispute.deposit_amount, 150)
+        # Poster gets 1000 + 60 = 1060
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1060)
 
-        reserved_entry = RewardLedger.objects.get(
-            user=self.taker,
-            transaction_type='dispute_deposit_reserved'
-        )
-        self.assertEqual(reserved_entry.amount, -150)
+        # Check forfeit ledger
+        forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
+        self.assertIsNotNone(forfeit_ledger)
 
-        self.client.post(
-            reverse('withdraw_dispute', args=[dispute.id]),
-            follow=True
-        )
-
-        self.taker_profile.refresh_from_db()
-        self.assertEqual(self.taker_profile.rewards, 1500) # Restored 1500
