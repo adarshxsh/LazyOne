@@ -1,7 +1,7 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from ..models import Task, Conversation, Notification, RewardLedger
+from ..models import Task, Conversation, Notification, RewardLedger, calculate_collateral
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
@@ -64,29 +64,52 @@ def take_task(request, task_id):
     if task.posted_by == request.user:
         messages.error(request, "You cannot take your own task.")
     else:
-        with transaction.atomic():
-            task.status = 'in_progress'
-            task.taken_by = request.user
-            task.save()
-            conversation, created = Conversation.objects.get_or_create(task=task)
-            if created:
-                conversation.participants.add(task.posted_by, task.taken_by)
-            Notification.objects.create(
-                recipient=task.posted_by,
-                message=f"{request.user.username} has taken your task: {task.title}",
-                link=reverse('my_tasks')
-            )
-            messages.success(request, "Task has been assigned to you. A chat has been created.")
+        collateral = calculate_collateral(task.reward)
+        taker_profile = request.user.userprofile
+        if taker_profile.rewards < collateral:
+            messages.error(request, f"Insufficient collateral points. You need {collateral} points as collateral to take this task, but you only have {taker_profile.rewards} points.")
+        else:
+            with transaction.atomic():
+                taker_profile.rewards -= collateral
+                taker_profile.save()
+
+                task.status = 'in_progress'
+                task.taken_by = request.user
+                task.collateral_amount = collateral
+                task.save()
+
+                RewardLedger.objects.create(
+                    user=request.user,
+                    task=task,
+                    amount=-collateral,
+                    transaction_type='collateral_lock',
+                    description=f"Collateral locked for task: '{task.title}'"
+                )
+
+                conversation, created = Conversation.objects.get_or_create(task=task)
+                if created:
+                    conversation.participants.add(task.posted_by, task.taken_by)
+                Notification.objects.create(
+                    recipient=task.posted_by,
+                    message=f"{request.user.username} has taken your task: {task.title}",
+                    link=reverse('my_tasks')
+                )
+                messages.success(request, "Task has been assigned to you. A chat has been created.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
 def complete_task(request, task_id):
     task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
+    collateral = task.collateral_amount
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
+        if collateral > 0:
+            task_doer_profile.rewards += collateral
         task_doer_profile.rewards += task.reward
         task_doer_profile.save()
+
         task.status = 'completed'
+        task.collateral_amount = 0
         task.save()
 
         if hasattr(task, 'dispute') and task.dispute.status == 'open':
@@ -96,9 +119,20 @@ def complete_task(request, task_id):
             task.dispute.status = 'resolved'
             task.dispute.save()
 
+        if collateral > 0:
+            RewardLedger.objects.create(
+                user=task.taken_by,
+                task=task,
+                amount=collateral,
+                transaction_type='collateral_release',
+                description=f"Collateral released for completed task: '{task.title}'"
+            )
         RewardLedger.objects.create(
-            user=task.taken_by, task=task, amount=task.reward,
-            transaction_type='task_completion', description=f"Completed task: '{task.title}'"
+            user=task.taken_by,
+            task=task,
+            amount=task.reward,
+            transaction_type='task_completion',
+            description=f"Completed task: '{task.title}'"
         )
         messages.success(request, f"Task marked as complete! {task.reward} points transferred to {task.taken_by.username}.")
     return redirect('my_tasks')
@@ -135,6 +169,7 @@ def request_cancellation(request, task_id):
 @login_required(login_url='/login/')
 def accept_cancellation(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, cancellation_requested=True)
+    collateral = task.collateral_amount
     with transaction.atomic():
         poster_profile = task.posted_by.userprofile
         poster_profile.rewards += task.reward
@@ -143,9 +178,23 @@ def accept_cancellation(request, task_id):
             user=task.posted_by, task=task, amount=task.reward,
             transaction_type='task_cancellation', description=f"Refund for cancelled task: '{task.title}'"
         )
+
+        if collateral > 0:
+            taker_profile = request.user.userprofile
+            taker_profile.rewards += collateral
+            taker_profile.save()
+            RewardLedger.objects.create(
+                user=request.user,
+                task=task,
+                amount=collateral,
+                transaction_type='collateral_release',
+                description=f"Collateral released upon cancellation acceptance for task: '{task.title}'"
+            )
+
         task.status = 'available'
         task.taken_by = None
         task.cancellation_requested = False
+        task.collateral_amount = 0
         task.save()
         Notification.objects.create(
             recipient=task.posted_by,
@@ -158,10 +207,30 @@ def accept_cancellation(request, task_id):
 @login_required(login_url='/login/')
 def abandon_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
+    collateral = task.collateral_amount
     with transaction.atomic():
+        if collateral > 0:
+            poster_profile = task.posted_by.userprofile
+            poster_profile.rewards += collateral
+            poster_profile.save()
+
+            RewardLedger.objects.create(
+                user=task.posted_by,
+                task=task,
+                amount=collateral,
+                transaction_type='collateral_slashing',
+                description=f"Collateral indemnity from abandoned task: '{task.title}'"
+            )
+
+        if hasattr(task, 'dispute'):
+            task.dispute.delete()
+
         task.status = 'available'
         task.taken_by = None
+        task.cancellation_requested = False
+        task.collateral_amount = 0
         task.save()
+
         Notification.objects.create(
             recipient=task.posted_by,
             message=f"{request.user.username} has abandoned your task: '{task.title}'. It is now available again.",

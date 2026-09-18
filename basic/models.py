@@ -3,6 +3,14 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
 
+
+def calculate_collateral(reward):
+    collateral = int(reward * 0.20)
+    if collateral < 10:
+        collateral = min(10, reward)
+    return collateral
+
+
 # Create your models here.
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
@@ -47,6 +55,7 @@ class Task(models.Model):
     deadline = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='available')
     cancellation_requested = models.BooleanField(default=False)
+    collateral_amount = models.PositiveIntegerField(default=0)
 
     def __str__(self):
         return self.title
@@ -65,6 +74,9 @@ class RewardLedger(models.Model):
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
+        ('collateral_lock', 'Collateral Lock'),
+        ('collateral_release', 'Collateral Release'),
+        ('collateral_slashing', 'Collateral Slashing'),
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
@@ -72,7 +84,7 @@ class RewardLedger(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
