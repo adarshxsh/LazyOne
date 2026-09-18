@@ -8,7 +8,11 @@
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg"><span class="font-bold text-white">{{ dispute.task.title }}</span></p>
+            <p class="text-sm text-gray-400 mt-1">
+                Posted by: <strong>{{ dispute.task.posted_by.username }}</strong>
+                {% if dispute.task.taken_by %}| Taken by: <strong>{{ dispute.task.taken_by.username }}</strong>{% endif %}
+            </p>
         </div>
 
         <div>
@@ -23,6 +27,36 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if is_juror %}
+            <div class="mt-6 border-t border-gray-700 pt-6">
+                <h3 class="text-xl font-semibold text-cyan-400 mb-2">Jury Adjudication Panel</h3>
+                {% if can_vote %}
+                    <p class="text-gray-300 mb-4">You have been selected as an impartial community juror. Review the details above and cast your confidential vote below:</p>
+                    <form action="{% url 'submit_dispute_vote' dispute.id %}" method="post" class="flex flex-wrap gap-4">
+                        {% csrf_token %}
+                        <button type="submit" name="choice" value="poster" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2.5 rounded-lg transition-colors">
+                            Vote for Poster ({{ dispute.task.posted_by.username }})
+                        </button>
+                        <button type="submit" name="choice" value="taker" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-6 py-2.5 rounded-lg transition-colors">
+                            Vote for Taker ({{ dispute.task.taken_by.username }})
+                        </button>
+                    </form>
+                {% elif user_vote %}
+                    <div class="bg-cyan-900/30 border border-cyan-500/40 p-4 rounded-lg text-cyan-200">
+                        <p class="font-semibold">Your vote has been submitted for this dispute panel.</p>
+                        <p class="text-sm text-cyan-300/80 mt-1">Selected choice: <span class="font-bold text-white capitalize">{{ user_vote.get_choice_display }}</span></p>
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        {% if dispute.status == 'resolved' %}
+            <div class="mt-6 border-t border-gray-700 pt-6">
+                <h3 class="text-xl font-semibold text-green-400 mb-2">Dispute Verdict</h3>
+                <p class="text-gray-300">This dispute has been resolved by majority consensus of the peer jury panel.</p>
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}
