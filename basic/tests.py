@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from basic.models import UserProfile, Task, Dispute, RewardLedger, Conversation
 
 
 class DisputeDepositBondTests(TestCase):
@@ -182,3 +182,199 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class TaskDisputeStateMachineTests(TestCase):
+    def setUp(self):
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker1 = User.objects.create_user(username='taker1', password='password123')
+        self.taker1_profile = UserProfile.objects.create(user=self.taker1, rewards=1000)
+
+        self.taker2 = User.objects.create_user(username='taker2', password='password123')
+        self.taker2_profile = UserProfile.objects.create(user=self.taker2, rewards=1000)
+
+        self.deadline = timezone.now() + timedelta(days=1)
+        self.task = Task.objects.create(
+            title="Test Task",
+            description="Test Description",
+            reward=100,
+            posted_by=self.poster,
+            deadline=self.deadline,
+            status='available'
+        )
+
+        self.client = Client()
+
+    def test_task_model_guard_methods(self):
+        # Initial available state
+        self.assertTrue(self.task.can_take(self.taker1))
+        self.assertFalse(self.task.can_take(self.poster))
+        self.assertTrue(self.task.can_cancel())
+        self.assertFalse(self.task.can_complete())
+        self.assertFalse(self.task.can_abandon())
+        self.assertFalse(self.task.can_accept_cancellation())
+
+        # In progress state
+        self.task.status = 'in_progress'
+        self.task.taken_by = self.taker1
+        self.task.save()
+
+        self.assertTrue(self.task.can_complete())
+        self.assertTrue(self.task.can_abandon())
+        self.assertTrue(self.task.can_request_cancellation())
+        self.assertFalse(self.task.can_accept_cancellation())
+        self.assertTrue(self.task.can_raise_dispute(self.taker1))
+
+        # Request cancellation
+        self.task.cancellation_requested = True
+        self.task.save()
+        self.assertTrue(self.task.can_accept_cancellation())
+
+        # Disputed state
+        self.task.status = 'disputed'
+        self.task.save()
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.taker1, reason="Issue")
+
+        self.assertFalse(self.task.can_accept_cancellation())
+        self.assertFalse(self.task.can_abandon())
+        self.assertTrue(self.task.can_complete())
+        self.assertFalse(self.task.can_raise_dispute(self.taker1))
+
+    def test_dispute_can_withdraw_guard(self):
+        self.task.status = 'disputed'
+        self.task.taken_by = self.taker1
+        self.task.save()
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.taker1, reason="Issue")
+
+        self.assertTrue(dispute.can_withdraw())
+
+        # Resolved dispute
+        dispute.status = 'resolved'
+        dispute.save()
+        self.assertFalse(dispute.can_withdraw())
+
+        # Task not disputed
+        dispute.status = 'open'
+        dispute.save()
+        self.task.status = 'completed'
+        self.task.save()
+        self.assertFalse(dispute.can_withdraw())
+
+    def test_reset_to_available_resets_task_state(self):
+        self.task.status = 'in_progress'
+        self.task.taken_by = self.taker1
+        self.task.cancellation_requested = True
+        self.task.save()
+
+        self.task.reset_to_available()
+        self.task.refresh_from_db()
+
+        self.assertEqual(self.task.status, 'available')
+        self.assertIsNone(self.task.taken_by)
+        self.assertFalse(self.task.cancellation_requested)
+
+    def test_accept_cancellation_on_disputed_task_fails(self):
+        """Acceptance Criteria 1: Calling accept_cancellation on a task in disputed status returns error and does not alter records."""
+        self.task.status = 'in_progress'
+        self.task.taken_by = self.taker1
+        self.task.cancellation_requested = True
+        self.task.save()
+        Conversation.objects.create(task=self.task)
+
+        # Taker raises a dispute -> status becomes disputed
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.taker1, reason="Issue")
+        self.task.status = 'disputed'
+        self.task.save()
+
+        self.client.login(username='taker1', password='password123')
+        response = self.client.get(reverse('accept_cancellation', args=[self.task.id]), follow=True)
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+        self.assertTrue(hasattr(self.task, 'dispute'))
+        self.assertTrue(self.task.cancellation_requested)
+        # Verify error message present
+        messages_list = list(response.context['messages'])
+        self.assertTrue(any("Cancellation cannot be accepted" in str(m) for m in messages_list))
+
+    def test_withdraw_dispute_on_resolved_dispute_or_non_disputed_task_fails(self):
+        """Acceptance Criteria 2: Calling withdraw_dispute on a resolved dispute or non-disputed task returns error and does not alter task status."""
+        self.task.status = 'disputed'
+        self.task.taken_by = self.taker1
+        self.task.save()
+        Conversation.objects.create(task=self.task)
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.taker1, reason="Issue", status='resolved')
+
+        self.client.login(username='taker1', password='password123')
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]), follow=True)
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+        messages_list = list(response.context['messages'])
+        self.assertTrue(any("cannot be withdrawn" in str(m) for m in messages_list))
+
+    def test_reopened_task_allows_new_dispute_by_subsequent_taker(self):
+        """Acceptance Criteria 3: Re-opened tasks after cancellation or dispute withdrawal can have new disputes raised by subsequent takers."""
+        # Step 1: Taker1 takes task, raises dispute, then withdraws dispute
+        self.client.login(username='taker1', password='password123')
+        self.client.get(reverse('take_task', args=[self.task.id]))
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Problem'})
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+        dispute1 = self.task.dispute
+
+        self.client.post(reverse('withdraw_dispute', args=[dispute1.id]))
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+        self.assertEqual(self.task.dispute.status, 'resolved')
+
+        # Taker1 abandons task
+        self.client.get(reverse('abandon_task', args=[self.task.id]))
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'available')
+
+        # Step 2: Taker2 takes re-opened task and raises a new dispute
+        self.client.login(username='taker2', password='password123')
+        self.client.get(reverse('take_task', args=[self.task.id]))
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+        self.assertEqual(self.task.taken_by, self.taker2)
+
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'New problem'})
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+        self.assertTrue(hasattr(self.task, 'dispute'))
+        self.assertEqual(self.task.dispute.raised_by, self.taker2)
+        self.assertEqual(self.task.dispute.status, 'open')
+        self.assertEqual(self.task.dispute.reason, 'New problem')
+
+    def test_completing_disputed_task_resolves_dispute_and_prevents_withdrawal(self):
+        """Acceptance Criteria 4: Completing a disputed task correctly resolves or cleans up the dispute without enabling retroactive withdrawal manipulation."""
+        self.client.login(username='taker1', password='password123')
+        self.client.get(reverse('take_task', args=[self.task.id]))
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Problem'})
+        self.task.refresh_from_db()
+        dispute = self.task.dispute
+
+        # Poster completes the disputed task
+        self.client.login(username='poster', password='password123')
+        self.client.get(reverse('complete_task', args=[self.task.id]))
+
+        self.task.refresh_from_db()
+        dispute.refresh_from_db()
+
+        self.assertEqual(self.task.status, 'completed')
+        self.assertEqual(dispute.status, 'resolved')
+
+        # Retroactive withdrawal attempt by taker1
+        self.client.login(username='taker1', password='password123')
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]), follow=True)
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+        messages_list = list(response.context['messages'])
+        self.assertTrue(any("cannot be withdrawn" in str(m) for m in messages_list))

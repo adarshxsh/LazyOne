@@ -59,6 +59,45 @@ class Task(models.Model):
     def deposit_bond_amount(self):
         return max(50, math.ceil(self.reward * 0.20))
 
+    def can_accept_cancellation(self):
+        return self.status == 'in_progress' and self.cancellation_requested
+
+    def can_complete(self):
+        return self.status in ('in_progress', 'disputed')
+
+    def can_abandon(self):
+        return self.status == 'in_progress'
+
+    def can_take(self, user=None):
+        if self.status != 'available':
+            return False
+        if user and self.posted_by == user:
+            return False
+        return True
+
+    def can_cancel(self):
+        return self.status == 'available'
+
+    def can_request_cancellation(self):
+        return self.status == 'in_progress' and not self.cancellation_requested
+
+    def can_raise_dispute(self, user=None):
+        if self.status != 'in_progress':
+            return False
+        if hasattr(self, 'dispute') and self.dispute.status == 'open':
+            return False
+        if user and self.taken_by != user:
+            return False
+        return True
+
+    def reset_to_available(self):
+        from django.db import transaction
+        with transaction.atomic():
+            self.status = 'available'
+            self.taken_by = None
+            self.cancellation_requested = False
+            self.save()
+
 class RewardLedger(models.Model):
     TRANSACTION_TYPES = (
         ('task_creation', 'Task Creation (Points Reserved)'),
@@ -141,6 +180,9 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+    def can_withdraw(self):
+        return self.status == 'open' and self.task.status == 'disputed'
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)

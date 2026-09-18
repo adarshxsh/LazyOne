@@ -60,28 +60,36 @@ def add_task(request):
 
 @login_required(login_url='/login/')
 def take_task(request, task_id):
-    task = get_object_or_404(Task, id=task_id, status='available')
-    if task.posted_by == request.user:
-        messages.error(request, "You cannot take your own task.")
-    else:
-        with transaction.atomic():
-            task.status = 'in_progress'
-            task.taken_by = request.user
-            task.save()
-            conversation, created = Conversation.objects.get_or_create(task=task)
-            if created:
-                conversation.participants.add(task.posted_by, task.taken_by)
-            Notification.objects.create(
-                recipient=task.posted_by,
-                message=f"{request.user.username} has taken your task: {task.title}",
-                link=reverse('my_tasks')
-            )
-            messages.success(request, "Task has been assigned to you. A chat has been created.")
+    task = get_object_or_404(Task, id=task_id)
+    if not task.can_take(user=request.user):
+        if task.posted_by == request.user:
+            messages.error(request, "You cannot take your own task.")
+        else:
+            messages.error(request, "Task is not available.")
+        return redirect('my_tasks')
+
+    with transaction.atomic():
+        task.status = 'in_progress'
+        task.taken_by = request.user
+        task.save()
+        conversation, created = Conversation.objects.get_or_create(task=task)
+        if created:
+            conversation.participants.add(task.posted_by, task.taken_by)
+        Notification.objects.create(
+            recipient=task.posted_by,
+            message=f"{request.user.username} has taken your task: {task.title}",
+            link=reverse('my_tasks')
+        )
+        messages.success(request, "Task has been assigned to you. A chat has been created.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
 def complete_task(request, task_id):
-    task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
+    task = get_object_or_404(Task, id=task_id, posted_by=request.user)
+    if not task.can_complete():
+        messages.error(request, "This task cannot be completed in its current state.")
+        return redirect('my_tasks')
+
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
         task_doer_profile.rewards += task.reward
@@ -105,7 +113,11 @@ def complete_task(request, task_id):
 
 @login_required(login_url='/login/')
 def cancel_task(request, task_id):
-    task = get_object_or_404(Task, id=task_id, posted_by=request.user, status='available')
+    task = get_object_or_404(Task, id=task_id, posted_by=request.user)
+    if not task.can_cancel():
+        messages.error(request, "This task cannot be cancelled.")
+        return redirect('my_tasks')
+
     with transaction.atomic():
         task.status = 'cancelled'
         task.save()
@@ -121,7 +133,11 @@ def cancel_task(request, task_id):
 
 @login_required(login_url='/login/')
 def request_cancellation(request, task_id):
-    task = get_object_or_404(Task, id=task_id, posted_by=request.user, status='in_progress')
+    task = get_object_or_404(Task, id=task_id, posted_by=request.user)
+    if not task.can_request_cancellation():
+        messages.error(request, "Cancellation cannot be requested for this task.")
+        return redirect('my_tasks')
+
     task.cancellation_requested = True
     task.save()
     Notification.objects.create(
@@ -134,7 +150,11 @@ def request_cancellation(request, task_id):
 
 @login_required(login_url='/login/')
 def accept_cancellation(request, task_id):
-    task = get_object_or_404(Task, id=task_id, taken_by=request.user, cancellation_requested=True)
+    task = get_object_or_404(Task, id=task_id, taken_by=request.user)
+    if not task.can_accept_cancellation():
+        messages.error(request, "Cancellation cannot be accepted for this task.")
+        return redirect('my_tasks')
+
     with transaction.atomic():
         poster_profile = task.posted_by.userprofile
         poster_profile.rewards += task.reward
@@ -143,10 +163,7 @@ def accept_cancellation(request, task_id):
             user=task.posted_by, task=task, amount=task.reward,
             transaction_type='task_cancellation', description=f"Refund for cancelled task: '{task.title}'"
         )
-        task.status = 'available'
-        task.taken_by = None
-        task.cancellation_requested = False
-        task.save()
+        task.reset_to_available()
         Notification.objects.create(
             recipient=task.posted_by,
             message=f"{request.user.username} accepted your cancellation request for '{task.title}'. The task is now available again.",
@@ -157,11 +174,13 @@ def accept_cancellation(request, task_id):
 
 @login_required(login_url='/login/')
 def abandon_task(request, task_id):
-    task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
+    task = get_object_or_404(Task, id=task_id, taken_by=request.user)
+    if not task.can_abandon():
+        messages.error(request, "Cannot abandon this task.")
+        return redirect('my_tasks')
+
     with transaction.atomic():
-        task.status = 'available'
-        task.taken_by = None
-        task.save()
+        task.reset_to_available()
         Notification.objects.create(
             recipient=task.posted_by,
             message=f"{request.user.username} has abandoned your task: '{task.title}'. It is now available again.",
