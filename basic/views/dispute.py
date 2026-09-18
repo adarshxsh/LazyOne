@@ -1,7 +1,8 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from ..models import Dispute, Task, Notification
+from django.db import transaction
+from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -31,24 +32,55 @@ def raise_dispute(request, task_id):
         if not reason:
             messages.error(request, "A reason is required to raise a dispute.")
             return redirect('my_tasks')
-        if hasattr(task, 'dispute'):
-            dispute = task.dispute
-            dispute.raised_by = request.user
-            dispute.reason = reason
-            dispute.status = 'open'
-            dispute.save()
-        else:
-            dispute = Dispute.objects.create(task=task, raised_by=request.user, reason=reason, status='open')
-        task.status = 'disputed'
-        task.save()
-        recipient = task.posted_by if request.user == task.taken_by else task.taken_by
-        if recipient:
-            Notification.objects.create(
-                recipient=recipient,
-                message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
-                link=reverse('dispute_detail', args=[dispute.id])
+        deposit_amount = task.deposit_bond_amount
+        user_profile = request.user.userprofile
+        if user_profile.rewards < deposit_amount:
+            messages.error(
+                request,
+                f"Insufficient reward points balance. You need at least {deposit_amount} points as a deposit bond to raise a dispute, but you only have {user_profile.rewards} points."
             )
-        messages.success(request, "Dispute raised successfully.")
+            return redirect('my_tasks')
+
+        with transaction.atomic():
+            user_profile.rewards -= deposit_amount
+            user_profile.save()
+
+            if hasattr(task, 'dispute'):
+                dispute = task.dispute
+                dispute.raised_by = request.user
+                dispute.reason = reason
+                dispute.status = 'open'
+                dispute.deposit_amount = deposit_amount
+                dispute.escrow_status = 'held'
+                dispute.save()
+            else:
+                dispute = Dispute.objects.create(
+                    task=task,
+                    raised_by=request.user,
+                    reason=reason,
+                    deposit_amount=deposit_amount,
+                    escrow_status='held'
+                )
+
+            RewardLedger.objects.create(
+                user=request.user,
+                task=task,
+                amount=-deposit_amount,
+                transaction_type='dispute_deposit',
+                description=f"Security deposit bond held for dispute on task: '{task.title}'"
+            )
+
+            task.status = 'disputed'
+            task.save()
+
+            recipient = task.posted_by if request.user == task.taken_by else task.taken_by
+            if recipient:
+                Notification.objects.create(
+                    recipient=recipient,
+                    message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
+                    link=reverse('dispute_detail', args=[dispute.id])
+                )
+        messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
 
@@ -60,16 +92,22 @@ def withdraw_dispute(request, dispute_id):
         messages.error(request, "This dispute cannot be withdrawn.")
         return redirect('my_tasks')
     task = dispute.task
-    dispute.status = 'withdrawn'
-    dispute.save()
-    task.status = 'in_progress'
-    task.save()
-    recipient = task.posted_by if request.user == task.taken_by else task.taken_by
-    if recipient:
-        Notification.objects.create(
-            recipient=recipient,
-            message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
-            link=reverse('my_tasks')
+    with transaction.atomic():
+        dispute.refund_deposit(
+            reason_description=f"Security deposit bond refunded for withdrawn dispute on task: '{task.title}'"
         )
-    messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'.")
+        dispute.status = 'withdrawn'
+        dispute.save()
+
+        task.status = 'in_progress'
+        task.save()
+
+        recipient = task.posted_by if request.user == task.taken_by else task.taken_by
+        if recipient:
+            Notification.objects.create(
+                recipient=recipient,
+                message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
+                link=reverse('my_tasks')
+            )
+    messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')

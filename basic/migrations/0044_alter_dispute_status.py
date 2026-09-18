@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("basic", "0042_remove_dispute_dispute_type_and_more"),
+        ("basic", "0043_dispute_deposit_amount_dispute_escrow_status_and_more"),
     ]
 
     operations = [
