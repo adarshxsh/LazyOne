@@ -139,9 +139,35 @@
             <p><strong>Your Current Reward Balance:</strong> <span id="modal-user-balance">{{ user.userprofile.rewards }}</span> points</p>
             <p id="modal-insufficient-warning" class="text-red-600 font-semibold hidden mt-1">Warning: You do not have enough reward points to post this deposit bond!</p>
         </div>
-        <form id="dispute-form" method="post">
+        <form id="dispute-form" method="post" enctype="multipart/form-data">
             {% csrf_token %}
-            <textarea id="dispute-reason" name="reason" rows="4" required class="w-full px-4 py-3 bg-white border border-gray-300 rounded-lg text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-600"></textarea>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Reason for Dispute *</label>
+            <textarea id="dispute-reason" name="reason" rows="3" required class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-600 mb-4"></textarea>
+
+            <div class="space-y-3 pt-2 border-t border-gray-300">
+                <p class="text-sm font-semibold text-gray-700">Attach Initial Evidence (Optional)</p>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Evidence Files</label>
+                    <input type="file" name="evidence_files" multiple class="w-full text-xs text-gray-700 bg-white border border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-1 focus:ring-cyan-600">
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Evidence Category</label>
+                        <select name="evidence_type" class="w-full bg-white border border-gray-300 text-gray-800 text-xs rounded-lg p-2 focus:ring-1 focus:ring-cyan-600 focus:outline-none">
+                            <option value="deliverable_proof" selected>Deliverable Proof</option>
+                            <option value="screenshot">Screenshot</option>
+                            <option value="chat_log">Chat Log</option>
+                            <option value="document">Document</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Title / Tag</label>
+                        <input type="text" name="title" placeholder="e.g. Work screenshot" class="w-full bg-white border border-gray-300 text-gray-800 text-xs rounded-lg p-2 focus:ring-1 focus:ring-cyan-600 focus:outline-none">
+                    </div>
+                </div>
+            </div>
+
             <div class="mt-6 flex justify-end space-x-4">
                 <button type="button" onclick="closeDisputeModal()" class="px-6 py-2 rounded-lg text-white bg-gray-600 hover:bg-gray-700 transition-colors">Cancel</button>
                 <button id="dispute-submit-btn" type="submit" class="px-6 py-2 rounded-lg text-white font-semibold bg-red-600 hover:bg-red-700 transition-colors">Submit Dispute</button>
