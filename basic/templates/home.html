@@ -117,6 +117,19 @@
                     </div>
                     <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">Posted by: {{ task.posted_by.username }} | Taken by: {{ task.taken_by.username }}</p>
                     <p class="text-sm text-gray-700 dark:text-gray-300 mt-2">Reason: <em class="text-gray-800 dark:text-gray-200">"{{ task.dispute.reason }}"</em></p>
+                    {% if task.dispute and task.dispute.voting_deadline %}
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                            Voting Deadline: {{ task.dispute.voting_deadline|date:"F j, Y, g:i a" }}
+                            {% if task.dispute.status == 'open' %}
+                                | Time Remaining: 
+                                {% if task.dispute.is_expired %}
+                                    <span class="text-red-600 font-semibold">Expired</span>
+                                {% else %}
+                                    <span class="dispute-countdown text-cyan-600 font-semibold" data-deadline="{{ task.dispute.voting_deadline|date:'c' }}">Calculating...</span>
+                                {% endif %}
+                            {% endif %}
+                        </p>
+                    {% endif %}
                 </div>
                 <div class="mt-4 pt-4 border-t border-red-300 dark:border-red-700/50 flex items-center justify-end">
                     <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-600 text-white font-semibold px-5 py-2 rounded-lg hover:bg-red-700 transition-colors">View Dispute Chat</a>
@@ -127,4 +140,26 @@
 </div>
 {% endif %}
 
+<script>
+    function updateCountdowns() {
+        document.querySelectorAll('.dispute-countdown').forEach(el => {
+            const deadlineStr = el.getAttribute('data-deadline');
+            if (!deadlineStr) return;
+            const deadline = new Date(deadlineStr).getTime();
+            const now = new Date().getTime();
+            const diff = deadline - now;
+            if (diff <= 0) {
+                el.className = 'text-red-600 font-semibold';
+                el.textContent = 'Expired';
+            } else {
+                const hours = Math.floor(diff / (1000 * 60 * 60));
+                const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+                el.textContent = `${hours}h ${minutes}m ${seconds}s remaining`;
+            }
+        });
+    }
+    document.addEventListener('DOMContentLoaded', updateCountdowns);
+    setInterval(updateCountdowns, 1000);
+</script>
 {% endblock %}

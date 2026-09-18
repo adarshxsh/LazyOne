@@ -130,4 +130,7 @@ print("MEDIA_FILES: OK")
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 print("DEFAULT_AUTO_FIELD: OK")
 
+# Dispute Configuration
+DISPUTE_VOTING_WINDOW_HOURS = 72
+
 print("--- settings.py loaded successfully ---")

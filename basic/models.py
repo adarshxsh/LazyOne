@@ -2,6 +2,12 @@ import math
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from datetime import timedelta
+from django.conf import settings
+
+def default_voting_deadline():
+    hours = getattr(settings, 'DISPUTE_VOTING_WINDOW_HOURS', 72)
+    return timezone.now() + timedelta(hours=hours)
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -96,6 +102,18 @@ class Dispute(models.Model):
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
+    voting_deadline = models.DateTimeField(default=default_voting_deadline, null=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        if not self.voting_deadline:
+            self.voting_deadline = default_voting_deadline()
+        super().save(*args, **kwargs)
+
+    @property
+    def is_expired(self):
+        if self.voting_deadline and self.status == 'open':
+            return timezone.now() >= self.voting_deadline
+        return False
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"

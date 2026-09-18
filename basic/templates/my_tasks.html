@@ -57,6 +57,9 @@
                             {% endif %}
                         {% elif task.status == 'disputed' %}
                             <p class="text-sm text-red-600">This task is in dispute. You can end the dispute by completing the task.</p>
+                            {% if task.dispute and task.dispute.voting_deadline %}
+                                <p class="text-xs text-gray-500 my-1">Voting Deadline: {{ task.dispute.voting_deadline|date:"F j, Y, g:i a" }} | Time Remaining: {% if task.dispute.is_expired %}<span class="text-red-600 font-semibold">Expired</span>{% else %}<span class="dispute-countdown text-cyan-600 font-semibold" data-deadline="{{ task.dispute.voting_deadline|date:'c' }}">Calculating...</span>{% endif %}</p>
+                            {% endif %}
                             <a href="{% url 'complete_task' task.id %}" class="inline-block bg-green-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm">Mark as Complete</a>
                             {% if task.conversation %}
                                 <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm">Go to Chat</a>
@@ -105,6 +108,9 @@
                             {% endif %}
                         {% elif task.status == 'disputed' %}
                             <p class="text-sm text-red-600">You have raised a dispute.</p>
+                            {% if task.dispute and task.dispute.voting_deadline %}
+                                <p class="text-xs text-gray-500 my-1">Voting Deadline: {{ task.dispute.voting_deadline|date:"F j, Y, g:i a" }} | Time Remaining: {% if task.dispute.is_expired %}<span class="text-red-600 font-semibold">Expired</span>{% else %}<span class="dispute-countdown text-cyan-600 font-semibold" data-deadline="{{ task.dispute.voting_deadline|date:'c' }}">Calculating...</span>{% endif %}</p>
+                            {% endif %}
                             {% if task.conversation %}
                                 <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm">Go to Chat</a>
                             {% endif %}
@@ -203,5 +209,26 @@
     function closeDisputeModal() {
         disputeModal.classList.add('hidden');
     }
+
+    function updateCountdowns() {
+        document.querySelectorAll('.dispute-countdown').forEach(el => {
+            const deadlineStr = el.getAttribute('data-deadline');
+            if (!deadlineStr) return;
+            const deadline = new Date(deadlineStr).getTime();
+            const now = new Date().getTime();
+            const diff = deadline - now;
+            if (diff <= 0) {
+                el.className = 'text-red-600 font-semibold';
+                el.textContent = 'Expired';
+            } else {
+                const hours = Math.floor(diff / (1000 * 60 * 60));
+                const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+                el.textContent = `${hours}h ${minutes}m ${seconds}s remaining`;
+            }
+        });
+    }
+    updateCountdowns();
+    setInterval(updateCountdowns, 1000);
 </script>
 {% endblock %}
