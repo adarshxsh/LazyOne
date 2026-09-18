@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+
+{% block title %}Admin Dispute Queue - {{ block.super }}{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div class="flex justify-between items-center border-b border-gray-700 pb-4">
+        <h2 class="text-3xl font-bold text-white">Admin Dispute Arbitration & Appeal Queue</h2>
+    </div>
+
+    <!-- Open Disputes Section -->
+    <section>
+        <h3 class="text-2xl font-semibold text-cyan-400 mb-4">Open Disputes Pending Arbitration</h3>
+        {% if open_disputes %}
+            <div class="space-y-4">
+                {% for dispute in open_disputes %}
+                    <div class="bg-gray-900/60 p-5 rounded-xl border border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <div>
+                            <h4 class="text-lg font-bold text-white"><a href="{% url 'dispute_detail' dispute.id %}" class="hover:underline text-cyan-400">Task: {{ dispute.task.title }}</a></h4>
+                            <p class="text-sm text-gray-300"><strong>Raised by:</strong> {{ dispute.raised_by.username }} | <strong>Posted by:</strong> {{ dispute.task.posted_by.username }} | <strong>Taker:</strong> {{ dispute.task.taken_by.username }}</p>
+                            <p class="text-sm text-gray-400 mt-1"><strong>Reason:</strong> {{ dispute.reason|truncatewords:20 }}</p>
+                            <span class="inline-block mt-2 px-3 py-1 text-xs font-semibold rounded-full bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">Open</span>
+                        </div>
+                        <div>
+                            <a href="{% url 'dispute_detail' dispute.id %}" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-medium rounded-lg text-sm transition-colors">Review & Resolve</a>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="text-gray-400 italic">No open disputes requiring initial staff arbitration.</p>
+        {% endif %}
+    </section>
+
+    <!-- Pending Appeals Section -->
+    <section>
+        <h3 class="text-2xl font-semibold text-cyan-400 mb-4">Pending Post-Resolution Appeals</h3>
+        {% if pending_appeals %}
+            <div class="space-y-4">
+                {% for dispute in pending_appeals %}
+                    <div class="bg-gray-900/60 p-5 rounded-xl border border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <div>
+                            <h4 class="text-lg font-bold text-white"><a href="{% url 'dispute_detail' dispute.id %}" class="hover:underline text-cyan-400">Task: {{ dispute.task.title }}</a></h4>
+                            <p class="text-sm text-gray-300"><strong>Appealed by:</strong> {{ dispute.appealed_by.username }} | <strong>Initial Decision:</strong> {{ dispute.get_resolution_decision_display }}</p>
+                            <p class="text-sm text-gray-400 mt-1"><strong>Appeal Justification:</strong> {{ dispute.appeal_reason|truncatewords:20 }}</p>
+                            <span class="inline-block mt-2 px-3 py-1 text-xs font-semibold rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">Appealed</span>
+                        </div>
+                        <div>
+                            <a href="{% url 'dispute_detail' dispute.id %}" class="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-medium rounded-lg text-sm transition-colors">Review Appeal</a>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="text-gray-400 italic">No pending appeals requiring senior administrative review.</p>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}
