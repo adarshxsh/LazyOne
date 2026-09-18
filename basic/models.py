@@ -21,6 +21,7 @@ class UserProfile(models.Model):
     is_phone_verified = models.BooleanField(default=False)
     instagram_username = models.CharField(max_length=100, blank=True)
     is_instagram_verified = models.BooleanField(default=False)
+    is_juror = models.BooleanField(default=False)
     
     # Fields for Email OTP Verification
     email_otp = models.CharField(max_length=6, blank=True, null=True)
@@ -68,6 +69,7 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('dispute_resolution', 'Dispute Resolution'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
@@ -83,6 +85,7 @@ class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
         ('resolved', 'Resolved'),
+        ('appealed', 'Appealed'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
@@ -95,6 +98,13 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    winner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='dispute_wins')
+    resolved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='resolved_disputes')
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolution_reason = models.TextField(blank=True, null=True)
+    appealed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='dispute_appeals')
+    appealed_at = models.DateTimeField(null=True, blank=True)
+    appeal_reason = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -141,6 +151,13 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+    @property
+    def can_be_appealed(self):
+        if self.status != 'resolved' or not self.resolved_at:
+            return False
+        from datetime import timedelta
+        return timezone.now() <= self.resolved_at + timedelta(hours=48)
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
