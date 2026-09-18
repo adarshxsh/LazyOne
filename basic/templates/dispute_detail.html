@@ -3,26 +3,120 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
+<div class="max-w-4xl mx-auto space-y-6 text-gray-300">
     <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
 
-    <div class="space-y-6 text-gray-300">
+    <div class="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-6">
         <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <h3 class="text-xl font-semibold text-cyan-400">Task Information</h3>
+            <p class="text-lg"><strong>Task:</strong> {{ dispute.task.title }}</p>
+            <p><strong>Reward:</strong> {{ dispute.task.reward }} Points</p>
+            <p><strong>Poster:</strong> {{ dispute.task.posted_by.username }}</p>
+            <p><strong>Taker:</strong> {{ dispute.task.taken_by.username }}</p>
         </div>
 
         <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <h3 class="text-xl font-semibold text-cyan-400">Dispute Status</h3>
+            <p><strong>Status:</strong> 
+                <span class="px-3 py-1 text-sm rounded-full font-semibold
+                    {% if dispute.status == 'open' or dispute.status == 'voting' %}bg-yellow-500/20 text-yellow-300
+                    {% elif dispute.status == 'resolved_tier1' %}bg-blue-500/20 text-blue-300
+                    {% elif dispute.status == 'appealed' %}bg-purple-500/20 text-purple-300
+                    {% else %}bg-green-500/20 text-green-300{% endif %}">
+                    {{ dispute.get_status_display }}
+                </span>
+            </p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y H:i" }}</p>
+            {% if dispute.winner %}
+                <p><strong>Current Ruling Winner:</strong> <span class="text-green-400 font-bold">{{ dispute.winner.username }}</span></p>
+            {% endif %}
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
-    </div>
 
+        <!-- Peer Jury Voting Section -->
+        <div class="border-t border-gray-700 pt-4">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Tier 1 Peer Jury Adjudication</h3>
+            <p><strong>Total Votes:</strong> {{ total_votes }} (Minimum Quorum: 3 votes required)</p>
+            <p><strong>Votes for Poster ({{ dispute.task.posted_by.username }}):</strong> {{ votes_poster }}</p>
+            <p><strong>Votes for Taker ({{ dispute.task.taken_by.username }}):</strong> {{ votes_taker }}</p>
+
+            {% if dispute.status == 'open' or dispute.status == 'voting' %}
+                <div class="mt-4 p-4 bg-gray-900/60 rounded-lg border border-gray-700">
+                    <h4 class="text-lg font-medium text-white mb-2">Cast Juror Vote</h4>
+                    {% if has_voted %}
+                        <p class="text-green-400 font-semibold">You have voted for {{ user_vote.get_vote_display }}.</p>
+                    {% elif can_vote %}
+                        <form method="POST" action="{% url 'vote_dispute' dispute.id %}" class="flex gap-4 mt-2">
+                            {% csrf_token %}
+                            <button type="submit" name="vote" value="poster" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors">
+                                Vote for Poster ({{ dispute.task.posted_by.username }})
+                            </button>
+                            <button type="submit" name="vote" value="taker" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors">
+                                Vote for Taker ({{ dispute.task.taken_by.username }})
+                            </button>
+                        </form>
+                    {% else %}
+                        <p class="text-yellow-400 text-sm">{{ vote_error_reason }}</p>
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Tier 2 Appeal Section -->
+        {% if dispute.status == 'resolved_tier1' %}
+            <div class="border-t border-gray-700 pt-4">
+                <h3 class="text-xl font-semibold text-cyan-400 mb-2">Appellate Escalation Window (Tier 2)</h3>
+                <p>Tier 1 Ruling: Winner is <strong class="text-green-400">{{ dispute.winner.username }}</strong>.</p>
+                <p>Resolution Date: {{ dispute.resolved_tier1_at|date:"F d, Y H:i" }}</p>
+                <p>Appeal Window: 48 Hours from resolution.</p>
+
+                {% if can_appeal %}
+                    <div class="mt-4 p-4 bg-gray-900/60 rounded-lg border border-gray-700">
+                        <p class="text-sm text-gray-300 mb-3">You can escalate this dispute to the Appellate Council within 48 hours by filing an appeal bond of <strong>{{ appeal_bond_amount }} points</strong>.</p>
+                        <form method="POST" action="{% url 'appeal_dispute' dispute.id %}">
+                            {% csrf_token %}
+                            <button type="submit" class="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg transition-colors">
+                                File Appeal (Deposit {{ appeal_bond_amount }} Points Bond)
+                            </button>
+                        </form>
+                    </div>
+                {% elif appeal_error_reason %}
+                    <p class="text-yellow-400 text-sm mt-2">{{ appeal_error_reason }}</p>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        <!-- Appellate Council Review Section -->
+        {% if dispute.status == 'appealed' or dispute.status == 'resolved_tier2' %}
+            <div class="border-t border-gray-700 pt-4">
+                <h3 class="text-xl font-semibold text-cyan-400 mb-2">Appellate Council (Tier 2)</h3>
+                <p><strong>Appealed By:</strong> {{ dispute.appellant.username }}</p>
+                <p><strong>Appeal Bond Deposited:</strong> {{ dispute.appeal_bond_amount }} Points</p>
+                {% if dispute.status == 'appealed' and request.user.is_staff %}
+                    <div class="mt-4 p-4 bg-gray-900/60 rounded-lg border border-purple-700">
+                        <h4 class="text-lg font-medium text-white mb-2">Appellate Council Action</h4>
+                        <form method="POST" action="{% url 'resolve_appeal' dispute.id %}" class="flex gap-4">
+                            {% csrf_token %}
+                            <button type="submit" name="decision" value="uphold" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded-lg transition-colors">
+                                Uphold Tier 1 Ruling
+                            </button>
+                            <button type="submit" name="decision" value="overturn" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition-colors">
+                                Overturn Tier 1 Ruling
+                            </button>
+                        </form>
+                    </div>
+                {% elif dispute.status == 'resolved_tier2' %}
+                    <p class="mt-2 text-green-400 font-semibold">Tier 2 Decision: {{ dispute.get_tier2_decision_display|default:dispute.tier2_decision|capfirst }} Tier 1 ruling.</p>
+                    <p>Final Winner: <strong>{{ dispute.winner.username }}</strong></p>
+                {% endif %}
+            </div>
+        {% endif %}
+    </div>
+</div>
 {% endblock %}
