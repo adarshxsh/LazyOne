@@ -32,6 +32,7 @@
                                     {% if task.status == 'completed' %}text-green-600{% endif %}
                                     {% if task.status == 'disputed' %}text-red-600{% endif %}
                                     {% if task.status == 'cancelled' %}text-gray-500{% endif %}
+                                    {% if task.status == 'expired' %}text-red-500{% endif %}
                                 ">{{ task.get_status_display }}</span>
                                 {% if task.status == 'in_progress' or task.status == 'completed' or task.status == 'disputed' %}by {{ task.taken_by.username }}{% endif %}
                             </p>
