@@ -105,3 +105,120 @@ def withdraw_dispute(request, dispute_id):
         )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def staff_resolve_dispute(request, dispute_id):
+    if not request.user.is_staff:
+        messages.error(request, "You do not have staff permission to perform this moderation action.")
+        return redirect('home')
+
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+
+    if dispute.status != 'open':
+        messages.error(request, "This dispute is already resolved.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    action = request.POST.get('action')
+    note = request.POST.get('note', '').strip()
+    note_suffix = f" Staff note: {note}" if note else ""
+
+    with transaction.atomic():
+        if action == 'refund_poster':
+            poster_profile = task.posted_by.userprofile
+            poster_profile.rewards += task.reward
+            poster_profile.save()
+
+            RewardLedger.objects.create(
+                user=task.posted_by,
+                task=task,
+                amount=task.reward,
+                transaction_type='task_cancellation',
+                description=f"Staff dispute resolution: Refund for task '{task.title}'"
+            )
+
+            dispute.refund_deposit(
+                reason_description=f"Security deposit bond refunded upon staff dispute resolution for task: '{task.title}'"
+            )
+            dispute.status = 'resolved'
+            dispute.save()
+
+            task.status = 'cancelled'
+            task.save()
+
+            Notification.objects.create(
+                recipient=task.posted_by,
+                message=f"Staff moderator resolved dispute for '{task.title}'. Points refunded to your balance.{note_suffix}",
+                link=reverse('dispute_detail', args=[dispute.id])
+            )
+            if task.taken_by:
+                Notification.objects.create(
+                    recipient=task.taken_by,
+                    message=f"Staff moderator resolved dispute for '{task.title}' in favor of poster.{note_suffix}",
+                    link=reverse('dispute_detail', args=[dispute.id])
+                )
+            messages.success(request, f"Dispute force-resolved: Poster refunded {task.reward} points.")
+
+        elif action == 'award_taker':
+            if not task.taken_by:
+                messages.error(request, "Task has no assigned taker to award points to.")
+                return redirect('dispute_detail', dispute_id=dispute.id)
+
+            taker_profile = task.taken_by.userprofile
+            taker_profile.rewards += task.reward
+            taker_profile.save()
+
+            RewardLedger.objects.create(
+                user=task.taken_by,
+                task=task,
+                amount=task.reward,
+                transaction_type='task_completion',
+                description=f"Staff dispute resolution: Award for task '{task.title}'"
+            )
+
+            dispute.refund_deposit(
+                reason_description=f"Security deposit bond refunded upon staff dispute resolution for task: '{task.title}'"
+            )
+            dispute.status = 'resolved'
+            dispute.save()
+
+            task.status = 'completed'
+            task.save()
+
+            Notification.objects.create(
+                recipient=task.taken_by,
+                message=f"Staff moderator resolved dispute for '{task.title}'. Points awarded to your balance.{note_suffix}",
+                link=reverse('dispute_detail', args=[dispute.id])
+            )
+            Notification.objects.create(
+                recipient=task.posted_by,
+                message=f"Staff moderator resolved dispute for '{task.title}' in favor of taker.{note_suffix}",
+                link=reverse('dispute_detail', args=[dispute.id])
+            )
+            messages.success(request, f"Dispute force-resolved: Taker awarded {task.reward} points.")
+
+        elif action == 'freeze':
+            dispute.refund_deposit(
+                reason_description=f"Security deposit bond refunded upon staff freezing dispute for task: '{task.title}'"
+            )
+            dispute.status = 'resolved'
+            dispute.save()
+
+            Notification.objects.create(
+                recipient=task.posted_by,
+                message=f"Staff moderator froze the dispute for '{task.title}'.{note_suffix}",
+                link=reverse('dispute_detail', args=[dispute.id])
+            )
+            if task.taken_by:
+                Notification.objects.create(
+                    recipient=task.taken_by,
+                    message=f"Staff moderator froze the dispute for '{task.title}'.{note_suffix}",
+                    link=reverse('dispute_detail', args=[dispute.id])
+                )
+            messages.success(request, "Dispute has been frozen and closed.")
+
+        else:
+            messages.error(request, "Invalid moderation action specified.")
+
+    return redirect('dispute_detail', dispute_id=dispute.id)
