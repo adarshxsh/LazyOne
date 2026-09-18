@@ -19,6 +19,40 @@
             </div>
         </div>
 
+        <!-- Reputation & Trust Stats Section -->
+        <div>
+            <h2 class="text-2xl font-bold text-gray-800 dark:text-white mb-4">Reputation & Trust Standing</h2>
+            <div class="bg-white/50 border border-gray-200 rounded-xl p-6 dark:bg-gray-800/50 dark:border-gray-700/50">
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
+                    <div class="p-3 bg-gray-100/80 dark:bg-gray-700/50 rounded-lg">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">Trust Score</p>
+                        <p class="text-2xl font-black text-cyan-600 dark:text-cyan-400 mt-1">{{ viewed_profile.reputation_score }}/100</p>
+                    </div>
+                    <div class="p-3 bg-gray-100/80 dark:bg-gray-700/50 rounded-lg">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">Risk Level</p>
+                        <span class="inline-block mt-1 px-2.5 py-1 text-xs font-bold rounded-full
+                            {% if viewed_profile.risk_tier == 'low' %}bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400{% endif %}
+                            {% if viewed_profile.risk_tier == 'medium' %}bg-yellow-100 text-yellow-700 dark:bg-yellow-500/20 dark:text-yellow-400{% endif %}
+                            {% if viewed_profile.risk_tier == 'high' %}bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400{% endif %}
+                            {% if viewed_profile.risk_tier == 'critical' %}bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400{% endif %}
+                        ">
+                            {{ viewed_profile.get_risk_tier_display }}
+                        </span>
+                    </div>
+                    <div class="p-3 bg-gray-100/80 dark:bg-gray-700/50 rounded-lg">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">Completion Rate</p>
+                        <p class="text-xl font-bold text-gray-800 dark:text-white mt-1">{{ viewed_profile.completion_rate }}%</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ viewed_profile.tasks_completed }} done / {{ viewed_profile.tasks_abandoned }} abandoned</p>
+                    </div>
+                    <div class="p-3 bg-gray-100/80 dark:bg-gray-700/50 rounded-lg">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">Dispute Record</p>
+                        <p class="text-xl font-bold text-gray-800 dark:text-white mt-1">{{ viewed_profile.dispute_win_rate }}% Win Rate</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ viewed_profile.disputes_won }} won / {{ viewed_profile.disputes_lost }} lost</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Friendship Settings Section (Visible only if friends) -->
         {% if is_friend and friendship %}
         <div>
