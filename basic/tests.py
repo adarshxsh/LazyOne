@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, Notification
 
 
 class DisputeDepositBondTests(TestCase):
@@ -182,3 +182,148 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class DisputePermissionsTests(TestCase):
+    def setUp(self):
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.other_user = User.objects.create_user(username='other', password='password123')
+
+        UserProfile.objects.create(user=self.poster, rewards=1000)
+        UserProfile.objects.create(user=self.taker, rewards=1000)
+        UserProfile.objects.create(user=self.other_user, rewards=1000)
+
+        self.task = Task.objects.create(
+            title='Test Task',
+            description='Test Description',
+            reward=100,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress'
+        )
+        self.conversation = Conversation.objects.create(task=self.task)
+        self.conversation.participants.add(self.poster, self.taker)
+
+    def test_poster_can_raise_dispute(self):
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Taker stopped working'})
+        
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+        
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertEqual(dispute.raised_by, self.poster)
+        self.assertEqual(dispute.reason, 'Taker stopped working')
+        
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+        
+        # Check notification sent to taker
+        notification = Notification.objects.filter(recipient=self.taker).first()
+        self.assertIsNotNone(notification)
+        self.assertIn("poster has raised a dispute", notification.message)
+
+    def test_taker_can_raise_dispute(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Poster is unreasonable'})
+        
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+        
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertEqual(dispute.raised_by, self.taker)
+        
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+        
+        # Check notification sent to poster
+        notification = Notification.objects.filter(recipient=self.poster).first()
+        self.assertIsNotNone(notification)
+        self.assertIn("taker has raised a dispute", notification.message)
+
+    def test_non_participant_cannot_raise_dispute(self):
+        self.client.login(username='other', password='password123')
+        response = self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Unauthorized'})
+        
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+        self.assertFalse(Dispute.objects.filter(task=self.task).exists())
+        self.assertRedirects(response, reverse('my_tasks'))
+
+    def test_cannot_raise_dispute_if_task_not_in_progress(self):
+        self.task.status = 'available'
+        self.task.taken_by = None
+        self.task.save()
+        
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Not in progress'})
+        
+        self.assertFalse(Dispute.objects.filter(task=self.task).exists())
+        self.assertRedirects(response, reverse('my_tasks'))
+
+    def test_poster_can_withdraw_own_dispute(self):
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.poster, reason='Issue')
+        self.task.status = 'disputed'
+        self.task.save()
+
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        # Notification sent to taker
+        notification = Notification.objects.filter(recipient=self.taker).first()
+        self.assertIsNotNone(notification)
+        self.assertIn("poster has withdrawn the dispute", notification.message)
+
+    def test_taker_can_withdraw_own_dispute(self):
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.taker, reason='Issue')
+        self.task.status = 'disputed'
+        self.task.save()
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        # Notification sent to poster
+        notification = Notification.objects.filter(recipient=self.poster).first()
+        self.assertIsNotNone(notification)
+        self.assertIn("taker has withdrawn the dispute", notification.message)
+
+    def test_counterparty_cannot_withdraw_other_user_dispute(self):
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.poster, reason='Issue')
+        self.task.status = 'disputed'
+        self.task.save()
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(Dispute.objects.filter(id=dispute.id).exists())
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+
+    def test_my_tasks_template_controls(self):
+        # 1. Check in_progress task renders "Raise Dispute" for poster
+        self.client.login(username='poster', password='password123')
+        response = self.client.get(reverse('my_tasks'))
+        self.assertContains(response, "Raise Dispute")
+
+        # 2. Poster raises dispute -> Poster sees Withdraw Dispute button, Taker does not see Withdraw Dispute button
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.poster, reason='Reason', status='open')
+        self.task.status = 'disputed'
+        self.task.save()
+
+        response_poster = self.client.get(reverse('my_tasks'))
+        self.assertContains(response_poster, "Withdraw Dispute")
+
+        self.client.login(username='taker', password='password123')
+        response_taker = self.client.get(reverse('my_tasks'))
+        self.assertNotContains(response_taker, "Withdraw Dispute")
