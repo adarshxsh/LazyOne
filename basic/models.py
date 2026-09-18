@@ -66,13 +66,14 @@ class RewardLedger(models.Model):
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
-        ('dispute_refund', 'Dispute Deposit Bond Refunded'),
+        ('dispute_refund', 'Dispute Deposit Bond Refunded / Settlement Poster Refund'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('dispute_payout', 'Dispute Settlement (Doer Payout)'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=25, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -89,6 +90,11 @@ class Dispute(models.Model):
         ('refunded', 'Refunded'),
         ('forfeited', 'Forfeited'),
     )
+    RESOLUTION_CHOICES = (
+        ('full_payout', 'Full Payout'),
+        ('full_refund', 'Full Refund'),
+        ('partial_split', 'Partial Split'),
+    )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
@@ -96,6 +102,17 @@ class Dispute(models.Model):
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
+    offered_doer_amount = models.PositiveIntegerField(null=True, blank=True)
+    offered_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='offered_settlements')
+    resolved_doer_amount = models.PositiveIntegerField(null=True, blank=True)
+    resolved_poster_amount = models.PositiveIntegerField(null=True, blank=True)
+    resolution_type = models.CharField(max_length=20, choices=RESOLUTION_CHOICES, null=True, blank=True)
+
+    @property
+    def offered_poster_amount(self):
+        if self.offered_doer_amount is not None and self.task:
+            return self.task.reward - self.offered_doer_amount
+        return None
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
