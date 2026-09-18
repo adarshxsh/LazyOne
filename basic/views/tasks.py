@@ -100,10 +100,11 @@ def take_task(request, task_id):
 @login_required(login_url='/login/')
 def complete_task(request, task_id):
     task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
-    collateral = task.collateral_amount if task.collateral_amount else calculate_collateral(task.reward)
+    collateral = task.collateral_amount
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
-        task_doer_profile.rewards += collateral
+        if collateral > 0:
+            task_doer_profile.rewards += collateral
         task_doer_profile.rewards += task.reward
         task_doer_profile.save()
 
@@ -111,17 +112,21 @@ def complete_task(request, task_id):
         task.collateral_amount = 0
         task.save()
 
-        if hasattr(task, 'dispute'):
+        if hasattr(task, 'dispute') and task.dispute.status == 'open':
+            task.dispute.refund_deposit(
+                reason_description=f"Security deposit bond refunded upon dispute resolution for task: '{task.title}'"
+            )
             task.dispute.status = 'resolved'
             task.dispute.save()
 
-        RewardLedger.objects.create(
-            user=task.taken_by,
-            task=task,
-            amount=collateral,
-            transaction_type='collateral_release',
-            description=f"Collateral released for completed task: '{task.title}'"
-        )
+        if collateral > 0:
+            RewardLedger.objects.create(
+                user=task.taken_by,
+                task=task,
+                amount=collateral,
+                transaction_type='collateral_release',
+                description=f"Collateral released for completed task: '{task.title}'"
+            )
         RewardLedger.objects.create(
             user=task.taken_by,
             task=task,
@@ -164,7 +169,7 @@ def request_cancellation(request, task_id):
 @login_required(login_url='/login/')
 def accept_cancellation(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, cancellation_requested=True)
-    collateral = task.collateral_amount if task.collateral_amount else calculate_collateral(task.reward)
+    collateral = task.collateral_amount
     with transaction.atomic():
         poster_profile = task.posted_by.userprofile
         poster_profile.rewards += task.reward
@@ -174,16 +179,17 @@ def accept_cancellation(request, task_id):
             transaction_type='task_cancellation', description=f"Refund for cancelled task: '{task.title}'"
         )
 
-        taker_profile = request.user.userprofile
-        taker_profile.rewards += collateral
-        taker_profile.save()
-        RewardLedger.objects.create(
-            user=request.user,
-            task=task,
-            amount=collateral,
-            transaction_type='collateral_release',
-            description=f"Collateral released upon cancellation acceptance for task: '{task.title}'"
-        )
+        if collateral > 0:
+            taker_profile = request.user.userprofile
+            taker_profile.rewards += collateral
+            taker_profile.save()
+            RewardLedger.objects.create(
+                user=request.user,
+                task=task,
+                amount=collateral,
+                transaction_type='collateral_release',
+                description=f"Collateral released upon cancellation acceptance for task: '{task.title}'"
+            )
 
         task.status = 'available'
         task.taken_by = None
@@ -201,19 +207,20 @@ def accept_cancellation(request, task_id):
 @login_required(login_url='/login/')
 def abandon_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
-    collateral = task.collateral_amount if task.collateral_amount else calculate_collateral(task.reward)
+    collateral = task.collateral_amount
     with transaction.atomic():
-        poster_profile = task.posted_by.userprofile
-        poster_profile.rewards += collateral
-        poster_profile.save()
+        if collateral > 0:
+            poster_profile = task.posted_by.userprofile
+            poster_profile.rewards += collateral
+            poster_profile.save()
 
-        RewardLedger.objects.create(
-            user=task.posted_by,
-            task=task,
-            amount=collateral,
-            transaction_type='collateral_slashing',
-            description=f"Collateral indemnity from abandoned task: '{task.title}'"
-        )
+            RewardLedger.objects.create(
+                user=task.posted_by,
+                task=task,
+                amount=collateral,
+                transaction_type='collateral_slashing',
+                description=f"Collateral indemnity from abandoned task: '{task.title}'"
+            )
 
         if hasattr(task, 'dispute'):
             task.dispute.delete()
