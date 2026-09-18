@@ -23,6 +23,26 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if can_vote %}
+        <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
+            <h3 class="text-xl font-semibold text-white mb-2">Cast Juror Vote</h3>
+            <p class="text-sm text-gray-400 mb-4">Review the task details and vote to resolve this dispute. Participating jurors earn a fee from the reward pool upon resolution.</p>
+            <form action="{% url 'submit_dispute_vote' dispute.id %}" method="post" class="flex space-x-4">
+                {% csrf_token %}
+                <button type="submit" name="choice" value="taker" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors">
+                    Vote for Taker ({{ task.taken_by.username }})
+                </button>
+                <button type="submit" name="choice" value="poster" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors">
+                    Vote for Poster ({{ task.posted_by.username }})
+                </button>
+            </form>
+        </div>
+        {% elif user_vote %}
+        <div class="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+            <p class="text-sm text-cyan-400">You voted for {{ user_vote.get_choice_display }}.</p>
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}

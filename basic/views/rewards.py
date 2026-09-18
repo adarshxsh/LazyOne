@@ -14,8 +14,8 @@ def rewards_view(request):
     rewards_earned = all_transactions.filter(amount__gt=0) # Positive amounts are earned
     rewards_given = all_transactions.filter(amount__lt=0, transaction_type='task_creation') # Negative amounts for creating tasks
 
-    # Calculate pending points for tasks that are 'in_progress'
-    pending_tasks = Task.objects.filter(posted_by=user, status='in_progress')
+    # Calculate pending points for tasks that are 'in_progress' or 'disputed'
+    pending_tasks = Task.objects.filter(posted_by=user, status__in=['in_progress', 'disputed'])
     pending_points = pending_tasks.aggregate(Sum('reward'))['reward__sum'] or 0
 
     context = {
