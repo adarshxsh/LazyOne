@@ -89,9 +89,18 @@ class Dispute(models.Model):
         ('refunded', 'Refunded'),
         ('forfeited', 'Forfeited'),
     )
+    CATEGORY_CHOICES = (
+        ('non_completion', 'Non-Completion'),
+        ('quality_issue', 'Quality Issue'),
+        ('payment_dispute', 'Payment Dispute'),
+        ('communication_failure', 'Communication Failure'),
+        ('other', 'Other'),
+    )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
+    category = models.CharField(max_length=50, choices=CATEGORY_CHOICES, default='other', blank=True, null=True)
+    evidence_payload = models.JSONField(default=dict, blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
@@ -141,6 +150,39 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+    @property
+    def category_display(self):
+        if not self.category:
+            return 'Other'
+        return dict(self.CATEGORY_CHOICES).get(self.category, self.category.replace('_', ' ').title())
+
+    @property
+    def category_badge_class(self):
+        badge_map = {
+            'non_completion': 'bg-red-500/20 text-red-300 border border-red-500/30',
+            'quality_issue': 'bg-orange-500/20 text-orange-300 border border-orange-500/30',
+            'payment_dispute': 'bg-purple-500/20 text-purple-300 border border-purple-500/30',
+            'communication_failure': 'bg-blue-500/20 text-blue-300 border border-blue-500/30',
+            'other': 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30',
+        }
+        return badge_map.get(self.category, 'bg-gray-500/20 text-gray-300 border border-gray-500/30')
+
+    @property
+    def formatted_evidence(self):
+        if not self.evidence_payload or not isinstance(self.evidence_payload, dict):
+            return []
+        items = []
+        for key, value in self.evidence_payload.items():
+            label = key.replace('_', ' ').title()
+            is_url = isinstance(value, str) and (value.startswith('http://') or value.startswith('https://'))
+            items.append({
+                'key': key,
+                'label': label,
+                'value': value,
+                'is_url': is_url,
+            })
+        return items
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)

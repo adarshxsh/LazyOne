@@ -1,8 +1,10 @@
+import json
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
 from ..models import Dispute, Task, Notification, RewardLedger
+from ..forms import validate_dispute_input
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -24,13 +26,24 @@ def raise_dispute(request, task_id):
     task = get_object_or_404(Task, id=task_id)
     if hasattr(task, 'dispute') and task.dispute.status == 'open':
         return redirect('dispute_detail', dispute_id=task.dispute.id)
-    if task.taken_by != request.user or task.status != 'in_progress':
-        messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
+
+    if request.user not in [task.posted_by, task.taken_by] or task.status != 'in_progress':
+        messages.error(request, "You can only raise a dispute for a task you are involved in that is currently in progress.")
         return redirect('my_tasks')
+
     if request.method == 'POST':
-        reason = request.POST.get('reason')
-        if not reason:
-            messages.error(request, "A reason is required to raise a dispute.")
+        if request.content_type == 'application/json':
+            try:
+                raw_data = json.loads(request.body)
+            except json.JSONDecodeError:
+                raw_data = {}
+        else:
+            raw_data = request.POST.dict()
+
+        cleaned_data, errors = validate_dispute_input(raw_data)
+        if errors:
+            for err in errors:
+                messages.error(request, err)
             return redirect('my_tasks')
 
         deposit_amount = task.deposit_bond_amount
@@ -49,7 +62,9 @@ def raise_dispute(request, task_id):
             if hasattr(task, 'dispute'):
                 dispute = task.dispute
                 dispute.raised_by = request.user
-                dispute.reason = reason
+                dispute.reason = cleaned_data['reason']
+                dispute.category = cleaned_data['category']
+                dispute.evidence_payload = cleaned_data['evidence_payload']
                 dispute.status = 'open'
                 dispute.deposit_amount = deposit_amount
                 dispute.escrow_status = 'held'
@@ -58,7 +73,9 @@ def raise_dispute(request, task_id):
                 dispute = Dispute.objects.create(
                     task=task,
                     raised_by=request.user,
-                    reason=reason,
+                    reason=cleaned_data['reason'],
+                    category=cleaned_data['category'],
+                    evidence_payload=cleaned_data['evidence_payload'],
                     deposit_amount=deposit_amount,
                     escrow_status='held'
                 )
@@ -74,13 +91,16 @@ def raise_dispute(request, task_id):
             task.status = 'disputed'
             task.save()
 
-            Notification.objects.create(
-                recipient=task.posted_by,
-                message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
-                link=reverse('dispute_detail', args=[dispute.id])
-            )
+            recipient = task.posted_by if request.user == task.taken_by else task.taken_by
+            if recipient:
+                Notification.objects.create(
+                    recipient=recipient,
+                    message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
+                    link=reverse('dispute_detail', args=[dispute.id])
+                )
         messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
         return redirect('dispute_detail', dispute_id=dispute.id)
+
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
@@ -98,10 +118,12 @@ def withdraw_dispute(request, dispute_id):
         task.status = 'in_progress'
         task.save()
 
-        Notification.objects.create(
-            recipient=task.posted_by,
-            message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
-            link=reverse('my_tasks')
-        )
+        recipient = task.posted_by if request.user == task.taken_by else task.taken_by
+        if recipient:
+            Notification.objects.create(
+                recipient=recipient,
+                message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
+                link=reverse('my_tasks')
+            )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
