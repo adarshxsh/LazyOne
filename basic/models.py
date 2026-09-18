@@ -68,6 +68,8 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('appeal_fee', 'Dispute Appeal Escrow Fee'),
+        ('juror_slashing', 'Juror Stake Slashing Penalty'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
@@ -83,6 +85,8 @@ class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
         ('resolved', 'Resolved'),
+        ('appealed', 'Appealed'),
+        ('appeal_resolved', 'Appeal Resolved'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
@@ -95,10 +99,34 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    appellant = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='appealed_disputes')
+    appeal_fee = models.PositiveIntegerField(default=0)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    appealed_at = models.DateTimeField(null=True, blank=True)
+    jurors = models.ManyToManyField(User, related_name='assigned_disputes', blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    @property
+    def required_appeal_fee(self):
+        deposit = self.deposit_amount if self.deposit_amount > 0 else self.task.deposit_bond_amount
+        return math.ceil(deposit * 1.5)
+
+    @property
+    def is_appeal_window_active(self):
+        if self.status in ['appealed', 'appeal_resolved']:
+            return False
+        if self.status == 'resolved':
+            ref_time = self.resolved_at or self.created_at
+            if ref_time:
+                from datetime import timedelta
+                return timezone.now() <= ref_time + timedelta(hours=48)
+            return False
+        if self.status == 'open':
+            return True
+        return False
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -141,6 +169,18 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class JurorVote(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='juror_votes')
+    voted_for = models.ForeignKey(User, on_delete=models.CASCADE, related_name='juror_votes_received')
+    voted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Juror vote by {self.juror.username} for {self.voted_for.username} in dispute {self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)

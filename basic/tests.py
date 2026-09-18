@@ -182,3 +182,132 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class DisputeAppealTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        self.other_user = User.objects.create_user(username='other', password='password123')
+        self.other_profile = UserProfile.objects.create(user=self.other_user, rewards=500)
+
+        self.juror1 = User.objects.create_user(username='juror1', password='password123')
+        self.juror1_profile = UserProfile.objects.create(user=self.juror1, rewards=100)
+
+        self.juror2 = User.objects.create_user(username='juror2', password='password123')
+        self.juror2_profile = UserProfile.objects.create(user=self.juror2, rewards=20)
+
+        self.juror3 = User.objects.create_user(username='juror3', password='password123')
+        self.juror3_profile = UserProfile.objects.create(user=self.juror3, rewards=100)
+
+        self.task = Task.objects.create(
+            title="Appeal Test Task",
+            description="Description",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed'
+        )
+        Conversation.objects.create(task=self.task)
+
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Unresolved dispute",
+            deposit_amount=100,
+            escrow_status='held',
+            status='open'
+        )
+
+    def test_file_appeal_success_and_ledger(self):
+        self.client.login(username='taker', password='password123')
+
+        # Appeal fee for deposit_amount=100 is math.ceil(100 * 1.5) = 150
+        self.assertEqual(self.dispute.required_appeal_fee, 150)
+
+        response = self.client.post(reverse('file_appeal', args=[self.dispute.id]))
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'appealed')
+        self.assertEqual(self.dispute.appellant, self.taker)
+        self.assertEqual(self.dispute.appeal_fee, 150)
+
+        # Balance check: 500 - 150 = 350
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 350)
+
+        # Ledger check for 'appeal_fee'
+        ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='appeal_fee').first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, -150)
+
+    def test_file_appeal_insufficient_rewards(self):
+        self.taker_profile.rewards = 50
+        self.taker_profile.save()
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(reverse('file_appeal', args=[self.dispute.id]))
+
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'open')
+
+    def test_file_appeal_non_litigant_denied(self):
+        self.client.login(username='other', password='password123')
+        response = self.client.post(reverse('file_appeal', args=[self.dispute.id]))
+
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]), fetch_redirect_response=False)
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'open')
+
+    def test_file_appeal_window_expired(self):
+        self.dispute.status = 'resolved'
+        self.dispute.resolved_at = timezone.now() - timedelta(hours=49)
+        self.dispute.save()
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(reverse('file_appeal', args=[self.dispute.id]))
+
+        self.dispute.refresh_from_db()
+        self.assertNotEqual(self.dispute.status, 'appealed')
+
+    def test_juror_voting_and_stake_slashing(self):
+        # 1. File appeal
+        self.client.login(username='taker', password='password123')
+        self.client.post(reverse('file_appeal', args=[self.dispute.id]))
+
+        self.dispute.refresh_from_db()
+        self.dispute.jurors.set([self.juror1, self.juror2, self.juror3])
+
+        # 2. Juror 1 votes for Taker
+        self.client.login(username='juror1', password='password123')
+        self.client.post(reverse('cast_juror_vote', args=[self.dispute.id]), {'voted_for_id': self.taker.id})
+
+        # 3. Juror 2 votes for Poster (minority voter!)
+        self.client.login(username='juror2', password='password123')
+        self.client.post(reverse('cast_juror_vote', args=[self.dispute.id]), {'voted_for_id': self.poster.id})
+
+        # 4. Juror 3 votes for Taker (majority 2/3 reached!)
+        self.client.login(username='juror3', password='password123')
+        self.client.post(reverse('cast_juror_vote', args=[self.dispute.id]), {'voted_for_id': self.taker.id})
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'appeal_resolved')
+
+        # Check that Juror 2 (minority voter) was slashed
+        # Juror 2 initial rewards = 20. Slashing penalty = 50. Capped at 20 -> balance 0.
+        self.juror2_profile.refresh_from_db()
+        self.assertEqual(self.juror2_profile.rewards, 0)
+
+        # Check juror_slashing transaction ledger entry
+        slashing_ledger = RewardLedger.objects.filter(user=self.juror2, transaction_type='juror_slashing').first()
+        self.assertIsNotNone(slashing_ledger)
+        self.assertEqual(slashing_ledger.amount, -20)
+
+
