@@ -11,6 +11,44 @@
     </div>
 
     <div class="space-y-8">
+        <!-- Reputation & Risk Score Section -->
+        <div>
+            <h2 class="text-2xl font-bold text-gray-800 dark:text-white mb-4">Reputation & Reliability</h2>
+            <div class="bg-white/50 border border-gray-200 rounded-xl p-6 dark:bg-gray-800/50 dark:border-gray-700/50">
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 text-center">
+                    <div class="p-3 bg-gray-100/50 dark:bg-gray-700/50 rounded-lg">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase">Reputation Score</p>
+                        <p class="text-2xl font-extrabold text-cyan-600 dark:text-cyan-400 mt-1" id="reputation-score">{{ viewed_profile.reputation_score }}</p>
+                    </div>
+                    <div class="p-3 bg-gray-100/50 dark:bg-gray-700/50 rounded-lg">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase">Risk Rating</p>
+                        <span class="inline-block mt-2 px-3 py-1 text-xs font-bold rounded-full
+                            {% if viewed_profile.risk_level == 'LOW' %}bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300
+                            {% elif viewed_profile.risk_level == 'MEDIUM' %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300
+                            {% else %}bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300{% endif %}"
+                            id="risk-rating-badge">
+                            {{ viewed_profile.get_risk_level_display }} Risk
+                        </span>
+                    </div>
+                    <div class="p-3 bg-gray-100/50 dark:bg-gray-700/50 rounded-lg">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase">Tasks Completed</p>
+                        <p class="text-2xl font-bold text-green-600 dark:text-green-400 mt-1">{{ viewed_profile.tasks_completed_count }}</p>
+                    </div>
+                    <div class="p-3 bg-gray-100/50 dark:bg-gray-700/50 rounded-lg">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase">Tasks Defaulted</p>
+                        <p class="text-2xl font-bold text-red-500 dark:text-red-400 mt-1">{{ viewed_profile.tasks_defaulted_count }}</p>
+                    </div>
+                    <div class="p-3 bg-gray-100/50 dark:bg-gray-700/50 rounded-lg col-span-2 sm:col-span-1">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase">Disputes Record</p>
+                        <p class="text-lg font-bold text-gray-700 dark:text-gray-300 mt-1">
+                            <span class="text-green-500">{{ viewed_profile.disputes_won_count }}W</span> /
+                            <span class="text-red-500">{{ viewed_profile.disputes_lost_count }}L</span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Bio Section -->
         <div>
             <h2 class="text-2xl font-bold text-gray-800 dark:text-white mb-4">About Me</h2>

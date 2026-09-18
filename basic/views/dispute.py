@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
 from ..models import Dispute, Task, Notification, RewardLedger
+from ..services import ReputationService
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -105,3 +106,53 @@ def withdraw_dispute(request, dispute_id):
         )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def resolve_dispute(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id, status='open')
+    task = dispute.task
+
+    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+        messages.error(request, "You are not authorized to resolve this dispute.")
+        return redirect('home')
+
+    winner_choice = request.POST.get('winner')  # 'poster' or 'taker'
+    if winner_choice not in ['poster', 'taker']:
+        messages.error(request, "Invalid dispute resolution choice.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    with transaction.atomic():
+        dispute.status = 'resolved'
+        dispute.save()
+
+        poster_profile = task.posted_by.userprofile
+        taker_profile = task.taken_by.userprofile if task.taken_by else None
+
+        if winner_choice == 'taker' and taker_profile:
+            task.status = 'completed'
+            task.save()
+            taker_profile.rewards += task.reward
+            taker_profile.save()
+            RewardLedger.objects.create(
+                user=task.taken_by, task=task, amount=task.reward,
+                transaction_type='task_completion', description=f"Resolved dispute in favor of taker: '{task.title}'"
+            )
+            ReputationService.record_task_completion(taker_profile)
+            ReputationService.record_dispute_resolution(winner_profile=taker_profile, loser_profile=poster_profile)
+        else:
+            task.status = 'cancelled'
+            task.save()
+            poster_profile.rewards += task.reward
+            poster_profile.save()
+            RewardLedger.objects.create(
+                user=task.posted_by, task=task, amount=task.reward,
+                transaction_type='task_cancellation', description=f"Refund for resolved dispute in favor of poster: '{task.title}'"
+            )
+            if taker_profile:
+                ReputationService.record_task_default(taker_profile)
+                ReputationService.record_dispute_resolution(winner_profile=poster_profile, loser_profile=taker_profile)
+
+        messages.success(request, "Dispute has been resolved.")
+    return redirect('dispute_detail', dispute_id=dispute.id)
+

@@ -3,7 +3,8 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from basic.models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from basic.services import ReputationService
 
 
 class DisputeDepositBondTests(TestCase):
@@ -182,3 +183,192 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class UserProfileReputationModelTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='testuser', password='password123')
+        self.profile = UserProfile.objects.create(user=self.user)
+
+    def test_default_profile_reputation_fields(self):
+        """Test initial default values for UserProfile reputation fields."""
+        self.assertEqual(self.profile.tasks_completed_count, 0)
+        self.assertEqual(self.profile.tasks_defaulted_count, 0)
+        self.assertEqual(self.profile.disputes_won_count, 0)
+        self.assertEqual(self.profile.disputes_lost_count, 0)
+        self.assertEqual(self.profile.reputation_score, 100)
+        self.assertEqual(self.profile.risk_level, 'LOW')
+
+
+class ReputationServiceTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='repuser', password='password123')
+        self.profile = UserProfile.objects.create(user=self.user)
+
+    def test_calculate_score_and_risk_level(self):
+        """Test formula calculations and risk levels."""
+        # Initial score
+        self.assertEqual(ReputationService.calculate_reputation_score(self.profile), 100)
+        self.assertEqual(ReputationService.calculate_risk_level(100, self.profile), 'LOW')
+
+        # Add completed tasks
+        self.profile.tasks_completed_count = 5
+        score = ReputationService.calculate_reputation_score(self.profile)
+        self.assertEqual(score, 150)
+        self.assertEqual(ReputationService.calculate_risk_level(score, self.profile), 'LOW')
+
+        # Add defaulted tasks
+        self.profile.tasks_defaulted_count = 3
+        score = ReputationService.calculate_reputation_score(self.profile) # 100 + 50 - 60 = 90
+        self.assertEqual(score, 90)
+        # 3 defaults => HIGH risk
+        self.assertEqual(ReputationService.calculate_risk_level(score, self.profile), 'HIGH')
+
+        # Floor at zero
+        self.profile.tasks_defaulted_count = 10
+        score = ReputationService.calculate_reputation_score(self.profile)
+        self.assertEqual(score, 0)
+
+    def test_record_task_completion_service(self):
+        """Test record_task_completion increments counter and recalculates score."""
+        ReputationService.record_task_completion(self.profile)
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.tasks_completed_count, 1)
+        self.assertEqual(self.profile.reputation_score, 110)
+
+    def test_record_task_default_service(self):
+        """Test record_task_default increments counter and recalculates score."""
+        ReputationService.record_task_default(self.profile)
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.tasks_defaulted_count, 1)
+        self.assertEqual(self.profile.reputation_score, 80)
+        self.assertEqual(self.profile.risk_level, 'MEDIUM')
+
+    def test_record_dispute_resolution_service(self):
+        """Test dispute resolution updates win/loss for involved parties."""
+        winner_user = User.objects.create_user(username='winner', password='password123')
+        winner_profile = UserProfile.objects.create(user=winner_user)
+
+        loser_user = User.objects.create_user(username='loser', password='password123')
+        loser_profile = UserProfile.objects.create(user=loser_user)
+
+        ReputationService.record_dispute_resolution(winner_profile, loser_profile)
+
+        winner_profile.refresh_from_db()
+        loser_profile.refresh_from_db()
+
+        self.assertEqual(winner_profile.disputes_won_count, 1)
+        self.assertEqual(winner_profile.reputation_score, 110)
+
+        self.assertEqual(loser_profile.disputes_lost_count, 1)
+        self.assertEqual(loser_profile.reputation_score, 80)
+
+
+class TaskAndDisputeLifecycleReputationTest(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title='Test Task',
+            description='Test Description',
+            reward=100,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=self.deadline
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_complete_task_view_updates_reputation(self):
+        """Test completing a task increments completed count and recalculates score."""
+        self.client.login(username='poster', password='password123')
+        response = self.client.get(reverse('complete_task', args=[self.task.id]))
+        self.assertEqual(response.status_code, 302)
+
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.tasks_completed_count, 1)
+        self.assertEqual(self.taker_profile.reputation_score, 110)
+
+    def test_abandon_task_view_updates_default_count(self):
+        """Test abandoning a task increments defaulted count and recalculates score."""
+        self.client.login(username='taker', password='password123')
+        response = self.client.get(reverse('abandon_task', args=[self.task.id]))
+        self.assertEqual(response.status_code, 302)
+
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.tasks_defaulted_count, 1)
+        self.assertEqual(self.taker_profile.reputation_score, 80)
+
+    def test_resolve_dispute_view_updates_reputation(self):
+        """Test resolving a dispute updates win/loss stats and risk score."""
+        dispute = Dispute.objects.create(task=self.task, raised_by=self.taker, reason='Incomplete work')
+        self.task.status = 'disputed'
+        self.task.save()
+
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(reverse('resolve_dispute', args=[dispute.id]), {'winner': 'poster'})
+        self.assertEqual(response.status_code, 302)
+
+        self.poster_profile.refresh_from_db()
+        self.taker_profile.refresh_from_db()
+
+        self.assertEqual(self.poster_profile.disputes_won_count, 1)
+        self.assertEqual(self.poster_profile.reputation_score, 110)
+
+        self.assertEqual(self.taker_profile.disputes_lost_count, 1)
+        self.assertEqual(self.taker_profile.tasks_defaulted_count, 1)
+        self.assertEqual(self.taker_profile.reputation_score, 60)
+
+
+class ProfileViewsReputationRenderingTest(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.user = User.objects.create_user(username='viewuser', password='password123')
+        self.profile = UserProfile.objects.create(
+            user=self.user,
+            tasks_completed_count=3,
+            tasks_defaulted_count=0,
+            disputes_won_count=1,
+            disputes_lost_count=0,
+            reputation_score=140,
+            risk_level='LOW'
+        )
+
+        self.other_user = User.objects.create_user(username='otheruser', password='password123')
+        self.other_profile = UserProfile.objects.create(user=self.other_user)
+
+    def test_user_profile_view_renders_reputation_metrics(self):
+        """Test user_profile_view renders reputation scores, stats, and risk badge."""
+        self.client.login(username='otheruser', password='password123')
+        response = self.client.get(reverse('user_profile', args=[self.user.id]))
+        self.assertEqual(response.status_code, 200)
+
+        self.assertContains(response, '140')
+        self.assertContains(response, 'Low Risk')
+        self.assertContains(response, '3') # tasks_completed_count
+
+    def test_edit_profile_view_renders_reputation_summary(self):
+        """Test profile_view renders reputation summary card for logged in user."""
+        self.client.login(username='viewuser', password='password123')
+        response = self.client.get(reverse('profile'))
+        self.assertEqual(response.status_code, 200)
+
+        self.assertContains(response, 'Your Reputation')
+        self.assertContains(response, '140')
+        self.assertContains(response, 'Low Risk')
+
+    def test_high_risk_level_assignment(self):
+        """Test assigning HIGH risk level when score drops below threshold."""
+        self.profile.tasks_defaulted_count = 10
+        ReputationService.update_reputation(self.profile)
+        self.profile.refresh_from_db()
+
+        self.assertEqual(self.profile.reputation_score, 0) # Floor at 0
+        self.assertEqual(self.profile.risk_level, 'HIGH')

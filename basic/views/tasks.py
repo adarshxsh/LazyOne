@@ -2,6 +2,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from ..models import Task, Conversation, Notification, RewardLedger
+from ..services import ReputationService
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
@@ -89,12 +90,19 @@ def complete_task(request, task_id):
         task.status = 'completed'
         task.save()
 
-        if hasattr(task, 'dispute') and task.dispute.status == 'open':
-            task.dispute.refund_deposit(
-                reason_description=f"Security deposit bond refunded upon dispute resolution for task: '{task.title}'"
-            )
+        # Update reputation metrics for task completion
+        ReputationService.record_task_completion(task_doer_profile)
+
+        if hasattr(task, 'dispute') and task.dispute.status != 'resolved':
+            if task.dispute.status == 'open':
+                task.dispute.refund_deposit(
+                    reason_description=f"Security deposit bond refunded upon dispute resolution for task: '{task.title}'"
+                )
             task.dispute.status = 'resolved'
             task.dispute.save()
+            # Poster completing a disputed task resolves dispute in favor of doer (taker wins, poster loses)
+            poster_profile = task.posted_by.userprofile
+            ReputationService.record_dispute_resolution(winner_profile=task_doer_profile, loser_profile=poster_profile)
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,
@@ -159,6 +167,9 @@ def accept_cancellation(request, task_id):
 def abandon_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
     with transaction.atomic():
+        taker_profile = request.user.userprofile
+        ReputationService.record_task_default(taker_profile)
+
         task.status = 'available'
         task.taken_by = None
         task.save()
