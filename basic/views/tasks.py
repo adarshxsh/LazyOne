@@ -1,7 +1,7 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from ..models import Task, Conversation, Notification, RewardLedger
+from ..models import Task, Conversation, Notification, RewardLedger, Dispute
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
@@ -89,12 +89,11 @@ def complete_task(request, task_id):
         task.status = 'completed'
         task.save()
 
-        if hasattr(task, 'dispute') and task.dispute.status == 'open':
+        if hasattr(task, 'dispute') and task.dispute.status not in ['resolved', 'withdrawn']:
             task.dispute.refund_deposit(
                 reason_description=f"Security deposit bond refunded upon dispute resolution for task: '{task.title}'"
             )
-            task.dispute.status = 'resolved'
-            task.dispute.save()
+            Dispute.objects.filter(id=task.dispute.id).update(status='resolved')
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,

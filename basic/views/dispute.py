@@ -2,7 +2,9 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from django.core.exceptions import ValidationError
+from django.contrib.auth.models import User
+from ..models import Dispute, Task, Notification, RewardLedger, DisputeEvidence, DisputeVote
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,12 +12,27 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+    is_participant = (request.user == task.posted_by or request.user == task.taken_by)
+    
+    if not is_participant and not request.user.is_staff and dispute.status != 'voting' and dispute.status != 'resolved':
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+
+    evidence_list = dispute.evidence.all().order_by('created_at')
+    votes = dispute.votes.all()
+    has_voted = votes.filter(voter=request.user).exists()
+    poster_votes = votes.filter(voted_for=task.posted_by).count()
+    taker_votes = votes.filter(voted_for=task.taken_by).count()
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'evidence_list': evidence_list,
+        'votes': votes,
+        'is_participant': is_participant,
+        'has_voted': has_voted,
+        'poster_votes': poster_votes,
+        'taker_votes': taker_votes,
     }
     return render(request, 'dispute_detail.html', context)
 
@@ -85,23 +102,67 @@ def raise_dispute(request, task_id):
 
 @login_required(login_url='/login/')
 @require_POST
+def submit_evidence_view(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    evidence_text = request.POST.get('evidence_text') or request.POST.get('text')
+    evidence_url = request.POST.get('evidence_url')
+    if not evidence_text:
+        messages.error(request, "Evidence text is required.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+    try:
+        dispute.submit_evidence(request.user, evidence_text, evidence_url)
+        messages.success(request, "Evidence submitted successfully.")
+    except ValidationError as e:
+        messages.error(request, e.message if hasattr(e, 'message') else str(e))
+    return redirect('dispute_detail', dispute_id=dispute.id)
+
+@login_required(login_url='/login/')
+@require_POST
+def start_voting_view(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    try:
+        dispute.start_voting()
+        messages.success(request, "Voting phase initiated.")
+    except ValidationError as e:
+        messages.error(request, e.message if hasattr(e, 'message') else str(e))
+    return redirect('dispute_detail', dispute_id=dispute.id)
+
+@login_required(login_url='/login/')
+@require_POST
+def cast_vote_view(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    voted_for_id = request.POST.get('voted_for')
+    if not voted_for_id:
+        messages.error(request, "Selection required to vote.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+    voted_for = get_object_or_404(User, id=voted_for_id)
+    try:
+        dispute.cast_vote(request.user, voted_for)
+        messages.success(request, f"Vote registered for {voted_for.username}.")
+    except ValidationError as e:
+        messages.error(request, e.message if hasattr(e, 'message') else str(e))
+    return redirect('dispute_detail', dispute_id=dispute.id)
+
+@login_required(login_url='/login/')
+@require_POST
+def finalize_resolution_view(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    outcome = request.POST.get('outcome')
+    try:
+        dispute.finalize_resolution(outcome=outcome if outcome else None)
+        messages.success(request, "Dispute resolution finalized successfully.")
+    except ValidationError as e:
+        messages.error(request, e.message if hasattr(e, 'message') else str(e))
+    return redirect('dispute_detail', dispute_id=dispute.id)
+
+@login_required(login_url='/login/')
+@require_POST
 def withdraw_dispute(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user)
-    task = dispute.task
-    with transaction.atomic():
-        dispute.refund_deposit(
-            reason_description=f"Security deposit bond refunded for withdrawn dispute on task: '{task.title}'"
-        )
-        dispute.status = 'resolved'
-        dispute.save()
-
-        task.status = 'in_progress'
-        task.save()
-
-        Notification.objects.create(
-            recipient=task.posted_by,
-            message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
-            link=reverse('my_tasks')
-        )
-    messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
+    try:
+        dispute.withdraw(request.user)
+        messages.success(request, f"You have successfully withdrawn the dispute for '{dispute.task.title}'. Your deposit bond has been refunded.")
+    except ValidationError as e:
+        messages.error(request, e.message if hasattr(e, 'message') else str(e))
     return redirect('my_tasks')
+
