@@ -192,3 +192,33 @@ class Notification(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+
+class JuryPool(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='jury_pool')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jury_assignments')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Juror {self.juror.username} for Dispute {self.dispute.id}"
+
+
+class JuryVote(models.Model):
+    VOTE_CHOICES = (
+        ('poster', 'Poster Wins'),
+        ('taker', 'Taker Wins'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jury_votes')
+    vote = models.CharField(max_length=10, choices=VOTE_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"{self.juror.username} voted {self.vote} on Dispute {self.dispute.id}"
+
