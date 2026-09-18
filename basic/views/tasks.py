@@ -81,7 +81,10 @@ def take_task(request, task_id):
 
 @login_required(login_url='/login/')
 def complete_task(request, task_id):
-    task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
+    task = get_object_or_404(Task, id=task_id, posted_by=request.user)
+    if task.status not in ['in_progress', 'disputed']:
+        messages.error(request, "Task is not in progress or under dispute.")
+        return redirect('my_tasks')
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
         task_doer_profile.rewards += task.reward
