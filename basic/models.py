@@ -2,6 +2,7 @@ import math
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.core.exceptions import ValidationError
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -82,7 +83,11 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('evidence_submission', 'Evidence Submission'),
+        ('voting', 'Voting'),
+        ('appealed', 'Appealed'),
         ('resolved', 'Resolved'),
+        ('withdrawn', 'Withdrawn'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
@@ -92,7 +97,7 @@ class Dispute(models.Model):
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -141,6 +146,84 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+    def submit_evidence(self, user=None, text="", file=None, description="", **kwargs):
+        if self.status not in ['open', 'evidence_submission']:
+            raise ValidationError(f"Cannot submit evidence when dispute is in status '{self.status}'.")
+        self.status = 'evidence_submission'
+        self.save()
+        if user is not None:
+            evidence_text = text or description
+            evidence = DisputeEvidence.objects.create(
+                dispute=self,
+                user=user,
+                text=evidence_text,
+                file=file
+            )
+            return evidence
+
+    def start_voting(self, **kwargs):
+        if self.status not in ['open', 'evidence_submission']:
+            raise ValidationError(f"Cannot start voting when dispute is in status '{self.status}'.")
+        self.status = 'voting'
+        self.save()
+
+    def appeal(self, **kwargs):
+        if self.status not in ['resolved']:
+            raise ValidationError(f"Cannot appeal a dispute when in status '{self.status}'.")
+        self.status = 'appealed'
+        self.save()
+
+    def resolve(self, **kwargs):
+        if self.status not in ['open', 'evidence_submission', 'voting', 'appealed']:
+            raise ValidationError(f"Cannot resolve a dispute in status '{self.status}'.")
+        self.status = 'resolved'
+        self.save()
+
+    def withdraw(self, **kwargs):
+        if self.status not in ['open', 'evidence_submission', 'voting', 'appealed']:
+            raise ValidationError(f"Cannot withdraw a dispute in status '{self.status}'.")
+        self.status = 'withdrawn'
+        self.save()
+
+
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidence_entries')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_evidence')
+    text = models.TextField(blank=True, default='')
+    file = models.FileField(upload_to='dispute_evidence/', blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Evidence by {self.user.username} for Dispute #{self.dispute.id}"
+
+    @property
+    def submitted_at(self):
+        return self.created_at
+
+    @property
+    def submitted_by(self):
+        return self.user
+
+    @property
+    def description(self):
+        return self.text
+
+    @description.setter
+    def description(self, value):
+        self.text = value
+
+    @property
+    def evidence_text(self):
+        return self.text
+
+    @property
+    def statement(self):
+        return self.text
+
+    @property
+    def file_path(self):
+        return self.file.name if self.file else ''
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)

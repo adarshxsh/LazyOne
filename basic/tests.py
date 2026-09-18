@@ -1,9 +1,12 @@
-from django.test import TestCase, Client
+import tempfile
+from django.test import TestCase, override_settings, Client
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from basic.models import UserProfile, Task, Dispute, DisputeEvidence, RewardLedger, Conversation
 
 
 class DisputeDepositBondTests(TestCase):
@@ -113,7 +116,7 @@ class DisputeDepositBondTests(TestCase):
 
         dispute.refresh_from_db()
         self.assertEqual(dispute.escrow_status, 'refunded')
-        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.status, 'withdrawn')
 
         # Balance restored: 40 + 60 = 100
         self.taker_profile.refresh_from_db()
@@ -182,3 +185,165 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+@override_settings(
+    PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'],
+    MEDIA_ROOT=tempfile.mkdtemp()
+)
+class DisputeLifecycleAndEvidenceTests(TestCase):
+    def setUp(self):
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.other_user = User.objects.create_user(username='other', password='password123')
+
+        self.task = Task.objects.create(
+            title='Test Task',
+            description='Do something',
+            reward=100,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed'
+        )
+        self.conversation = Conversation.objects.create(task=self.task)
+        self.conversation.participants.add(self.poster, self.taker)
+
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Task work was not acknowledged'
+        )
+
+        self.client = Client()
+
+    def test_status_choices_expansion(self):
+        expected_choices = ['open', 'evidence_submission', 'voting', 'appealed', 'resolved', 'withdrawn']
+        actual_choices = [choice[0] for choice in Dispute.STATUS_CHOICES]
+        for choice in expected_choices:
+            self.assertIn(choice, actual_choices)
+
+    def test_dispute_evidence_model_creation_and_attribution(self):
+        evidence1 = DisputeEvidence.objects.create(
+            dispute=self.dispute,
+            user=self.taker,
+            text='Proof of completion screenshot'
+        )
+        uploaded_file = SimpleUploadedFile('screenshot.png', b'file_content', content_type='image/png')
+        evidence2 = DisputeEvidence.objects.create(
+            dispute=self.dispute,
+            user=self.poster,
+            text='Counter proof statement',
+            file=uploaded_file
+        )
+
+        self.assertEqual(self.dispute.evidence_entries.count(), 2)
+        self.assertEqual(evidence1.submitted_by, self.taker)
+        self.assertEqual(evidence1.description, 'Proof of completion screenshot')
+        self.assertEqual(evidence2.submitted_by, self.poster)
+        self.assertIn('screenshot', evidence2.file_path)
+
+    def test_submit_evidence_transition(self):
+        self.assertEqual(self.dispute.status, 'open')
+        evidence = self.dispute.submit_evidence(user=self.taker, text='First evidence')
+        self.assertEqual(self.dispute.status, 'evidence_submission')
+        self.assertIsNotNone(evidence)
+        self.assertEqual(evidence.text, 'First evidence')
+
+        # Additional evidence submission in evidence_submission state
+        evidence2 = self.dispute.submit_evidence(user=self.poster, text='Second evidence')
+        self.assertEqual(self.dispute.status, 'evidence_submission')
+        self.assertEqual(self.dispute.evidence_entries.count(), 2)
+
+    def test_start_voting_transition(self):
+        self.dispute.submit_evidence(user=self.taker, text='Evidence before voting')
+        self.assertEqual(self.dispute.status, 'evidence_submission')
+
+        self.dispute.start_voting()
+        self.assertEqual(self.dispute.status, 'voting')
+
+    def test_resolve_and_appeal_transitions(self):
+        self.dispute.start_voting()
+        self.assertEqual(self.dispute.status, 'voting')
+
+        self.dispute.resolve()
+        self.assertEqual(self.dispute.status, 'resolved')
+
+        self.dispute.appeal()
+        self.assertEqual(self.dispute.status, 'appealed')
+
+        self.dispute.resolve()
+        self.assertEqual(self.dispute.status, 'resolved')
+
+    def test_invalid_state_transitions_raise_validation_error(self):
+        # Open directly to appealed is invalid
+        with self.assertRaises(ValidationError):
+            self.dispute.appeal()
+
+        # Resolve the dispute
+        self.dispute.resolve()
+        self.assertEqual(self.dispute.status, 'resolved')
+
+        # Cannot submit evidence when resolved
+        with self.assertRaises(ValidationError):
+            self.dispute.submit_evidence(user=self.taker, text='Late evidence')
+
+        # Cannot start voting when resolved
+        with self.assertRaises(ValidationError):
+            self.dispute.start_voting()
+
+        # Cannot resolve an already resolved dispute
+        with self.assertRaises(ValidationError):
+            self.dispute.resolve()
+
+        # Cannot withdraw a resolved dispute
+        with self.assertRaises(ValidationError):
+            self.dispute.withdraw()
+
+    def test_withdraw_dispute_retains_instance(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(reverse('withdraw_dispute', args=[self.dispute.id]))
+        self.assertRedirects(response, reverse('my_tasks'), fetch_redirect_response=False)
+
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'withdrawn')
+        self.assertTrue(Dispute.objects.filter(id=self.dispute.id).exists())
+        self.assertEqual(self.task.status, 'in_progress')
+
+        # Attempting to withdraw again should raise ValidationError
+        with self.assertRaises(ValidationError):
+            self.dispute.withdraw()
+
+    def test_dispute_detail_view_renders_status_badge_and_evidence(self):
+        DisputeEvidence.objects.create(
+            dispute=self.dispute,
+            user=self.taker,
+            text='Initial proof submitted'
+        )
+
+        self.client.login(username='taker', password='password123')
+        url = reverse('dispute_detail', args=[self.dispute.id])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Open')
+        self.assertContains(response, 'Initial proof submitted')
+        self.assertContains(response, 'Submit Evidence')
+
+    def test_dispute_detail_post_submits_evidence(self):
+        self.client.login(username='poster', password='password123')
+        url = reverse('dispute_detail', args=[self.dispute.id])
+        
+        test_file = SimpleUploadedFile('log.txt', b'log_data', content_type='text/plain')
+        response = self.client.post(url, {
+            'text': 'Poster response statement',
+            'file': test_file
+        })
+
+        self.assertRedirects(response, url)
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'evidence_submission')
+        self.assertEqual(self.dispute.evidence_entries.count(), 1)
+        evidence = self.dispute.evidence_entries.first()
+        self.assertEqual(evidence.user, self.poster)
+        self.assertEqual(evidence.text, 'Poster response statement')
