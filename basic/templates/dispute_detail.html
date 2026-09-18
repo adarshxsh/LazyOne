@@ -3,12 +3,20 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
+    <div class="flex justify-between items-center mb-6">
+        <h2 class="text-3xl font-bold text-white">Dispute Details</h2>
+        {% if task.conversation %}
+            <a href="{% url 'chat_view' task.conversation.id %}" class="bg-cyan-500 hover:bg-cyan-600 text-white font-semibold px-4 py-2 rounded-lg transition-colors text-sm">
+                View Dispute Chat
+            </a>
+        {% endif %}
+    </div>
 
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg"><span class="font-bold text-white">{{ dispute.task.title }}</span> (Reward: {{ dispute.task.reward }} points)</p>
+            <p class="text-sm text-gray-400">Posted by: {{ dispute.task.posted_by.username }} | Taken by: {{ dispute.task.taken_by.username }}</p>
         </div>
 
         <div>
@@ -16,13 +24,77 @@
             <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y H:i" }}</p>
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if is_expired and dispute.status == 'open' %}
+            <div class="p-4 bg-red-900/40 border border-red-700 rounded-lg text-red-200">
+                <p class="font-semibold">Voting Window Expired (48 Hours)</p>
+                <p class="text-sm text-red-300">The 48-hour jury voting window has closed without reaching quorum. This dispute has been escalated to platform staff for review.</p>
+            </div>
+        {% endif %}
+
+        {% if is_juror %}
+            <div class="bg-gray-800/80 p-6 rounded-xl border border-gray-700 space-y-4">
+                <h3 class="text-xl font-bold text-cyan-400">Jury Arbitration Panel</h3>
+                
+                {% if can_vote %}
+                    <p class="text-sm text-gray-300">You have been impaneled as a juror for this dispute. Review the dispute chat history and submit your secret vote below:</p>
+                    <form action="{% url 'submit_dispute_vote' dispute.id %}" method="post" class="space-y-4">
+                        {% csrf_token %}
+                        <div class="space-y-2">
+                            <label class="block text-sm font-semibold text-gray-200">Select Verdict Choice:</label>
+                            <div class="flex items-center space-x-6">
+                                <label class="inline-flex items-center space-x-2 text-white cursor-pointer">
+                                    <input type="radio" name="choice" value="poster" required class="text-cyan-500 focus:ring-cyan-400">
+                                    <span>In favor of Task Poster ({{ task.posted_by.username }})</span>
+                                </label>
+                                <label class="inline-flex items-center space-x-2 text-white cursor-pointer">
+                                    <input type="radio" name="choice" value="taker" required class="text-cyan-500 focus:ring-cyan-400">
+                                    <span>In favor of Task Doer ({{ task.taken_by.username }})</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div>
+                            <label for="reason" class="block text-sm font-semibold text-gray-200 mb-1">Reason / Justification (optional):</label>
+                            <textarea id="reason" name="reason" rows="3" class="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500" placeholder="Explain your rationale..."></textarea>
+                        </div>
+                        <button type="submit" class="bg-cyan-500 hover:bg-cyan-600 text-white font-bold px-6 py-2 rounded-lg transition-colors text-sm">
+                            Submit Secret Vote
+                        </button>
+                    </form>
+                {% elif has_voted %}
+                    <div class="p-4 bg-cyan-900/30 border border-cyan-700 rounded-lg text-cyan-200 text-sm">
+                        You cast your vote for <strong>{{ user_vote.get_choice_display }}</strong> on {{ user_vote.voted_at|date:"F d, Y H:i" }}.
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        {% if show_results %}
+            <div class="bg-gray-800/80 p-6 rounded-xl border border-gray-700 space-y-3">
+                <h3 class="text-xl font-bold text-cyan-400">Jury Voting Status</h3>
+                <div class="grid grid-cols-3 gap-4 text-center">
+                    <div class="bg-gray-900 p-3 rounded-lg border border-gray-700">
+                        <p class="text-2xl font-bold text-white">{{ poster_votes }}</p>
+                        <p class="text-xs text-gray-400">Poster Votes</p>
+                    </div>
+                    <div class="bg-gray-900 p-3 rounded-lg border border-gray-700">
+                        <p class="text-2xl font-bold text-white">{{ taker_votes }}</p>
+                        <p class="text-xs text-gray-400">Doer Votes</p>
+                    </div>
+                    <div class="bg-gray-900 p-3 rounded-lg border border-gray-700">
+                        <p class="text-2xl font-bold text-white">{{ total_votes }}</p>
+                        <p class="text-xs text-gray-400">Total Votes Cast</p>
+                    </div>
+                </div>
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}
