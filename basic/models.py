@@ -1,7 +1,9 @@
 import math
-from django.db import models
+from django.db import models, transaction
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.core.exceptions import ValidationError
+from datetime import timedelta
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -80,22 +82,86 @@ class RewardLedger(models.Model):
         return f"{self.user.username}: {self.amount} points for {self.description}"
 
 class Dispute(models.Model):
+    STATUS_INITIATED = 'initiated'
+    STATUS_EVIDENCE_SUBMISSION = 'evidence_submission'
+    STATUS_VOTING = 'voting'
+    STATUS_APPEALED = 'appealed'
+    STATUS_RESOLVED = 'resolved'
+    STATUS_CANCELLED = 'cancelled'
+
     STATUS_CHOICES = (
-        ('open', 'Open'),
-        ('resolved', 'Resolved'),
+        (STATUS_INITIATED, 'Initiated'),
+        (STATUS_EVIDENCE_SUBMISSION, 'Evidence Submission'),
+        (STATUS_VOTING, 'Voting'),
+        (STATUS_APPEALED, 'Appealed'),
+        (STATUS_RESOLVED, 'Resolved'),
+        (STATUS_CANCELLED, 'Cancelled'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
         ('refunded', 'Refunded'),
         ('forfeited', 'Forfeited'),
     )
+
+    VALID_TRANSITIONS = {
+        STATUS_INITIATED: {STATUS_EVIDENCE_SUBMISSION, STATUS_CANCELLED},
+        STATUS_EVIDENCE_SUBMISSION: {STATUS_VOTING, STATUS_RESOLVED, STATUS_CANCELLED},
+        STATUS_VOTING: {STATUS_APPEALED, STATUS_RESOLVED, STATUS_CANCELLED},
+        STATUS_APPEALED: {STATUS_VOTING, STATUS_EVIDENCE_SUBMISSION, STATUS_RESOLVED, STATUS_CANCELLED},
+        STATUS_RESOLVED: {STATUS_APPEALED},
+        STATUS_CANCELLED: set(),
+    }
+
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_INITIATED)
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
+
+    evidence_deadline = models.DateTimeField(null=True, blank=True)
+    voting_deadline = models.DateTimeField(null=True, blank=True)
+    appeal_deadline = models.DateTimeField(null=True, blank=True)
+
+    def can_transition_to(self, target_status):
+        allowed = self.VALID_TRANSITIONS.get(self.status, set())
+        return target_status in allowed
+
+    def validate_transition(self, target_status):
+        if not self.can_transition_to(target_status):
+            raise ValidationError(
+                f"Cannot transition dispute from '{self.status}' to '{target_status}'."
+            )
+
+    def transition_to(self, target_status, save=True, deadline=None):
+        self.validate_transition(target_status)
+        now = timezone.now()
+        with transaction.atomic():
+            self.status = target_status
+            if target_status == self.STATUS_EVIDENCE_SUBMISSION:
+                self.evidence_deadline = deadline or (now + timedelta(days=1))
+            elif target_status == self.STATUS_VOTING:
+                self.voting_deadline = deadline or (now + timedelta(days=2))
+            elif target_status == self.STATUS_APPEALED:
+                self.appeal_deadline = deadline or (now + timedelta(days=1))
+            elif target_status == self.STATUS_RESOLVED:
+                if not self.appeal_deadline:
+                    self.appeal_deadline = deadline or (now + timedelta(days=1))
+
+            if save:
+                super().save()
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            orig = Dispute.objects.filter(pk=self.pk).values('status').first()
+            if orig and orig['status'] != self.status:
+                allowed = self.VALID_TRANSITIONS.get(orig['status'], set())
+                if self.status not in allowed:
+                    raise ValidationError(
+                        f"Cannot transition dispute from '{orig['status']}' to '{self.status}'."
+                    )
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"

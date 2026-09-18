@@ -2,6 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
+from django.core.exceptions import ValidationError
 from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
@@ -32,7 +33,6 @@ def raise_dispute(request, task_id):
         if not reason:
             messages.error(request, "A reason is required to raise a dispute.")
             return redirect('my_tasks')
-
         deposit_amount = task.deposit_bond_amount
         user_profile = request.user.userprofile
         if user_profile.rewards < deposit_amount:
@@ -50,7 +50,7 @@ def raise_dispute(request, task_id):
                 dispute = task.dispute
                 dispute.raised_by = request.user
                 dispute.reason = reason
-                dispute.status = 'open'
+                dispute.status = Dispute.STATUS_INITIATED
                 dispute.deposit_amount = deposit_amount
                 dispute.escrow_status = 'held'
                 dispute.save()
@@ -59,9 +59,12 @@ def raise_dispute(request, task_id):
                     task=task,
                     raised_by=request.user,
                     reason=reason,
+                    status=Dispute.STATUS_INITIATED,
                     deposit_amount=deposit_amount,
                     escrow_status='held'
                 )
+
+            dispute.transition_to(Dispute.STATUS_EVIDENCE_SUBMISSION)
 
             RewardLedger.objects.create(
                 user=request.user,
@@ -92,8 +95,7 @@ def withdraw_dispute(request, dispute_id):
         dispute.refund_deposit(
             reason_description=f"Security deposit bond refunded for withdrawn dispute on task: '{task.title}'"
         )
-        dispute.status = 'resolved'
-        dispute.save()
+        dispute.transition_to(Dispute.STATUS_CANCELLED)
 
         task.status = 'in_progress'
         task.save()
@@ -105,3 +107,26 @@ def withdraw_dispute(request, dispute_id):
         )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def transition_dispute(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+        messages.error(request, "You are not authorized to perform transition actions on this dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    target_status = request.POST.get('target_status')
+    if not target_status:
+        messages.error(request, "Target status is required.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    try:
+        with transaction.atomic():
+            dispute.transition_to(target_status)
+            messages.success(request, f"Dispute status updated to '{dispute.get_status_display()}'.")
+    except ValidationError as e:
+        messages.error(request, e.message if hasattr(e, 'message') else str(e))
+
+    return redirect('dispute_detail', dispute_id=dispute.id)
