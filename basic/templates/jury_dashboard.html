@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+
+{% block title %}Jury Portal - {{ block.super }}{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-700 pb-6">
+        <div>
+            <h2 class="text-3xl font-bold text-white">Community Jury Portal</h2>
+            <p class="text-gray-400 mt-1">Review disputes, cast confidential votes, and help resolve platform tasks fairly.</p>
+        </div>
+        <div class="bg-gray-800 p-4 rounded-xl border border-gray-700 flex items-center space-x-4">
+            <div>
+                <span class="text-xs uppercase text-gray-400 tracking-wider">Juror Status</span>
+                <p class="font-semibold text-lg">
+                    {% if jury_pool.is_eligible %}
+                        <span class="text-green-400">● Eligible Juror</span>
+                    {% else %}
+                        <span class="text-red-400">● Ineligible (Missed Deadline)</span>
+                    {% endif %}
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pending Disputes -->
+    <div>
+        <h3 class="text-xl font-bold text-cyan-400 mb-4 flex items-center">
+            <span>Pending Jury Assignments</span>
+            <span class="ml-2 bg-cyan-900/50 text-cyan-300 text-xs px-2.5 py-0.5 rounded-full border border-cyan-700/50">
+                {{ pending_assignments|length }}
+            </span>
+        </h3>
+
+        {% if pending_assignments %}
+            <div class="grid gap-4 md:grid-cols-2">
+                {% for assignment in pending_assignments %}
+                    <div class="bg-gray-800/80 p-5 rounded-xl border border-gray-700 hover:border-cyan-500/50 transition duration-200">
+                        <div class="flex justify-between items-start mb-3">
+                            <h4 class="font-bold text-lg text-white">{{ assignment.dispute.task.title }}</h4>
+                            <span class="text-xs px-2.5 py-1 rounded-full bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">
+                                Action Required
+                            </span>
+                        </div>
+                        <p class="text-sm text-gray-300 line-clamp-2 mb-4">
+                            <strong>Reason:</strong> {{ assignment.dispute.reason }}
+                        </p>
+                        <div class="flex justify-between items-center text-xs text-gray-400 pt-3 border-t border-gray-700/50">
+                            <span>Deadline: {{ assignment.dispute.voting_deadline|date:"M d, H:i" }}</span>
+                            <a href="{% url 'jury_dispute_detail' assignment.dispute.id %}" class="bg-cyan-500 hover:bg-cyan-600 text-white font-medium px-3 py-1.5 rounded-lg text-xs transition">
+                                Review & Vote →
+                            </a>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="bg-gray-800/40 p-6 rounded-xl border border-gray-700/50 text-center text-gray-400">
+                You have no pending jury assignments at this time.
+            </div>
+        {% endif %}
+    </div>
+
+    <!-- Completed Assignments -->
+    <div>
+        <h3 class="text-xl font-bold text-gray-300 mb-4">Past Jury Service</h3>
+        {% if completed_assignments %}
+            <div class="space-y-3">
+                {% for assignment in completed_assignments %}
+                    <div class="bg-gray-800/40 p-4 rounded-xl border border-gray-700/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div>
+                            <h4 class="font-medium text-white">{{ assignment.dispute.task.title }}</h4>
+                            <p class="text-xs text-gray-400">Status: <span class="capitalize text-gray-300">{{ assignment.dispute.status }}</span></p>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            {% if assignment.has_voted %}
+                                <span class="text-xs bg-green-900/40 text-green-300 px-2.5 py-1 rounded-full border border-green-700/50">Vote Cast</span>
+                            {% else %}
+                                <span class="text-xs bg-gray-700 text-gray-400 px-2.5 py-1 rounded-full">Expired</span>
+                            {% endif %}
+                            <a href="{% url 'jury_dispute_detail' assignment.dispute.id %}" class="text-xs text-cyan-400 hover:underline">View Details</a>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="bg-gray-800/40 p-6 rounded-xl border border-gray-700/50 text-center text-gray-400">
+                No past jury service recorded.
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
