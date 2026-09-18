@@ -68,11 +68,14 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('juror_stake_lock', 'Juror Stake Lock'),
+        ('juror_stake_release', 'Juror Stake Release'),
+        ('juror_stake_slashed', 'Juror Stake Slashed'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -82,6 +85,7 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('under_review', 'Under Review'),
         ('resolved', 'Resolved'),
     )
     ESCROW_STATUS_CHOICES = (
@@ -141,6 +145,48 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+    def release_juror_stakes(self, reason_description=None):
+        assignments = self.juror_assignments.filter(status__in=['assigned', 'active', 'voted'])
+        for assignment in assignments:
+            juror_profile = assignment.user.userprofile
+            juror_profile.rewards += assignment.staked_amount
+            juror_profile.save()
+
+            desc = reason_description or f"Juror stake released for dispute on task: '{self.task.title}'"
+            RewardLedger.objects.create(
+                user=assignment.user,
+                task=self.task,
+                amount=assignment.staked_amount,
+                transaction_type='juror_stake_release',
+                description=desc
+            )
+            assignment.status = 'released'
+            assignment.save()
+
+class JurorAssignment(models.Model):
+    STATUS_CHOICES = (
+        ('assigned', 'Assigned'),
+        ('active', 'Active'),
+        ('voted', 'Voted'),
+        ('released', 'Released'),
+        ('slashed', 'Slashed'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='juror_assignments')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='juror_assignments')
+    staked_amount = models.PositiveIntegerField(default=100)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='assigned')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'user')
+
+    def __str__(self):
+        return f"Juror {self.user.username} for dispute {self.dispute.id} ({self.status})"
+
+    @property
+    def juror(self):
+        return self.user
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)

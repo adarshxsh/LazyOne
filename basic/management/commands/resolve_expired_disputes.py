@@ -28,6 +28,9 @@ class Command(BaseCommand):
         for dispute in expired_disputes:
             task = dispute.task
             with transaction.atomic():
+                dispute.release_juror_stakes(
+                    reason_description=f"Juror stake released on auto-resolved dispute for task '{task.title}'"
+                )
                 dispute.status = 'resolved'
                 dispute.save()
 
