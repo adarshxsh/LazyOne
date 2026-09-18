@@ -3,6 +3,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from ..models import UserProfile, FriendRequest, Friendship, Notification
 from django.contrib.auth.models import User
+from django.db import transaction
 from django.urls import reverse
 import json
 
@@ -47,66 +48,75 @@ def friends_view(request):
 def send_friend_request(request, user_id):
     if request.method == 'POST':
         to_user = get_object_or_404(User, id=user_id)
-        closeness = request.POST.get('closeness', 50)
-        friend_request, created = FriendRequest.objects.get_or_create(
-            from_user=request.user,
-            to_user=to_user,
-            defaults={'closeness': closeness}
-        )
-        if created:
-            messages.success(request, 'Friend request sent.')
-            # Create notification for the recipient
-            Notification.objects.create(
-                recipient=to_user,
-                message=f"{request.user.username} sent you a friend request.",
-                link=reverse('friends') # Link to the friends page
+        with transaction.atomic():
+            friend_request, created = FriendRequest.objects.get_or_create(
+                from_user=request.user,
+                to_user=to_user
             )
-        else:
-            messages.info(request, 'Friend request already sent.')
+            if created:
+                messages.success(request, 'Friend request sent.')
+                # Create notification for the recipient
+                Notification.objects.create(
+                    recipient=to_user,
+                    message=f"{request.user.username} sent you a friend request.",
+                    link=reverse('friends') # Link to the friends page
+                )
+            else:
+                messages.info(request, 'Friend request already sent.')
     return redirect('friends')
 
 @login_required(login_url='/login/')
 def accept_friend_request(request, request_id):
-    friend_request = get_object_or_404(FriendRequest, id=request_id)
-    if friend_request.to_user == request.user:
+    with transaction.atomic():
+        friend_request = FriendRequest.objects.select_for_update().filter(id=request_id).first()
+        if not friend_request or friend_request.to_user != request.user:
+            messages.error(request, 'Invalid request.')
+            return redirect('friends')
+
+        # To prevent deadlocks when two users accept mutual friend requests concurrently,
+        # lock profiles in deterministic order by primary key 'id'.
         from_user_profile = UserProfile.objects.get(user=friend_request.from_user)
         to_user_profile = UserProfile.objects.get(user=request.user)
-        from_user_profile.friends.add(to_user_profile)
-        to_user_profile.friends.add(from_user_profile)
+
+        locked_profiles = list(
+            UserProfile.objects.select_for_update()
+            .filter(id__in=[from_user_profile.id, to_user_profile.id])
+            .order_by('id')
+        )
+        profile_map = {p.id: p for p in locked_profiles}
+        locked_from_profile = profile_map[from_user_profile.id]
+        locked_to_profile = profile_map[to_user_profile.id]
+
+        locked_from_profile.friends.add(locked_to_profile)
+        locked_to_profile.friends.add(locked_from_profile)
+        closeness = request.POST.get('closeness', 50) if request.method == 'POST' else 50
         Friendship.objects.get_or_create(
-            from_user=from_user_profile,
-            to_user=to_user_profile,
-            defaults={'closeness': friend_request.closeness}
+            from_user=locked_from_profile,
+            to_user=locked_to_profile,
+            defaults={'closeness': closeness}
         )
         Friendship.objects.get_or_create(
-            from_user=to_user_profile,
-            to_user=from_user_profile,
-            defaults={'closeness': friend_request.closeness}
+            from_user=locked_to_profile,
+            to_user=locked_from_profile,
+            defaults={'closeness': closeness}
         )
         friend_request.delete()
         messages.success(request, 'Friend request accepted.')
         # Create notification for the sender
         Notification.objects.create(
-            recipient=from_user_profile.user,
+            recipient=locked_from_profile.user,
             message=f"{request.user.username} accepted your friend request.",
             link=reverse('friends') # Link to the friends page
         )
-    else:
-        messages.error(request, 'Invalid request.')
     return redirect('friends')
 
 @login_required(login_url='/login/')
 def decline_friend_request(request, request_id):
-    friend_request = get_object_or_404(FriendRequest, id=request_id)
-    if friend_request.to_user == request.user:
-        friend_request.delete()
-        messages.success(request, 'Friend request declined.')
-        # Optionally, notify the sender that their request was declined
-        # Notification.objects.create(
-        #     recipient=friend_request.from_user,
-        #     message=f\"{request.user.username} declined your friend request.\",
-        #     link=f\"{% url 'friends' %}\"
-        # )
-    else:
-        messages.error(request, 'Invalid request.')
+    with transaction.atomic():
+        friend_request = FriendRequest.objects.select_for_update().filter(id=request_id).first()
+        if friend_request and friend_request.to_user == request.user:
+            friend_request.delete()
+            messages.success(request, 'Friend request declined.')
+        else:
+            messages.error(request, 'Invalid request.')
     return redirect('friends')

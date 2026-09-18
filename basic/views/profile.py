@@ -3,6 +3,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from ..models import UserProfile, Task, Friendship
 from django.contrib.auth.models import User
+from django.db import transaction
 import json
 from django.http import JsonResponse, HttpResponse
 from firebase_admin import auth
@@ -18,28 +19,31 @@ def profile_view(request):
     db = apps.get_app_config('basic').firestore_db # Get Firestore client
     profile, created = UserProfile.objects.get_or_create(user=request.user)
     if request.method == 'POST':
-        # Update Django model
-        profile.first_name = request.POST.get('first_name', '')
-        profile.last_name = request.POST.get('last_name', '')
-        profile.bio = request.POST.get('bio', '')
-        profile.college = request.POST.get('college', '')
-        profile.major = request.POST.get('major', '')
-        profile.roll_no = request.POST.get('roll_no', '')
-        profile.batch = request.POST.get('batch', 2029)
-        
-        # Check if phone number has changed
-        new_phone_number = request.POST.get('phone_number', '')
-        if new_phone_number != profile.phone_number:
-            profile.phone_number = new_phone_number
-            profile.is_phone_verified = False # Reset verification status
+        with transaction.atomic():
+            p = UserProfile.objects.select_for_update().get(pk=profile.pk)
+            # Update Django model
+            p.first_name = request.POST.get('first_name', '')
+            p.last_name = request.POST.get('last_name', '')
+            p.bio = request.POST.get('bio', '')
+            p.college = request.POST.get('college', '')
+            p.major = request.POST.get('major', '')
+            p.roll_no = request.POST.get('roll_no', '')
+            p.batch = request.POST.get('batch', 2029)
+            
+            # Check if phone number has changed
+            new_phone_number = request.POST.get('phone_number', '')
+            if new_phone_number != p.phone_number:
+                p.phone_number = new_phone_number
+                p.is_phone_verified = False # Reset verification status
 
-        profile.instagram_username = request.POST.get('instagram_username', '')
-        profile.save()
+            p.instagram_username = request.POST.get('instagram_username', '')
+            p.save()
+            profile = p
 
-        # Update Firestore document
-        if db and request.user.userprofile.firebase_uid:
+        # Update Firestore document (external network request OUTSIDE DB transaction)
+        if db and profile.firebase_uid:
             try:
-                user_ref = db.collection('users').document(request.user.userprofile.firebase_uid)
+                user_ref = db.collection('users').document(profile.firebase_uid)
                 user_ref.set({
                     'username': request.user.username,
                     'first_name': profile.first_name,
@@ -102,8 +106,10 @@ def update_closeness(request, friendship_id):
     if request.method == 'POST':
         closeness = request.POST.get('closeness')
         if closeness:
-            friendship.closeness = closeness
-            friendship.save()
+            with transaction.atomic():
+                f_obj = Friendship.objects.select_for_update().get(id=friendship_id)
+                f_obj.closeness = closeness
+                f_obj.save()
             messages.success(request, f"Closeness with {friendship.to_user.user.username} updated!")
             # Correctly get the user id to redirect back to their profile
             if request.user.userprofile == friendship.from_user:
@@ -131,20 +137,21 @@ def verify_phone_token(request):
             if not id_token:
                 return JsonResponse({'success': False, 'error': 'No token provided.'}, status=400)
 
+            # External network request OUTSIDE DB transaction
             decoded_token = auth.verify_id_token(id_token)
             firebase_phone_number = decoded_token.get('phone_number')
 
             if not firebase_phone_number:
                 return JsonResponse({'success': False, 'error': 'Could not verify phone number from token.'}, status=400)
 
-            user_profile = request.user.userprofile
+            # DB transaction for local updates
+            with transaction.atomic():
+                user_profile = UserProfile.objects.select_for_update().get(user=request.user)
+                user_profile.is_phone_verified = True
+                user_profile.phone_number = firebase_phone_number
+                user_profile.save()
 
-            # Trust the number from the Firebase token, since the user just verified it.
-            user_profile.is_phone_verified = True
-            user_profile.phone_number = firebase_phone_number
-            user_profile.save()
-
-            # Also update the phone number in Firestore
+            # External network request to Firestore OUTSIDE DB transaction
             if db and user_profile.firebase_uid:
                 try:
                     user_ref = db.collection('users').document(user_profile.firebase_uid)

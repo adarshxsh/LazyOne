@@ -1,5 +1,6 @@
 from django.contrib.auth.backends import BaseBackend
 from django.contrib.auth.models import User
+from django.db import transaction
 from firebase_admin import auth
 from .models import UserProfile
 import logging
@@ -18,35 +19,41 @@ class FirebaseBackend(BaseBackend):
         if token is None:
             return None
 
+        # External network request OUTSIDE DB transaction
         try:
             decoded_token = auth.verify_id_token(token)
             uid = decoded_token['uid']
             email = decoded_token.get('email')
+        except Exception as e:
+            logger.error(f"Exception during Firebase token verification: {e}")
+            return None
 
-            if not email:
-                logger.error("Firebase token decoded, but email was not present.")
-                return None
+        if not email:
+            logger.error("Firebase token decoded, but email was not present.")
+            return None
 
-            user, created = User.objects.get_or_create(
-                username=email, 
-                defaults={'email': email}
-            )
+        # DB operations inside atomic transaction
+        try:
+            with transaction.atomic():
+                user, created = User.objects.select_for_update().get_or_create(
+                    username=email, 
+                    defaults={'email': email}
+                )
 
-            # Ensure profile exists and firebase_uid is set
-            profile, profile_created = UserProfile.objects.get_or_create(user=user)
-            if profile_created:
-                logger.info(f"New user profile created for: {email}")
-                profile.rewards = 1500 # Set initial rewards for new profiles
-            
-            if not profile.firebase_uid:
-                profile.firebase_uid = uid
-                profile.save()
-            
+                # Ensure profile exists and firebase_uid is set
+                profile, profile_created = UserProfile.objects.select_for_update().get_or_create(user=user)
+                if profile_created:
+                    logger.info(f"New user profile created for: {email}")
+                    profile.rewards = 1500 # Set initial rewards for new profiles
+                
+                if not profile.firebase_uid:
+                    profile.firebase_uid = uid
+                    profile.save()
+                
             return user
 
         except Exception as e:
-            # Log the specific exception that occurred
-            logger.error(f"Exception during Firebase token verification: {e}")
+            logger.error(f"Exception during User database update in FirebaseBackend: {e}")
             return None
 
     def get_user(self, user_id):
