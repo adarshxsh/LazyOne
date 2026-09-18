@@ -23,6 +23,33 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if dispute.status == 'open' %}
+        <div class="bg-gray-900/50 p-6 rounded-lg border border-gray-700 mt-6">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Settle Dispute (Partial Escrow Split)</h3>
+            <p class="text-sm text-gray-400 mb-4">Task Reward Pool: <span class="font-bold text-white">{{ dispute.task.reward }} points</span></p>
+
+            <form action="{% url 'partial_settle_dispute' dispute.id %}" method="post" class="space-y-4">
+                {% csrf_token %}
+                <p class="text-sm font-medium text-gray-300">Select Preset Split (Taker % / Poster %):</p>
+                <div class="flex flex-wrap gap-3 mb-4">
+                    <button type="submit" name="percentage" value="50" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold transition">50% / 50%</button>
+                    <button type="submit" name="percentage" value="75" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold transition">75% Taker / 25% Poster</button>
+                    <button type="submit" name="percentage" value="25" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold transition">25% Taker / 75% Poster</button>
+                    <button type="submit" name="percentage" value="100" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold transition">100% Taker (0% Poster)</button>
+                    <button type="submit" name="percentage" value="0" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold transition">0% Taker (100% Poster)</button>
+                </div>
+
+                <div class="border-t border-gray-700 pt-4">
+                    <p class="text-sm font-medium text-gray-300 mb-2">Or enter Custom Percentage Split:</p>
+                    <div class="flex items-center space-x-3">
+                        <input type="number" name="percentage" min="0" max="100" step="any" placeholder="Taker % (e.g. 60)" class="px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-cyan-500 text-sm w-48">
+                        <button type="submit" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg text-sm font-semibold transition">Settle by %</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}

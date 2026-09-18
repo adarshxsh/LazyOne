@@ -182,3 +182,179 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+class PartialSettleDisputeTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.staff_user = User.objects.create_user(username='arbitrator', password='password123', is_staff=True)
+        self.other_user = User.objects.create_user(username='other', password='password123')
+
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1500)
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=1500)
+        self.staff_profile = UserProfile.objects.create(user=self.staff_user, rewards=1500)
+        self.other_profile = UserProfile.objects.create(user=self.other_user, rewards=1500)
+
+        # Create task with 1000 points reward (poster balance becomes 500)
+        self.poster_profile.rewards -= 1000
+        self.poster_profile.save()
+        self.task = Task.objects.create(
+            title="Design Logo",
+            description="Create a modern logo",
+            reward=1000,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            deadline=timezone.now() + timedelta(days=1),
+            status='disputed'
+        )
+        RewardLedger.objects.create(
+            user=self.poster, task=self.task, amount=-1000,
+            transaction_type='task_creation', description="Reserved for task: 'Design Logo'"
+        )
+
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Work partially completed",
+            status='open'
+        )
+
+    def test_partial_settle_dispute_percentage_split_50_50(self):
+        """Arbitrator settles with a 50/50 percentage split."""
+        self.client.login(username='arbitrator', password='password123')
+        url = reverse('partial_settle_dispute', args=[self.dispute.id])
+        
+        response = self.client.post(url, {'percentage': '50'})
+        self.assertEqual(response.status_code, 302)
+
+        self.poster_profile.refresh_from_db()
+        self.taker_profile.refresh_from_db()
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+
+        # Initial poster balance was 500 + 500 refund = 1000
+        self.assertEqual(self.poster_profile.rewards, 1000)
+        # Initial taker balance was 1500 + 500 payout = 2000
+        self.assertEqual(self.taker_profile.rewards, 2000)
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.task.status, 'completed')
+
+        # Check ledger entries
+        payout_ledger = RewardLedger.objects.filter(
+            user=self.taker, task=self.task, transaction_type='partial_dispute_payout'
+        ).first()
+        self.assertIsNotNone(payout_ledger)
+        self.assertEqual(payout_ledger.amount, 500)
+
+        refund_ledger = RewardLedger.objects.filter(
+            user=self.poster, task=self.task, transaction_type='partial_dispute_refund'
+        ).first()
+        self.assertIsNotNone(refund_ledger)
+        self.assertEqual(refund_ledger.amount, 500)
+
+    def test_partial_settle_dispute_custom_percentage_json(self):
+        """JSON request settling with 75% payout to taker."""
+        self.client.login(username='poster', password='password123')
+        url = reverse('partial_settle_dispute', args=[self.dispute.id])
+
+        response = self.client.post(
+            url,
+            data={'percentage': 75},
+            content_type='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest'
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['status'], 'success')
+        self.assertEqual(data['payout_amount'], 750)
+        self.assertEqual(data['refund_amount'], 250)
+
+        self.poster_profile.refresh_from_db()
+        self.taker_profile.refresh_from_db()
+
+        self.assertEqual(self.poster_profile.rewards, 500 + 250)
+        self.assertEqual(self.taker_profile.rewards, 1500 + 750)
+
+    def test_partial_settle_dispute_explicit_point_split(self):
+        """Settling with explicit point split (600 payout, 400 refund)."""
+        self.client.login(username='taker', password='password123')
+        url = reverse('partial_settle_dispute', args=[self.dispute.id])
+
+        response = self.client.post(url, {
+            'payout_amount': '600',
+            'refund_amount': '400'
+        })
+        self.assertEqual(response.status_code, 302)
+
+        self.poster_profile.refresh_from_db()
+        self.taker_profile.refresh_from_db()
+
+        self.assertEqual(self.poster_profile.rewards, 500 + 400)
+        self.assertEqual(self.taker_profile.rewards, 1500 + 600)
+
+    def test_partial_settle_dispute_integer_balance_conservation(self):
+        """Fractional percentage test ensuring balance conservation."""
+        self.task.reward = 100
+        self.task.save()
+
+        self.client.login(username='arbitrator', password='password123')
+        url = reverse('partial_settle_dispute', args=[self.dispute.id])
+
+        response = self.client.post(url, {'percentage': '33.33'}, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # 33 payout + 67 refund = 100
+        self.assertEqual(data['payout_amount'], 33)
+        self.assertEqual(data['refund_amount'], 67)
+        self.assertEqual(data['payout_amount'] + data['refund_amount'], 100)
+
+    def test_partial_settle_dispute_invalid_negative_percentage(self):
+        """Reject negative percentage values."""
+        self.client.login(username='arbitrator', password='password123')
+        url = reverse('partial_settle_dispute', args=[self.dispute.id])
+
+        response = self.client.post(url, {'percentage': '-10'}, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code, 400)
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'open')
+
+    def test_partial_settle_dispute_exceeding_total_escrow(self):
+        """Reject split exceeding total escrow amount."""
+        self.client.login(username='arbitrator', password='password123')
+        url = reverse('partial_settle_dispute', args=[self.dispute.id])
+
+        response = self.client.post(url, {'percentage': '150'}, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code, 400)
+
+    def test_partial_settle_dispute_point_sum_mismatch(self):
+        """Reject explicit split where payout + refund != reward."""
+        self.client.login(username='arbitrator', password='password123')
+        url = reverse('partial_settle_dispute', args=[self.dispute.id])
+
+        response = self.client.post(url, {
+            'payout_amount': '600',
+            'refund_amount': '600'
+        }, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code, 400)
+
+    def test_partial_settle_dispute_unauthorized_user(self):
+        """Reject settlement attempt by unrelated user."""
+        self.client.login(username='other', password='password123')
+        url = reverse('partial_settle_dispute', args=[self.dispute.id])
+
+        response = self.client.post(url, {'percentage': '50'}, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code, 403)
+
+    def test_partial_settle_dispute_already_resolved(self):
+        """Cannot settle an already resolved dispute."""
+        self.dispute.status = 'resolved'
+        self.dispute.save()
+
+        self.client.login(username='arbitrator', password='password123')
+        url = reverse('partial_settle_dispute', args=[self.dispute.id])
+
+        response = self.client.post(url, {'percentage': '50'}, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code, 400)
