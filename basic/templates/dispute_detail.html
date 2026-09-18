@@ -27,6 +27,9 @@
                 <p class="text-sm text-gray-300"><strong>Expiration Deadline:</strong> <span class="text-yellow-400 font-semibold">{{ dispute.deadline|date:"F d, Y H:i" }} UTC</span></p>
                 {% endif %}
                 <p class="text-sm text-gray-300"><strong>Resolution Strategy:</strong> {{ dispute.get_expiration_handler_display }}</p>
+                {% if dispute.deposit_amount %}
+                <p class="text-sm text-gray-300"><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
+                {% endif %}
             </div>
         </div>
 
