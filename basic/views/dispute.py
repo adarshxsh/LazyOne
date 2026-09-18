@@ -44,6 +44,8 @@ def raise_dispute(request, task_id):
 
         with transaction.atomic():
             user_profile.rewards -= deposit_amount
+            user_profile.disputes_raised += 1
+            user_profile.recalculate_reputation_and_risk()
             user_profile.save()
 
             if hasattr(task, 'dispute'):
@@ -79,6 +81,7 @@ def raise_dispute(request, task_id):
                 message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
                 link=reverse('dispute_detail', args=[dispute.id])
             )
+
         messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
@@ -97,6 +100,11 @@ def withdraw_dispute(request, dispute_id):
 
         task.status = 'in_progress'
         task.save()
+
+        user_profile = request.user.userprofile
+        user_profile.refresh_from_db()
+        user_profile.recalculate_reputation_and_risk()
+        user_profile.save()
 
         Notification.objects.create(
             recipient=task.posted_by,
