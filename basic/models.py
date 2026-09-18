@@ -68,11 +68,13 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('dispute_resolution', 'Dispute Resolution'),
+        ('dispute_reversal', 'Dispute Reversal'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=30, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -83,11 +85,23 @@ class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
         ('resolved', 'Resolved'),
+        ('appealed', 'Appealed'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
         ('refunded', 'Refunded'),
         ('forfeited', 'Forfeited'),
+    )
+    RESOLUTION_CHOICES = (
+        ('poster_wins', 'Poster Wins'),
+        ('taker_wins', 'Taker Wins'),
+        ('split', 'Split Decision'),
+    )
+    APPEAL_STATUS_CHOICES = (
+        ('none', 'No Appeal'),
+        ('appealed', 'Appealed'),
+        ('upheld', 'Upheld'),
+        ('overturned', 'Overturned'),
     )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
@@ -96,6 +110,20 @@ class Dispute(models.Model):
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
+
+    # Resolution fields
+    resolution_type = models.CharField(max_length=20, choices=RESOLUTION_CHOICES, null=True, blank=True)
+    resolved_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='resolved_disputes')
+    resolution_notes = models.TextField(blank=True, null=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    # Appeal fields
+    appeal_status = models.CharField(max_length=20, choices=APPEAL_STATUS_CHOICES, default='none')
+    appealed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='appealed_disputes')
+    appeal_reason = models.TextField(blank=True, null=True)
+    appealed_at = models.DateTimeField(null=True, blank=True)
+    appeal_reviewed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='reviewed_appeals')
+    appeal_notes = models.TextField(blank=True, null=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
