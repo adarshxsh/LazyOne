@@ -2,9 +2,10 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, Task, Notification, RewardLedger, DisputeEvidence
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+from django.core.exceptions import ValidationError
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
@@ -13,9 +14,28 @@ def dispute_detail_view(request, dispute_id):
     if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+
+    if request.method == 'POST':
+        text = request.POST.get('text') or request.POST.get('description') or request.POST.get('evidence_text') or ''
+        file = request.FILES.get('file') or request.FILES.get('attachment') or request.FILES.get('evidence_file')
+        
+        if not text and not file:
+            messages.error(request, "Please provide text or attach a file to submit evidence.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+        try:
+            dispute.submit_evidence(user=request.user, text=text, file=file)
+            messages.success(request, "Evidence submitted successfully.")
+        except ValidationError as e:
+            messages.error(request, str(e.message) if hasattr(e, 'message') else str(e))
+            
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    evidence_entries = dispute.evidence_entries.all().order_by('-created_at')
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'evidence_entries': evidence_entries,
     }
     return render(request, 'dispute_detail.html', context)
 
@@ -88,20 +108,24 @@ def raise_dispute(request, task_id):
 def withdraw_dispute(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user)
     task = dispute.task
-    with transaction.atomic():
-        dispute.refund_deposit(
-            reason_description=f"Security deposit bond refunded for withdrawn dispute on task: '{task.title}'"
-        )
-        dispute.status = 'resolved'
-        dispute.save()
+    try:
+        with transaction.atomic():
+            dispute.withdraw()
+            dispute.refund_deposit(
+                reason_description=f"Security deposit bond refunded for withdrawn dispute on task: '{task.title}'"
+            )
+            task.status = 'in_progress'
+            task.save()
 
-        task.status = 'in_progress'
-        task.save()
+            recipient = task.taken_by if (request.user == task.posted_by and task.taken_by) else task.posted_by
+            Notification.objects.create(
+                recipient=recipient,
+                message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
+                link=reverse('my_tasks')
+            )
+    except ValidationError as e:
+        messages.error(request, str(e.message) if hasattr(e, 'message') else str(e))
+        return redirect('dispute_detail', dispute_id=dispute.id)
 
-        Notification.objects.create(
-            recipient=task.posted_by,
-            message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
-            link=reverse('my_tasks')
-        )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
