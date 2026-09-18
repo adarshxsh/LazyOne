@@ -1,9 +1,9 @@
-from django.test import TestCase, Client
+from django.test import TestCase, Client, override_settings
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Notification, Conversation
 
 
 class DisputeDepositBondTests(TestCase):
@@ -182,3 +182,216 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+@override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
+class AdminDisputeAndAppealsTests(TestCase):
+    def setUp(self):
+        # Create users
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.other_user = User.objects.create_user(username='other', password='password123')
+        self.staff_admin = User.objects.create_user(username='staff_admin', password='password123', is_staff=True)
+
+        # Create profiles
+        self.poster_profile, _ = UserProfile.objects.get_or_create(user=self.poster, defaults={'rewards': 1500})
+        self.taker_profile, _ = UserProfile.objects.get_or_create(user=self.taker, defaults={'rewards': 1500})
+        self.other_profile, _ = UserProfile.objects.get_or_create(user=self.other_user, defaults={'rewards': 1500})
+        self.staff_profile, _ = UserProfile.objects.get_or_create(user=self.staff_admin, defaults={'rewards': 1500})
+
+        # Create task and conversation
+        self.task = Task.objects.create(
+            title="Test Task",
+            description="Test Description",
+            reward=100,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed'
+        )
+        self.conversation = Conversation.objects.create(task=self.task)
+        self.conversation.participants.add(self.poster, self.taker)
+
+        # Create dispute
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Work was completed but poster refused payout",
+            status='open'
+        )
+
+    def test_staff_adjudication_poster_award(self):
+        self.client.login(username='staff_admin', password='password123')
+        url = reverse('resolve_dispute', args=[self.dispute.id])
+        response = self.client.post(url, {
+            'decision': 'poster',
+            'rationale': 'Task was incomplete'
+        })
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+        self.poster_profile.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.dispute.resolution_decision, 'poster')
+        self.assertEqual(self.dispute.poster_payout, 100)
+        self.assertEqual(self.dispute.taker_payout, 0)
+        self.assertEqual(self.dispute.resolved_by, self.staff_admin)
+        self.assertEqual(self.task.status, 'cancelled')
+        self.assertEqual(self.poster_profile.rewards, 1600)  # 1500 + 100
+
+        # Verify ledger entry
+        ledger = RewardLedger.objects.get(user=self.poster, task=self.task, transaction_type='dispute_refund')
+        self.assertEqual(ledger.amount, 100)
+
+        # Verify notifications
+        self.assertTrue(Notification.objects.filter(recipient=self.poster).exists())
+        self.assertTrue(Notification.objects.filter(recipient=self.taker).exists())
+
+    def test_staff_adjudication_taker_award(self):
+        self.client.login(username='staff_admin', password='password123')
+        url = reverse('resolve_dispute', args=[self.dispute.id])
+        response = self.client.post(url, {
+            'decision': 'taker',
+            'rationale': 'Work was satisfactory'
+        })
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+        self.taker_profile.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.dispute.resolution_decision, 'taker')
+        self.assertEqual(self.dispute.poster_payout, 0)
+        self.assertEqual(self.dispute.taker_payout, 100)
+        self.assertEqual(self.task.status, 'completed')
+        self.assertEqual(self.taker_profile.rewards, 1600)  # 1500 + 100
+
+        # Verify ledger entry
+        ledger = RewardLedger.objects.get(user=self.taker, task=self.task, transaction_type='dispute_payout')
+        self.assertEqual(ledger.amount, 100)
+
+    def test_staff_adjudication_split_award(self):
+        self.client.login(username='staff_admin', password='password123')
+        url = reverse('resolve_dispute', args=[self.dispute.id])
+        response = self.client.post(url, {
+            'decision': 'split',
+            'taker_percent': '60',
+            'rationale': 'Partial completion'
+        })
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+
+        self.dispute.refresh_from_db()
+        self.poster_profile.refresh_from_db()
+        self.taker_profile.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.dispute.poster_payout, 40)
+        self.assertEqual(self.dispute.taker_payout, 60)
+        self.assertEqual(self.poster_profile.rewards, 1540)
+        self.assertEqual(self.taker_profile.rewards, 1560)
+
+    def test_non_staff_cannot_resolve_dispute(self):
+        self.client.login(username='poster', password='password123')
+        url = reverse('resolve_dispute', args=[self.dispute.id])
+        response = self.client.post(url, {
+            'decision': 'poster',
+            'rationale': 'Self award'
+        })
+        self.assertEqual(response.status_code, 302)
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'open')
+
+    def test_file_appeal_within_72_hours(self):
+        # Resolve dispute first
+        self.dispute.status = 'resolved'
+        self.dispute.resolved_at = timezone.now()
+        self.dispute.poster_payout = 100
+        self.dispute.taker_payout = 0
+        self.dispute.resolution_decision = 'poster'
+        self.dispute.save()
+
+        self.client.login(username='taker', password='password123')
+        url = reverse('file_appeal', args=[self.dispute.id])
+        response = self.client.post(url, {
+            'justification': 'Evidence provided proves completion.'
+        })
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'pending_appeal')
+        self.assertEqual(self.dispute.appealed_by, self.taker)
+        self.assertEqual(self.dispute.appeal_justification, 'Evidence provided proves completion.')
+
+    def test_file_appeal_outside_72_hours_fails(self):
+        self.dispute.status = 'resolved'
+        self.dispute.resolved_at = timezone.now() - timedelta(hours=73)
+        self.dispute.save()
+
+        self.client.login(username='taker', password='password123')
+        url = reverse('file_appeal', args=[self.dispute.id])
+        response = self.client.post(url, {
+            'justification': 'Late appeal submission'
+        })
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'resolved')
+
+    def test_staff_appellate_review_uphold(self):
+        self.dispute.status = 'pending_appeal'
+        self.dispute.resolved_at = timezone.now() - timedelta(hours=2)
+        self.dispute.appealed_at = timezone.now() - timedelta(hours=1)
+        self.dispute.poster_payout = 100
+        self.dispute.taker_payout = 0
+        self.dispute.save()
+
+        self.client.login(username='staff_admin', password='password123')
+        url = reverse('review_appeal', args=[self.dispute.id])
+        response = self.client.post(url, {
+            'appeal_decision': 'uphold',
+            'rationale': 'Original decision was sound.'
+        })
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'appeal_closed')
+        self.assertEqual(self.dispute.appeal_decision, 'uphold')
+
+    def test_staff_appellate_review_reverse(self):
+        self.dispute.status = 'pending_appeal'
+        self.dispute.resolved_at = timezone.now() - timedelta(hours=2)
+        self.dispute.appealed_at = timezone.now() - timedelta(hours=1)
+        self.dispute.resolution_decision = 'poster'
+        self.dispute.poster_payout = 100
+        self.dispute.taker_payout = 0
+        self.dispute.save()
+
+        # Give poster the initial points to simulate initial resolution
+        self.poster_profile.rewards = 1600
+        self.poster_profile.save()
+
+        self.client.login(username='staff_admin', password='password123')
+        url = reverse('review_appeal', args=[self.dispute.id])
+        response = self.client.post(url, {
+            'appeal_decision': 'reverse',
+            'rationale': 'New evidence shows taker completed work.'
+        })
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+
+        self.dispute.refresh_from_db()
+        self.poster_profile.refresh_from_db()
+        self.taker_profile.refresh_from_db()
+        self.task.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'appeal_closed')
+        self.assertEqual(self.dispute.appeal_decision, 'reverse')
+        self.assertEqual(self.dispute.poster_payout, 0)
+        self.assertEqual(self.dispute.taker_payout, 100)
+        self.assertEqual(self.poster_profile.rewards, 1500)  # 1600 - 100
+        self.assertEqual(self.taker_profile.rewards, 1600)   # 1500 + 100
+        self.assertEqual(self.task.status, 'completed')
+
+        # Check ledger entries for reversal
+        self.assertTrue(RewardLedger.objects.filter(user=self.poster, transaction_type='appeal_reversal', amount=-100).exists())
+        self.assertTrue(RewardLedger.objects.filter(user=self.taker, transaction_type='appeal_payout', amount=100).exists())
