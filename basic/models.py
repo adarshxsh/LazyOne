@@ -1,16 +1,7 @@
-from django.db import models, transaction
+import math
+from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
-
-def calculate_deposit_bond(reward_amount):
-    """
-    Calculates the required deposit bond for a dispute based on task reward amount.
-    Returns a positive integer (e.g. 20% of reward amount, minimum 1 point).
-    """
-    if reward_amount is None or reward_amount < 0:
-        return 1
-    bond = int(reward_amount * 0.20)
-    return max(1, bond)
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -64,8 +55,9 @@ class Task(models.Model):
     def main_chat(self):
         return self.conversations.first()
 
-    def get_deposit_bond(self):
-        return calculate_deposit_bond(self.reward)
+    @property
+    def deposit_bond_amount(self):
+        return max(50, math.ceil(self.reward * 0.20))
 
 class RewardLedger(models.Model):
     TRANSACTION_TYPES = (
@@ -73,14 +65,14 @@ class RewardLedger(models.Model):
         ('task_completion', 'Task Completion (Points Awarded)'),
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
-        ('dispute_deposit_hold', 'Dispute Deposit Hold'),
-        ('dispute_deposit_refund', 'Dispute Deposit Refund'),
-        ('dispute_bond_forfeiture', 'Dispute Bond Forfeiture'),
+        ('dispute_deposit', 'Dispute Deposit Bond Held'),
+        ('dispute_refund', 'Dispute Deposit Bond Refunded'),
+        ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -92,8 +84,8 @@ class Dispute(models.Model):
         ('open', 'Open'),
         ('resolved', 'Resolved'),
     )
-    DEPOSIT_STATUS_CHOICES = (
-        ('held', 'Held'),
+    ESCROW_STATUS_CHOICES = (
+        ('held', 'Held in Escrow'),
         ('refunded', 'Refunded'),
         ('forfeited', 'Forfeited'),
     )
@@ -102,46 +94,53 @@ class Dispute(models.Model):
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
-    deposit_status = models.CharField(max_length=20, choices=DEPOSIT_STATUS_CHOICES, default='held')
+    escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
 
-    def resolve_deposit(self, outcome):
-        """
-        Processes deposit bond refund or forfeiture atomically.
-        outcome: 'refund' (returns points to raiser) or 'forfeit' (forfeits points)
-        """
-        if self.deposit_status != 'held':
-            return
+    def refund_deposit(self, reason_description=None):
+        if self.escrow_status == 'held' and self.deposit_amount > 0:
+            user_profile = self.raised_by.userprofile
+            user_profile.rewards += self.deposit_amount
+            user_profile.save()
 
-        with transaction.atomic():
-            if outcome == 'refund':
-                self.deposit_status = 'refunded'
-                self.save()
-                raiser_profile = self.raised_by.userprofile
-                raiser_profile.rewards += self.deposit_amount
-                raiser_profile.save()
+            desc = reason_description or f"Security deposit bond refunded for dispute on task: '{self.task.title}'"
+            RewardLedger.objects.create(
+                user=self.raised_by,
+                task=self.task,
+                amount=self.deposit_amount,
+                transaction_type='dispute_refund',
+                description=desc
+            )
+            self.escrow_status = 'refunded'
+            self.save()
 
+    def forfeit_deposit(self, beneficiary=None, reason_description=None):
+        if self.escrow_status == 'held' and self.deposit_amount > 0:
+            if beneficiary:
+                beneficiary_profile = beneficiary.userprofile
+                beneficiary_profile.rewards += self.deposit_amount
+                beneficiary_profile.save()
                 RewardLedger.objects.create(
-                    user=self.raised_by,
+                    user=beneficiary,
                     task=self.task,
                     amount=self.deposit_amount,
-                    transaction_type='dispute_deposit_refund',
-                    description=f"Dispute deposit refund for task: '{self.task.title}'"
+                    transaction_type='dispute_refund',
+                    description=f"Forfeited dispute deposit bond awarded from task: '{self.task.title}'"
                 )
-            elif outcome == 'forfeit':
-                self.deposit_status = 'forfeited'
-                self.save()
 
-                RewardLedger.objects.create(
-                    user=self.raised_by,
-                    task=self.task,
-                    amount=-self.deposit_amount,
-                    transaction_type='dispute_bond_forfeiture',
-                    description=f"Dispute bond forfeited for task: '{self.task.title}'"
-                )
+            desc = reason_description or f"Security deposit bond forfeited for dispute on task: '{self.task.title}'"
+            RewardLedger.objects.create(
+                user=self.raised_by,
+                task=self.task,
+                amount=0,
+                transaction_type='dispute_forfeit',
+                description=desc
+            )
+            self.escrow_status = 'forfeited'
+            self.save()
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
