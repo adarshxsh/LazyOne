@@ -3,7 +3,34 @@
 {% block title %}Profile{% endblock %}
 
 {% block content %}
-<h2 class="text-3xl font-bold text-white mb-8 text-center">Edit Your Profile</h2>
+<h2 class="text-3xl font-bold text-white mb-6 text-center">Edit Your Profile</h2>
+
+<div class="max-w-2xl mx-auto mb-8 p-6 bg-gray-800/50 border border-gray-700/50 rounded-xl text-center">
+    <h3 class="text-xl font-bold text-white mb-3">Your Reputation & Standing</h3>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div class="p-3 bg-gray-700/50 rounded-lg">
+            <p class="text-xs text-gray-400 font-medium uppercase">Score</p>
+            <p class="text-2xl font-extrabold text-cyan-400 mt-1">{{ profile.reputation_score }}</p>
+        </div>
+        <div class="p-3 bg-gray-700/50 rounded-lg">
+            <p class="text-xs text-gray-400 font-medium uppercase">Risk Level</p>
+            <span class="inline-block mt-2 px-3 py-1 text-xs font-bold rounded-full
+                {% if profile.risk_level == 'LOW' %}bg-green-900/40 text-green-300
+                {% elif profile.risk_level == 'MEDIUM' %}bg-yellow-900/40 text-yellow-300
+                {% else %}bg-red-900/40 text-red-300{% endif %}">
+                {{ profile.get_risk_level_display }} Risk
+            </span>
+        </div>
+        <div class="p-3 bg-gray-700/50 rounded-lg">
+            <p class="text-xs text-gray-400 font-medium uppercase">Completed</p>
+            <p class="text-2xl font-bold text-green-400 mt-1">{{ profile.tasks_completed_count }}</p>
+        </div>
+        <div class="p-3 bg-gray-700/50 rounded-lg">
+            <p class="text-xs text-gray-400 font-medium uppercase">Defaulted</p>
+            <p class="text-2xl font-bold text-red-400 mt-1">{{ profile.tasks_defaulted_count }}</p>
+        </div>
+    </div>
+</div>
 
 <form method="post" class="space-y-6 max-w-2xl mx-auto">
     {% csrf_token %}

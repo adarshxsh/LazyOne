@@ -26,6 +26,19 @@ class UserProfile(models.Model):
     email_otp = models.CharField(max_length=6, blank=True, null=True)
     email_otp_created_at = models.DateTimeField(blank=True, null=True)
 
+    # Reputation & Risk Score Fields
+    tasks_completed_count = models.IntegerField(default=0)
+    tasks_defaulted_count = models.IntegerField(default=0)
+    disputes_won_count = models.IntegerField(default=0)
+    disputes_lost_count = models.IntegerField(default=0)
+    reputation_score = models.IntegerField(default=100)
+    RISK_LEVEL_CHOICES = (
+        ('LOW', 'Low'),
+        ('MEDIUM', 'Medium'),
+        ('HIGH', 'High'),
+    )
+    risk_level = models.CharField(max_length=10, choices=RISK_LEVEL_CHOICES, default='LOW')
+
     def __str__(self):
         return self.user.username
 
@@ -103,6 +116,7 @@ class Dispute(models.Model):
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
             user_profile = self.raised_by.userprofile
+            user_profile.refresh_from_db()
             user_profile.rewards += self.deposit_amount
             user_profile.save()
 
@@ -121,6 +135,7 @@ class Dispute(models.Model):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
             if beneficiary:
                 beneficiary_profile = beneficiary.userprofile
+                beneficiary_profile.refresh_from_db()
                 beneficiary_profile.rewards += self.deposit_amount
                 beneficiary_profile.save()
                 RewardLedger.objects.create(
