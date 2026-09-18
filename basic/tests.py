@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, DisputeVote, RewardLedger, Conversation
 
 
 class DisputeDepositBondTests(TestCase):
@@ -182,3 +182,129 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class CommunityArbitrationTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Create users and profiles
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.juror1 = User.objects.create_user(username='juror1', password='password123')
+        self.juror2 = User.objects.create_user(username='juror2', password='password123')
+        self.juror3 = User.objects.create_user(username='juror3', password='password123')
+
+        self.poster_profile, _ = UserProfile.objects.get_or_create(user=self.poster, defaults={'rewards': 900})
+        self.taker_profile, _ = UserProfile.objects.get_or_create(user=self.taker, defaults={'rewards': 1000})
+        self.juror1_profile, _ = UserProfile.objects.get_or_create(user=self.juror1, defaults={'rewards': 1000})
+        self.juror2_profile, _ = UserProfile.objects.get_or_create(user=self.juror2, defaults={'rewards': 1000})
+        self.juror3_profile, _ = UserProfile.objects.get_or_create(user=self.juror3, defaults={'rewards': 1000})
+
+        # Create disputed task and conversation
+        self.deadline = timezone.now() + timedelta(days=1)
+        self.task = Task.objects.create(
+            title='Test Task',
+            description='Test Description',
+            reward=100,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            deadline=self.deadline,
+            status='disputed'
+        )
+
+        self.conversation = Conversation.objects.create(task=self.task)
+        self.conversation.participants.add(self.poster, self.taker)
+
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Work completed but poster refuses to approve.'
+        )
+
+    def test_read_only_dispute_chat_access_for_non_participants(self):
+        # Authenticated non-participant accesses dispute chat
+        self.client.login(username='juror1', password='password123')
+        response = self.client.get(reverse('chat_view', args=[self.conversation.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['is_read_only'])
+
+    def test_non_disputed_private_chat_access_denied_for_non_participants(self):
+        # Create non-disputed private task chat
+        private_task = Task.objects.create(
+            title='Private Task',
+            description='Private Description',
+            reward=50,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress'
+        )
+        private_conv = Conversation.objects.create(task=private_task)
+        private_conv.participants.add(self.poster, self.taker)
+
+        self.client.login(username='juror1', password='password123')
+        response = self.client.get(reverse('chat_view', args=[private_conv.id]))
+        self.assertEqual(response.status_code, 302) # Redirect to home with error
+
+    def test_unauthenticated_user_redirected(self):
+        # Unauthenticated user trying to access chat or dispute detail
+        chat_res = self.client.get(reverse('chat_view', args=[self.conversation.id]))
+        self.assertEqual(chat_res.status_code, 302)
+        self.assertIn('/login/', chat_res.url)
+
+        detail_res = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(detail_res.status_code, 302)
+        self.assertIn('/login/', detail_res.url)
+
+    def test_direct_participants_barred_from_voting(self):
+        # Task poster attempts to vote
+        self.client.login(username='poster', password='password123')
+        vote_res = self.client.post(reverse('cast_dispute_vote', args=[self.dispute.id]), {'chosen_party': 'poster'})
+        self.assertEqual(vote_res.status_code, 302)
+        self.assertEqual(DisputeVote.objects.count(), 0)
+
+        # Task taker attempts to vote
+        self.client.login(username='taker', password='password123')
+        vote_res = self.client.post(reverse('cast_dispute_vote', args=[self.dispute.id]), {'chosen_party': 'taker'})
+        self.assertEqual(vote_res.status_code, 302)
+        self.assertEqual(DisputeVote.objects.count(), 0)
+
+    def test_duplicate_voting_prevented(self):
+        self.client.login(username='juror1', password='password123')
+        vote_url = reverse('cast_dispute_vote', args=[self.dispute.id])
+
+        # First vote
+        res1 = self.client.post(vote_url, {'chosen_party': 'taker'})
+        self.assertEqual(res1.status_code, 302)
+        self.assertEqual(DisputeVote.objects.count(), 1)
+
+        # Duplicate vote attempt
+        res2 = self.client.post(vote_url, {'chosen_party': 'poster'})
+        self.assertEqual(res2.status_code, 302)
+        self.assertEqual(DisputeVote.objects.count(), 1)
+
+    def test_quorum_and_automated_verdict_resolution(self):
+        vote_url = reverse('cast_dispute_vote', args=[self.dispute.id])
+
+        # Juror 1 votes taker
+        self.client.login(username='juror1', password='password123')
+        self.client.post(vote_url, {'chosen_party': 'taker'})
+
+        # Juror 2 votes poster
+        self.client.login(username='juror2', password='password123')
+        self.client.post(vote_url, {'chosen_party': 'poster'})
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'open') # 2 votes, quorum target is 3
+
+        # Juror 3 votes taker (3rd vote reaches quorum)
+        self.client.login(username='juror3', password='password123')
+        self.client.post(vote_url, {'chosen_party': 'taker'})
+
+        # Check resolution
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+        self.taker_profile.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.task.status, 'completed')
+        self.assertEqual(self.taker_profile.rewards, 1100) # 1000 + 100 reward

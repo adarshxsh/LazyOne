@@ -2,22 +2,99 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, Task, Notification, RewardLedger, DisputeVote
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+from django.utils import timezone
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
-        messages.error(request, "You are not authorized to view this dispute.")
-        return redirect('home')
+
+    # Check if open dispute should be auto-resolved due to deadline
+    dispute.check_and_resolve()
+
+    user_vote = DisputeVote.objects.filter(voter=request.user, dispute=dispute).first()
+    user_voted = user_vote is not None
+    is_participant = (request.user == task.posted_by or request.user == task.taken_by)
+    can_vote = (not is_participant) and (not user_voted) and (dispute.status == 'open')
+
+    total_votes = dispute.total_votes_count
+    poster_votes = dispute.poster_votes_count
+    taker_votes = dispute.taker_votes_count
+    quorum_target = dispute.quorum_target
+
+    if total_votes > 0:
+        poster_percentage = round((poster_votes / total_votes) * 100)
+        taker_percentage = round((taker_votes / total_votes) * 100)
+    else:
+        poster_percentage = 0
+        taker_percentage = 0
+
+    quorum_percentage = min(100, round((total_votes / quorum_target) * 100))
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'user_voted': user_voted,
+        'user_vote': user_vote,
+        'can_vote': can_vote,
+        'is_participant': is_participant,
+        'poster_votes': poster_votes,
+        'taker_votes': taker_votes,
+        'total_votes': total_votes,
+        'quorum_target': quorum_target,
+        'poster_percentage': poster_percentage,
+        'taker_percentage': taker_percentage,
+        'quorum_percentage': quorum_percentage,
+        'voting_deadline_iso': dispute.voting_deadline.isoformat(),
     }
     return render(request, 'dispute_detail.html', context)
+
+
+@login_required(login_url='/login/')
+@require_POST
+def cast_dispute_vote(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+
+    if dispute.status != 'open':
+        messages.error(request, "This dispute is no longer open for voting.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if request.user == task.posted_by or request.user == task.taken_by:
+        messages.error(request, "Task poster and taker are strictly barred from voting on their own disputes.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if DisputeVote.objects.filter(voter=request.user, dispute=dispute).exists():
+        messages.error(request, "You have already cast a vote on this dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    chosen_party = request.POST.get('chosen_party') or request.POST.get('vote')
+    rationale = request.POST.get('rationale', '')
+
+    if chosen_party not in ['poster', 'taker']:
+        messages.error(request, "Invalid vote choice. Please select either the Task Poster or Task Taker.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    DisputeVote.objects.create(
+        voter=request.user,
+        dispute=dispute,
+        chosen_party=chosen_party,
+        rationale=rationale,
+        vote_weight=1
+    )
+
+    messages.success(request, "Your jury vote has been submitted successfully.")
+
+    # Check if vote triggers quorum or automated resolution
+    resolved = dispute.check_and_resolve()
+    if resolved:
+        messages.info(request, "Jury vote quorum reached! The dispute has been automatically resolved.")
+
+    return redirect('dispute_detail', dispute_id=dispute.id)
+
 
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
@@ -82,6 +159,7 @@ def raise_dispute(request, task_id):
         messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
+
 
 @login_required(login_url='/login/')
 @require_POST
