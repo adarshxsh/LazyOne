@@ -1,3 +1,4 @@
+import logging
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
@@ -5,6 +6,9 @@ from django.db import transaction
 from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+from ..services.juror_selection import select_jurors_for_dispute, InsufficientJurorsError
+
+logger = logging.getLogger(__name__)
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
@@ -32,7 +36,6 @@ def raise_dispute(request, task_id):
         if not reason:
             messages.error(request, "A reason is required to raise a dispute.")
             return redirect('my_tasks')
-
         deposit_amount = task.deposit_bond_amount
         user_profile = request.user.userprofile
         if user_profile.rewards < deposit_amount:
@@ -73,6 +76,13 @@ def raise_dispute(request, task_id):
 
             task.status = 'disputed'
             task.save()
+
+            try:
+                select_jurors_for_dispute(dispute, panel_size=3)
+            except InsufficientJurorsError as e:
+                logger.warning(f"Juror selection warning for dispute {dispute.id}: {e}")
+            except Exception as e:
+                logger.error(f"Error selecting jurors for dispute {dispute.id}: {e}")
 
             Notification.objects.create(
                 recipient=task.posted_by,
