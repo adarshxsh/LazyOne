@@ -2,6 +2,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from ..models import Task, Conversation, Notification, RewardLedger
+from ..services import expire_task
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
@@ -60,7 +61,16 @@ def add_task(request):
 
 @login_required(login_url='/login/')
 def take_task(request, task_id):
-    task = get_object_or_404(Task, id=task_id, status='available')
+    task = get_object_or_404(Task, id=task_id)
+    if task.deadline and task.deadline < timezone.now():
+        expire_task(task)
+        messages.error(request, "This task has expired and cannot be taken.")
+        return redirect('my_tasks')
+
+    if task.status != 'available':
+        messages.error(request, "This task is no longer available.")
+        return redirect('my_tasks')
+
     if task.posted_by == request.user:
         messages.error(request, "You cannot take your own task.")
     else:

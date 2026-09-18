@@ -1,15 +1,19 @@
 from django.shortcuts import render
 from django.db.models import Q
+from django.utils import timezone
 from ..models import UserProfile, Task, Friendship, Conversation
 import json
 
 def home(request):
+    now = timezone.now()
     # --- Disputed Tasks ---
     disputed_tasks = Task.objects.filter(status='disputed').order_by('-created_at')
 
     # --- Search Logic for Available Tasks ---
     query = request.GET.get('q', '')
-    available_tasks = Task.objects.filter(status='available')
+    available_tasks = Task.objects.filter(status='available').filter(
+        Q(deadline__isnull=True) | Q(deadline__gt=now)
+    )
     if query:
         available_tasks = available_tasks.filter(
             Q(title__icontains=query) | Q(description__icontains=query)
@@ -17,7 +21,11 @@ def home(request):
     available_tasks = available_tasks.order_by('-created_at')[:20]
 
     # --- All non-completed tasks for the new section ---
-    recent_tasks = Task.objects.exclude(status__in=['completed', 'cancelled']).order_by('-created_at')
+    recent_tasks = Task.objects.exclude(
+        status__in=['completed', 'cancelled', 'expired']
+    ).filter(
+        Q(deadline__isnull=True) | Q(deadline__gt=now)
+    ).order_by('-created_at')
     
     # Initialize context for anonymous users
     context = {
