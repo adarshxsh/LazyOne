@@ -22,7 +22,7 @@ def dispute_detail_view(request, dispute_id):
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
     task = get_object_or_404(Task, id=task_id)
-    if hasattr(task, 'dispute') and task.dispute.status == 'open':
+    if hasattr(task, 'dispute') and task.dispute.status not in ['resolved', 'withdrawn']:
         return redirect('dispute_detail', dispute_id=task.dispute.id)
     if task.taken_by != request.user or task.status != 'in_progress':
         messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
@@ -47,13 +47,17 @@ def raise_dispute(request, task_id):
             user_profile.save()
 
             if hasattr(task, 'dispute'):
-                dispute = task.dispute
-                dispute.raised_by = request.user
-                dispute.reason = reason
-                dispute.status = 'open'
-                dispute.deposit_amount = deposit_amount
-                dispute.escrow_status = 'held'
-                dispute.save()
+                if task.dispute.status in ['resolved', 'withdrawn']:
+                    task.dispute.delete()
+                    dispute = Dispute.objects.create(
+                        task=task,
+                        raised_by=request.user,
+                        reason=reason,
+                        deposit_amount=deposit_amount,
+                        escrow_status='held'
+                    )
+                else:
+                    return redirect('dispute_detail', dispute_id=task.dispute.id)
             else:
                 dispute = Dispute.objects.create(
                     task=task,
@@ -92,8 +96,7 @@ def withdraw_dispute(request, dispute_id):
         dispute.refund_deposit(
             reason_description=f"Security deposit bond refunded for withdrawn dispute on task: '{task.title}'"
         )
-        dispute.status = 'resolved'
-        dispute.save()
+        dispute.transition_to('withdrawn')
 
         task.status = 'in_progress'
         task.save()
