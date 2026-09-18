@@ -6,6 +6,7 @@ from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
 from django.db.models import Q
+from django.conf import settings
 from datetime import datetime, timedelta
 
 
@@ -159,6 +160,21 @@ def accept_cancellation(request, task_id):
 def abandon_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
     with transaction.atomic():
+        user_profile = request.user.userprofile
+        penalty_pct = getattr(settings, 'TASK_ABANDONMENT_PENALTY_PERCENTAGE', 10)
+        penalty = min(task.reward, max(1, int(task.reward * penalty_pct / 100)))
+        deducted = min(penalty, max(0, user_profile.rewards))
+        user_profile.rewards = max(0, user_profile.rewards - penalty)
+        user_profile.save()
+
+        RewardLedger.objects.create(
+            user=request.user,
+            task=task,
+            amount=-deducted,
+            transaction_type='task_abandonment',
+            description=f"Penalty for abandoning task: '{task.title}'"
+        )
+
         task.status = 'available'
         task.taken_by = None
         task.save()
@@ -167,7 +183,7 @@ def abandon_task(request, task_id):
             message=f"{request.user.username} has abandoned your task: '{task.title}'. It is now available again.",
             link=reverse('my_tasks')
         )
-        messages.success(request, "You have abandoned the task. It is now available for others.")
+        messages.success(request, f"You have abandoned the task. A penalty of {deducted} points was deducted from your rewards balance.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
