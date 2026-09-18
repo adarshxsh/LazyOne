@@ -21,6 +21,7 @@ class UserProfile(models.Model):
     is_phone_verified = models.BooleanField(default=False)
     instagram_username = models.CharField(max_length=100, blank=True)
     is_instagram_verified = models.BooleanField(default=False)
+    is_fraudulent = models.BooleanField(default=False)
     
     # Fields for Email OTP Verification
     email_otp = models.CharField(max_length=6, blank=True, null=True)
@@ -47,6 +48,7 @@ class Task(models.Model):
     deadline = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='available')
     cancellation_requested = models.BooleanField(default=False)
+    taker_collateral = models.PositiveIntegerField(default=0)
 
     def __str__(self):
         return self.title
@@ -68,11 +70,15 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('collateral_lock', 'Collateral Lock (Points Reserved)'),
+        ('collateral_release', 'Collateral Release (Points Returned)'),
+        ('fraud_slashing_penalty', 'Fraud Slashing Penalty'),
+        ('collateral_slash', 'Collateral Slash (Credited to Harmed Poster)'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 

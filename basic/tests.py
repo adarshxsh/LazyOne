@@ -1,4 +1,4 @@
-from django.test import TestCase, Client
+from django.test import TestCase, Client, override_settings
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
@@ -182,3 +182,172 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+from basic.views.tasks import slash_user
+
+
+@override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
+class TakerCollateralAndSlashingTests(TestCase):
+    def setUp(self):
+        self.poster = User.objects.create_user(username='poster', password='password')
+        self.poster_profile, _ = UserProfile.objects.get_or_create(user=self.poster, defaults={'rewards': 1500})
+        
+        self.taker = User.objects.create_user(username='taker', password='password')
+        self.taker_profile, _ = UserProfile.objects.get_or_create(user=self.taker, defaults={'rewards': 500})
+
+    def test_take_task_reserves_collateral(self):
+        task = Task.objects.create(
+            title="Test Task",
+            description="Details",
+            reward=500,
+            posted_by=self.poster,
+            deadline=timezone.now() + timedelta(days=1),
+            status='available'
+        )
+        self.client.login(username='taker', password='password')
+        self.client.get(f'/task/take/{task.id}/')
+        
+        self.taker_profile.refresh_from_db()
+        task.refresh_from_db()
+        
+        self.assertEqual(self.taker_profile.rewards, 400)
+        self.assertEqual(task.status, 'in_progress')
+        self.assertEqual(task.taken_by, self.taker)
+        self.assertEqual(task.taker_collateral, 100)
+
+        ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='collateral_lock').first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, -100)
+        self.assertEqual(ledger.task, task)
+
+    def test_take_task_minimum_collateral(self):
+        task = Task.objects.create(
+            title="Small Task",
+            description="Details",
+            reward=50,
+            posted_by=self.poster,
+            deadline=timezone.now() + timedelta(days=1),
+            status='available'
+        )
+        self.client.login(username='taker', password='password')
+        self.client.get(f'/task/take/{task.id}/')
+        
+        self.taker_profile.refresh_from_db()
+        task.refresh_from_db()
+        
+        self.assertEqual(self.taker_profile.rewards, 480)
+        self.assertEqual(task.taker_collateral, 20)
+
+    def test_take_task_insufficient_rewards_blocked(self):
+        task = Task.objects.create(
+            title="Expensive Task",
+            description="Details",
+            reward=500,
+            posted_by=self.poster,
+            deadline=timezone.now() + timedelta(days=1),
+            status='available'
+        )
+        self.taker_profile.rewards = 10
+        self.taker_profile.save()
+
+        self.client.login(username='taker', password='password')
+        self.client.get(f'/task/take/{task.id}/')
+
+        self.taker_profile.refresh_from_db()
+        task.refresh_from_db()
+
+        self.assertEqual(self.taker_profile.rewards, 10)
+        self.assertEqual(task.status, 'available')
+        self.assertIsNone(task.taken_by)
+
+    def test_complete_task_releases_collateral_and_reward(self):
+        task = Task.objects.create(
+            title="Test Task",
+            description="Details",
+            reward=500,
+            posted_by=self.poster,
+            deadline=timezone.now() + timedelta(days=1),
+            status='available'
+        )
+        self.client.login(username='taker', password='password')
+        self.client.get(f'/task/take/{task.id}/')
+
+        self.client.login(username='poster', password='password')
+        self.client.get(f'/task/complete/{task.id}/')
+
+        self.taker_profile.refresh_from_db()
+        task.refresh_from_db()
+
+        self.assertEqual(task.status, 'completed')
+        self.assertEqual(self.taker_profile.rewards, 1000)
+
+        completion_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='task_completion').first()
+        self.assertIsNotNone(completion_ledger)
+        self.assertEqual(completion_ledger.amount, 500)
+
+        release_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='collateral_release').first()
+        self.assertIsNotNone(release_ledger)
+        self.assertEqual(release_ledger.amount, 100)
+
+    def test_accept_cancellation_releases_collateral(self):
+        task = Task.objects.create(
+            title="Test Task",
+            description="Details",
+            reward=500,
+            posted_by=self.poster,
+            deadline=timezone.now() + timedelta(days=1),
+            status='available'
+        )
+        self.client.login(username='taker', password='password')
+        self.client.get(f'/task/take/{task.id}/')
+
+        self.client.login(username='poster', password='password')
+        self.client.get(f'/task/cancel/request/{task.id}/')
+
+        self.client.login(username='taker', password='password')
+        self.client.get(f'/task/cancel/accept/{task.id}/')
+
+        self.taker_profile.refresh_from_db()
+        task.refresh_from_db()
+
+        self.assertEqual(task.status, 'available')
+        self.assertIsNone(task.taken_by)
+        self.assertEqual(self.taker_profile.rewards, 500)
+
+        release_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='collateral_release').first()
+        self.assertIsNotNone(release_ledger)
+        self.assertEqual(release_ledger.amount, 100)
+
+    def test_slash_user_confiscates_points_and_collateral(self):
+        task = Task.objects.create(
+            title="Test Task",
+            description="Details",
+            reward=500,
+            posted_by=self.poster,
+            deadline=timezone.now() + timedelta(days=1),
+            status='available'
+        )
+        self.client.login(username='taker', password='password')
+        self.client.get(f'/task/take/{task.id}/')
+
+        initial_poster_rewards = self.poster_profile.rewards
+
+        slash_user(self.taker, harmed_poster=self.poster, reason="Verified Sybil Fraud")
+
+        self.taker_profile.refresh_from_db()
+        self.poster_profile.refresh_from_db()
+        task.refresh_from_db()
+
+        self.assertTrue(self.taker_profile.is_fraudulent)
+        self.assertEqual(self.taker_profile.rewards, 0)
+        self.assertEqual(task.status, 'available')
+        self.assertIsNone(task.taken_by)
+        self.assertEqual(task.taker_collateral, 0)
+
+        self.assertEqual(self.poster_profile.rewards, initial_poster_rewards + 100)
+
+        slash_penalties = RewardLedger.objects.filter(user=self.taker, transaction_type='fraud_slashing_penalty')
+        self.assertTrue(slash_penalties.exists())
+        
+        poster_slash_credit = RewardLedger.objects.filter(user=self.poster, transaction_type='collateral_slash').first()
+        self.assertIsNotNone(poster_slash_credit)
+        self.assertEqual(poster_slash_credit.amount, 100)
