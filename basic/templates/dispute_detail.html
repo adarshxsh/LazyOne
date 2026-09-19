@@ -13,8 +13,8 @@
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
+            <p><strong>Status:</strong> <span id="dispute-status-badge" class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span id="dispute-escrow-status" class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
         </div>
@@ -24,5 +24,47 @@
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
     </div>
+
+    <div id="dispute-live-notification" class="hidden mt-6 p-4 bg-cyan-900/40 border border-cyan-500 rounded-lg text-cyan-200"></div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const disputeId = "{{ dispute.id }}";
+            const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+            const socketUrl = `${wsScheme}://${window.location.host}/ws/disputes/${disputeId}/`;
+            const disputeSocket = new WebSocket(socketUrl);
+
+            disputeSocket.onmessage = function(e) {
+                const data = JSON.parse(e.data);
+                if (data.type === 'dispute_update' && data.dispute) {
+                    const statusBadge = document.getElementById('dispute-status-badge');
+                    const escrowBadge = document.getElementById('dispute-escrow-status');
+                    const notificationBox = document.getElementById('dispute-live-notification');
+
+                    if (statusBadge) {
+                        statusBadge.textContent = data.dispute.status_display;
+                        if (data.dispute.status === 'open') {
+                            statusBadge.className = 'px-2 py-1 text-sm rounded-full bg-yellow-500/20 text-yellow-300';
+                        } else {
+                            statusBadge.className = 'px-2 py-1 text-sm rounded-full bg-green-500/20 text-green-300';
+                        }
+                    }
+
+                    if (escrowBadge) {
+                        escrowBadge.textContent = data.dispute.escrow_status_display;
+                    }
+
+                    if (notificationBox && data.message) {
+                        notificationBox.textContent = `Real-time update: ${data.message}`;
+                        notificationBox.classList.remove('hidden');
+                    }
+                }
+            };
+
+            disputeSocket.onerror = function(err) {
+                console.error('Dispute WebSocket error:', err);
+            };
+        });
+    </script>
 
 {% endblock %}

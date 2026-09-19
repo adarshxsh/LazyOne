@@ -1,2 +1,9 @@
-# This file is no longer used after migrating to Firestore for real-time chat.
-# The project now runs using the standard wsgi.py for HTTP requests.
+from django.urls import path
+from . import consumers
+
+websocket_urlpatterns = [
+    path('ws/disputes/', consumers.DisputeConsumer.as_asgi()),
+    path('ws/disputes/<int:dispute_id>/', consumers.DisputeConsumer.as_asgi()),
+    path('ws/dispute/<int:dispute_id>/', consumers.DisputeConsumer.as_asgi()),
+]
+

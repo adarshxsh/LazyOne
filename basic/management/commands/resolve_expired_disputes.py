@@ -4,6 +4,7 @@ from django.utils import timezone
 from django.db import transaction
 from django.urls import reverse
 from basic.models import Dispute, RewardLedger, Notification
+from basic.broadcasting import broadcast_dispute_update
 
 class Command(BaseCommand):
     help = 'Resolves expired open disputes, refunds/forfeits escrowed bonds, and settles task points.'
@@ -83,6 +84,12 @@ class Command(BaseCommand):
                         message=f"Dispute for task '{task.title}' has expired ({days}d SLA) and was automatically resolved.",
                         link=dispute_link
                     )
+
+                transaction.on_commit(lambda d=dispute, t=task: broadcast_dispute_update(
+                    d,
+                    'dispute_resolved',
+                    f"Dispute for task '{t.title}' was automatically resolved."
+                ))
 
                 count += 1
 
