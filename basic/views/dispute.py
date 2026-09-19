@@ -2,6 +2,8 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
+from django.core.validators import URLValidator
+from django.core.exceptions import ValidationError
 from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
@@ -28,10 +30,37 @@ def raise_dispute(request, task_id):
         messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
         return redirect('my_tasks')
     if request.method == 'POST':
-        reason = request.POST.get('reason')
-        if not reason:
-            messages.error(request, "A reason is required to raise a dispute.")
+        category = request.POST.get('category', '').strip()
+        evidence_type = request.POST.get('evidence_type', 'other').strip()
+        evidence_details = request.POST.get('evidence_details', '').strip()
+        reason = request.POST.get('reason', '').strip()
+
+        if not evidence_details and reason:
+            evidence_details = reason
+        if not reason and evidence_details:
+            reason = evidence_details
+
+        valid_categories = [choice[0] for choice in Dispute.CATEGORY_CHOICES]
+        if not category or category not in valid_categories:
+            messages.error(request, "A valid dispute category selection is required.")
             return redirect('my_tasks')
+
+        if not evidence_details or len(evidence_details) < 50:
+            messages.error(request, "Evidence details must be at least 50 characters long.")
+            return redirect('my_tasks')
+
+        evidence_url = request.POST.get('evidence_url', '').strip()
+        if evidence_url:
+            validator = URLValidator()
+            try:
+                validator(evidence_url)
+            except ValidationError:
+                messages.error(request, "Please enter a valid URL for evidence proof.")
+                return redirect('my_tasks')
+
+        valid_evidence_types = [choice[0] for choice in Dispute.EVIDENCE_TYPE_CHOICES]
+        if not evidence_type or evidence_type not in valid_evidence_types:
+            evidence_type = 'other'
 
         deposit_amount = task.deposit_bond_amount
         user_profile = request.user.userprofile
@@ -49,6 +78,10 @@ def raise_dispute(request, task_id):
             if hasattr(task, 'dispute'):
                 dispute = task.dispute
                 dispute.raised_by = request.user
+                dispute.category = category
+                dispute.evidence_type = evidence_type
+                dispute.evidence_details = evidence_details
+                dispute.evidence_url = evidence_url if evidence_url else None
                 dispute.reason = reason
                 dispute.status = 'open'
                 dispute.deposit_amount = deposit_amount
@@ -58,6 +91,10 @@ def raise_dispute(request, task_id):
                 dispute = Dispute.objects.create(
                     task=task,
                     raised_by=request.user,
+                    category=category,
+                    evidence_type=evidence_type,
+                    evidence_details=evidence_details,
+                    evidence_url=evidence_url if evidence_url else None,
                     reason=reason,
                     deposit_amount=deposit_amount,
                     escrow_status='held'
