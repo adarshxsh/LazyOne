@@ -63,6 +63,9 @@ def take_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, status='available')
     if task.posted_by == request.user:
         messages.error(request, "You cannot take your own task.")
+    elif task.deadline and task.deadline <= timezone.now():
+        messages.error(request, "This task has expired and can no longer be taken.")
+        return redirect('home')
     else:
         with transaction.atomic():
             task.status = 'in_progress'
