@@ -38,6 +38,7 @@ def add_task(request):
 
             with transaction.atomic():
                 user_profile.rewards -= reward
+                user_profile.tasks_posted += 1
                 user_profile.save()
                 new_task = Task.objects.create(
                     title=title, description=description, reward=reward,
@@ -85,6 +86,8 @@ def complete_task(request, task_id):
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
         task_doer_profile.rewards += task.reward
+        task_doer_profile.tasks_completed += 1
+        task_doer_profile.update_reputation(10, save=False)
         task_doer_profile.save()
         task.status = 'completed'
         task.save()
@@ -95,6 +98,15 @@ def complete_task(request, task_id):
             )
             task.dispute.status = 'resolved'
             task.dispute.save()
+            task_doer_profile.refresh_from_db()
+            task_doer_profile.disputes_won += 1
+            task_doer_profile.update_reputation(15, save=False)
+            task_doer_profile.save()
+
+            poster_profile = task.posted_by.userprofile
+            poster_profile.disputes_lost += 1
+            poster_profile.update_reputation(-25, save=False)
+            poster_profile.save()
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,
@@ -111,6 +123,7 @@ def cancel_task(request, task_id):
         task.save()
         user_profile = request.user.userprofile
         user_profile.rewards += task.reward
+        user_profile.tasks_cancelled += 1
         user_profile.save()
         RewardLedger.objects.create(
             user=request.user, task=task, amount=task.reward,
@@ -138,6 +151,7 @@ def accept_cancellation(request, task_id):
     with transaction.atomic():
         poster_profile = task.posted_by.userprofile
         poster_profile.rewards += task.reward
+        poster_profile.tasks_cancelled += 1
         poster_profile.save()
         RewardLedger.objects.create(
             user=task.posted_by, task=task, amount=task.reward,
@@ -162,6 +176,10 @@ def abandon_task(request, task_id):
         task.status = 'available'
         task.taken_by = None
         task.save()
+        taker_profile = request.user.userprofile
+        taker_profile.tasks_cancelled += 1
+        taker_profile.update_reputation(-20, save=False)
+        taker_profile.save()
         Notification.objects.create(
             recipient=task.posted_by,
             message=f"{request.user.username} has abandoned your task: '{task.title}'. It is now available again.",

@@ -26,8 +26,56 @@ class UserProfile(models.Model):
     email_otp = models.CharField(max_length=6, blank=True, null=True)
     email_otp_created_at = models.DateTimeField(blank=True, null=True)
 
+    RISK_TIER_CHOICES = (
+        ('LOW', 'Low Risk'),
+        ('MEDIUM', 'Medium Risk'),
+        ('HIGH', 'High Risk'),
+    )
+
+    # User Reputation & Performance Metrics
+    reputation_score = models.IntegerField(default=100)
+    tasks_completed = models.PositiveIntegerField(default=0)
+    tasks_posted = models.PositiveIntegerField(default=0)
+    tasks_cancelled = models.PositiveIntegerField(default=0)
+    disputes_won = models.PositiveIntegerField(default=0)
+    disputes_lost = models.PositiveIntegerField(default=0)
+    risk_tier = models.CharField(max_length=10, choices=RISK_TIER_CHOICES, default='LOW')
+
     def __str__(self):
         return self.user.username
+
+    @property
+    def completion_rate(self):
+        total = self.tasks_completed + self.tasks_cancelled
+        if total == 0:
+            return 100.0
+        return round((self.tasks_completed / total) * 100, 1)
+
+    @property
+    def is_low_risk(self):
+        return self.risk_tier == 'LOW'
+
+    @property
+    def is_medium_risk(self):
+        return self.risk_tier == 'MEDIUM'
+
+    @property
+    def is_high_risk(self):
+        return self.risk_tier == 'HIGH'
+
+    def calculate_risk_tier(self):
+        if self.reputation_score < 50 or self.disputes_lost >= 2 or (self.tasks_cancelled >= 2 and self.tasks_cancelled > self.tasks_completed):
+            return 'HIGH'
+        elif self.reputation_score < 80 or self.disputes_lost == 1 or self.tasks_cancelled > 0:
+            return 'MEDIUM'
+        else:
+            return 'LOW'
+
+    def update_reputation(self, delta=0, save=True):
+        self.reputation_score = max(0, self.reputation_score + delta)
+        self.risk_tier = self.calculate_risk_tier()
+        if save:
+            self.save()
 
 class Task(models.Model):
     STATUS_CHOICES = (
@@ -58,6 +106,16 @@ class Task(models.Model):
     @property
     def deposit_bond_amount(self):
         return max(50, math.ceil(self.reward * 0.20))
+
+    def deposit_bond_amount_for_user(self, user):
+        base_bond = self.deposit_bond_amount
+        if user and hasattr(user, 'userprofile'):
+            tier = user.userprofile.risk_tier
+            if tier == 'HIGH':
+                return math.ceil(base_bond * 2.0)
+            elif tier == 'MEDIUM':
+                return math.ceil(base_bond * 1.5)
+        return base_bond
 
 class RewardLedger(models.Model):
     TRANSACTION_TYPES = (
@@ -122,6 +180,8 @@ class Dispute(models.Model):
             if beneficiary:
                 beneficiary_profile = beneficiary.userprofile
                 beneficiary_profile.rewards += self.deposit_amount
+                beneficiary_profile.disputes_won += 1
+                beneficiary_profile.update_reputation(15, save=False)
                 beneficiary_profile.save()
                 RewardLedger.objects.create(
                     user=beneficiary,
@@ -139,6 +199,11 @@ class Dispute(models.Model):
                 transaction_type='dispute_forfeit',
                 description=desc
             )
+            raiser_profile = self.raised_by.userprofile
+            raiser_profile.disputes_lost += 1
+            raiser_profile.update_reputation(-25, save=False)
+            raiser_profile.save()
+
             self.escrow_status = 'forfeited'
             self.save()
 

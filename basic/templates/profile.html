@@ -5,6 +5,46 @@
 {% block content %}
 <h2 class="text-3xl font-bold text-white mb-8 text-center">Edit Your Profile</h2>
 
+<div class="max-w-2xl mx-auto mb-8 bg-gray-800/80 border border-gray-700/60 rounded-xl p-6 shadow-lg">
+    <div class="flex flex-wrap items-center justify-between gap-4 border-b border-gray-700 pb-4 mb-4">
+        <div>
+            <h3 class="text-xl font-bold text-white">Reputation & Trust Profile</h3>
+            <p class="text-sm text-gray-400">Score: <span class="font-bold text-cyan-400 text-lg">{{ profile.reputation_score }}</span> pts | Completion Rate: <span class="font-bold text-emerald-400">{{ profile.completion_rate }}%</span></p>
+        </div>
+        <div>
+            {% if profile.risk_tier == 'LOW' %}
+                <span class="px-4 py-1.5 rounded-full text-sm font-bold bg-green-500/20 text-green-400 border border-green-500/40 shadow-sm">Low Risk</span>
+            {% elif profile.risk_tier == 'MEDIUM' %}
+                <span class="px-4 py-1.5 rounded-full text-sm font-bold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 shadow-sm">Medium Risk</span>
+            {% else %}
+                <span class="px-4 py-1.5 rounded-full text-sm font-bold bg-red-500/20 text-red-400 border border-red-500/40 shadow-sm">High Risk</span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
+        <div class="bg-gray-700/40 p-3 rounded-lg border border-gray-600/40">
+            <p class="text-2xl font-bold text-white">{{ profile.tasks_completed }}</p>
+            <p class="text-xs text-gray-400 uppercase tracking-wider">Completed</p>
+        </div>
+        <div class="bg-gray-700/40 p-3 rounded-lg border border-gray-600/40">
+            <p class="text-2xl font-bold text-white">{{ profile.tasks_posted }}</p>
+            <p class="text-xs text-gray-400 uppercase tracking-wider">Posted</p>
+        </div>
+        <div class="bg-gray-700/40 p-3 rounded-lg border border-gray-600/40">
+            <p class="text-2xl font-bold text-white">{{ profile.tasks_cancelled }}</p>
+            <p class="text-xs text-gray-400 uppercase tracking-wider">Cancelled</p>
+        </div>
+        <div class="bg-gray-700/40 p-3 rounded-lg border border-gray-600/40">
+            <p class="text-2xl font-bold text-emerald-400">{{ profile.disputes_won }}</p>
+            <p class="text-xs text-gray-400 uppercase tracking-wider">Disputes Won</p>
+        </div>
+        <div class="bg-gray-700/40 p-3 rounded-lg border border-gray-600/40">
+            <p class="text-2xl font-bold text-rose-400">{{ profile.disputes_lost }}</p>
+            <p class="text-xs text-gray-400 uppercase tracking-wider">Disputes Lost</p>
+        </div>
+    </div>
+</div>
+
 <form method="post" class="space-y-6 max-w-2xl mx-auto">
     {% csrf_token %}
 
