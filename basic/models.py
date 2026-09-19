@@ -3,6 +3,8 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
 
+from django.conf import settings
+
 # Create your models here.
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
@@ -59,6 +61,14 @@ class Task(models.Model):
     def deposit_bond_amount(self):
         return max(50, math.ceil(self.reward * 0.20))
 
+    @property
+    def filing_fee_amount(self):
+        return getattr(settings, 'DISPUTE_FILING_FEE', 25)
+
+    @property
+    def total_dispute_cost(self):
+        return self.deposit_bond_amount + self.filing_fee_amount
+
 class RewardLedger(models.Model):
     TRANSACTION_TYPES = (
         ('task_creation', 'Task Creation (Points Reserved)'),
@@ -66,13 +76,14 @@ class RewardLedger(models.Model):
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
+        ('dispute_filing_fee', 'Dispute Non-Refundable Filing Fee'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -94,11 +105,25 @@ class Dispute(models.Model):
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
+    filing_fee = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    @property
+    def withdrawal_penalty(self):
+        if self.deposit_amount <= 0:
+            return 0
+        pct = getattr(settings, 'DISPUTE_WITHDRAWAL_PENALTY_PERCENT', 25)
+        min_penalty = getattr(settings, 'DISPUTE_WITHDRAWAL_PENALTY_MIN', 10)
+        raw_penalty = math.ceil(self.deposit_amount * (pct / 100.0))
+        return min(self.deposit_amount, max(min_penalty, raw_penalty))
+
+    @property
+    def net_refund(self):
+        return max(0, self.deposit_amount - self.withdrawal_penalty)
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:

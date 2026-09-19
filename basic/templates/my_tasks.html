@@ -101,18 +101,15 @@
                                     <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-cyan-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-cyan-700 transition-colors text-sm">Go to Chat</a>
                                 {% endif %}
                                 <a href="{% url 'abandon_task' task.id %}" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm">Abandon Task</a>
-                                <button onclick="openDisputeModal('{{ task.id }}', '{{ task.deposit_bond_amount }}')" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm">Raise Dispute</button>
+                                <button onclick="openDisputeModal('{{ task.id }}', '{{ task.deposit_bond_amount }}', '{{ task.filing_fee_amount }}')" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm">Raise Dispute</button>
                             {% endif %}
                         {% elif task.status == 'disputed' %}
                             <p class="text-sm text-red-600">You have raised a dispute.</p>
                             {% if task.conversation %}
                                 <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm">Go to Chat</a>
                             {% endif %}
-                            <form action="{% url 'withdraw_dispute' task.dispute.id %}" method="post" class="inline">
-                                <a href="{% url 'dispute_detail' task.dispute.id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors text-sm">View Dispute</a>
-                                {% csrf_token %}
-                                <button type="submit" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm">Withdraw Dispute</button>
-                            </form>
+                            <a href="{% url 'dispute_detail' task.dispute.id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors text-sm">View Dispute</a>
+                            <button type="button" onclick="openWithdrawModal('{{ task.dispute.id }}', '{{ task.dispute.deposit_amount }}', '{{ task.dispute.withdrawal_penalty }}', '{{ task.dispute.net_refund }}')" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm">Withdraw Dispute</button>
                         {% elif task.status == 'completed' %}
                             <p class="text-green-600 font-semibold">Task Completed</p>
                         {% else %}
@@ -134,10 +131,12 @@
     <div class="bg-gray-100 rounded-2xl shadow-2xl p-8 max-w-md w-full border border-gray-300">
         <h3 class="text-2xl font-bold text-gray-800 mb-4">Raise a Dispute</h3>
         <p class="text-gray-600 mb-3">Please explain why you are raising a dispute. This will be visible to the task poster.</p>
-        <div class="bg-yellow-50 border-l-4 border-yellow-400 p-3 mb-4 rounded text-sm text-yellow-800">
+        <div class="bg-yellow-50 border-l-4 border-yellow-400 p-3 mb-4 rounded text-sm text-yellow-800 space-y-1">
             <p><strong>Required Security Deposit Bond:</strong> <span id="modal-deposit-amount">50</span> points</p>
-            <p><strong>Your Current Reward Balance:</strong> <span id="modal-user-balance">{{ user.userprofile.rewards }}</span> points</p>
-            <p id="modal-insufficient-warning" class="text-red-600 font-semibold hidden mt-1">Warning: You do not have enough reward points to post this deposit bond!</p>
+            <p><strong>Non-Refundable Filing Fee:</strong> <span id="modal-filing-fee">25</span> points</p>
+            <p class="border-t border-yellow-200 pt-1 font-semibold text-gray-800"><strong>Total Required Points:</strong> <span id="modal-total-required">75</span> points</p>
+            <p><strong>Your Current Balance:</strong> <span id="modal-user-balance">{{ user.userprofile.rewards }}</span> points</p>
+            <p id="modal-insufficient-warning" class="text-red-600 font-semibold hidden mt-1">Warning: You do not have enough reward points to raise this dispute!</p>
         </div>
         <form id="dispute-form" method="post">
             {% csrf_token %}
@@ -145,6 +144,39 @@
             <div class="mt-6 flex justify-end space-x-4">
                 <button type="button" onclick="closeDisputeModal()" class="px-6 py-2 rounded-lg text-white bg-gray-600 hover:bg-gray-700 transition-colors">Cancel</button>
                 <button id="dispute-submit-btn" type="submit" class="px-6 py-2 rounded-lg text-white font-semibold bg-red-600 hover:bg-red-700 transition-colors">Submit Dispute</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Withdraw Dispute Modal -->
+<div id="withdraw-dispute-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 hidden">
+    <div class="bg-gray-100 rounded-2xl shadow-2xl p-8 max-w-md w-full border border-gray-300 text-gray-800">
+        <h3 class="text-2xl font-bold text-gray-800 mb-3">Withdraw Dispute</h3>
+        <p class="text-yellow-800 font-medium text-sm mb-4">
+            Warning: Voluntarily withdrawing this dispute incurs a non-refundable withdrawal penalty awarded to the task poster.
+        </p>
+
+        <div class="bg-white p-4 rounded-lg border border-gray-300 space-y-2 mb-6 text-sm">
+            <div class="flex justify-between">
+                <span class="text-gray-600">Total Security Deposit Bond Held:</span>
+                <span id="withdraw-modal-deposit" class="font-semibold text-gray-800">0 points</span>
+            </div>
+            <div class="flex justify-between text-red-600">
+                <span>Non-Refundable Withdrawal Penalty:</span>
+                <span id="withdraw-modal-penalty" class="font-semibold">-0 points</span>
+            </div>
+            <div class="border-t border-gray-200 pt-2 flex justify-between text-green-600 text-base font-bold">
+                <span>Net Refund Amount:</span>
+                <span id="withdraw-modal-net">+0 points</span>
+            </div>
+        </div>
+
+        <form id="withdraw-dispute-form" method="post">
+            {% csrf_token %}
+            <div class="flex justify-end space-x-4">
+                <button type="button" onclick="closeWithdrawModal()" class="px-6 py-2 rounded-lg text-white bg-gray-600 hover:bg-gray-700 transition-colors">Cancel</button>
+                <button type="submit" class="px-6 py-2 rounded-lg text-white font-semibold bg-red-600 hover:bg-red-700 transition-colors">Confirm Withdrawal</button>
             </div>
         </form>
     </div>
@@ -176,14 +208,20 @@
     const disputeForm = document.getElementById('dispute-form');
     const userBalance = parseInt("{{ user.userprofile.rewards }}", 10) || 0;
 
-    function openDisputeModal(taskId, depositBond) {
+    function openDisputeModal(taskId, depositBond, filingFee) {
         disputeForm.action = `/task/dispute/${taskId}/`;
         const bond = parseInt(depositBond, 10) || 50;
+        const fee = parseInt(filingFee, 10) || 25;
+        const total = bond + fee;
+
         document.getElementById('modal-deposit-amount').textContent = bond;
+        document.getElementById('modal-filing-fee').textContent = fee;
+        document.getElementById('modal-total-required').textContent = total;
+
         const warning = document.getElementById('modal-insufficient-warning');
         const submitBtn = document.getElementById('dispute-submit-btn');
 
-        if (userBalance < bond) {
+        if (userBalance < total) {
             warning.classList.remove('hidden');
             if (submitBtn) {
                 submitBtn.disabled = true;
@@ -202,6 +240,27 @@
 
     function closeDisputeModal() {
         disputeModal.classList.add('hidden');
+    }
+
+    function openWithdrawModal(disputeId, depositAmount, penaltyAmount, netRefund) {
+        const withdrawDisputeForm = document.getElementById('withdraw-dispute-form');
+        const withdrawDisputeModal = document.getElementById('withdraw-dispute-modal');
+        if (withdrawDisputeForm) {
+            withdrawDisputeForm.action = `/dispute/withdraw/${disputeId}/`;
+        }
+        document.getElementById('withdraw-modal-deposit').textContent = depositAmount + ' points';
+        document.getElementById('withdraw-modal-penalty').textContent = '-' + penaltyAmount + ' points';
+        document.getElementById('withdraw-modal-net').textContent = '+' + netRefund + ' points';
+        if (withdrawDisputeModal) {
+            withdrawDisputeModal.classList.remove('hidden');
+        }
+    }
+
+    function closeWithdrawModal() {
+        const withdrawDisputeModal = document.getElementById('withdraw-dispute-modal');
+        if (withdrawDisputeModal) {
+            withdrawDisputeModal.classList.add('hidden');
+        }
     }
 </script>
 {% endblock %}

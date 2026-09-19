@@ -130,4 +130,9 @@ print("MEDIA_FILES: OK")
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 print("DEFAULT_AUTO_FIELD: OK")
 
+# Dispute Configuration
+DISPUTE_FILING_FEE = int(os.getenv('DISPUTE_FILING_FEE', 25))
+DISPUTE_WITHDRAWAL_PENALTY_PERCENT = int(os.getenv('DISPUTE_WITHDRAWAL_PENALTY_PERCENT', 25))
+DISPUTE_WITHDRAWAL_PENALTY_MIN = int(os.getenv('DISPUTE_WITHDRAWAL_PENALTY_MIN', 10))
+
 print("--- settings.py loaded successfully ---")
