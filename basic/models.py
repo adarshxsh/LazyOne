@@ -68,11 +68,13 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('dispute_partial_payout', 'Dispute Partial Payout'),
+        ('dispute_partial_refund', 'Dispute Partial Refund'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -95,6 +97,8 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    settlement_taker_share_percent = models.IntegerField(null=True, blank=True)
+    settlement_notes = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
