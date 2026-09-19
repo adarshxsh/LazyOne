@@ -103,6 +103,8 @@ class DisputeDepositBondTests(TestCase):
         )
 
         dispute = Dispute.objects.get(task=self.task)
+        self.assertEqual(dispute.withdrawal_penalty, 15)
+        self.assertEqual(dispute.net_refund, 45)
 
         # Withdraw dispute
         response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
@@ -115,14 +117,61 @@ class DisputeDepositBondTests(TestCase):
         self.assertEqual(dispute.escrow_status, 'refunded')
         self.assertEqual(dispute.status, 'resolved')
 
-        # Balance restored: 40 + 60 = 100
+        # Balance restored partially: 40 + 45 = 85 (15 points penalty deducted)
         self.taker_profile.refresh_from_db()
-        self.assertEqual(self.taker_profile.rewards, 100)
+        self.assertEqual(self.taker_profile.rewards, 85)
 
-        # Check refund ledger
-        ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_refund').first()
-        self.assertIsNotNone(ledger)
-        self.assertEqual(ledger.amount, 60)
+        # Poster balance credited with penalty: 1000 + 15 = 1015
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1015)
+
+        # Check refund ledger for taker
+        refund_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_refund').first()
+        self.assertIsNotNone(refund_ledger)
+        self.assertEqual(refund_ledger.amount, 45)
+
+        # Check forfeit ledger for poster
+        forfeit_ledger = RewardLedger.objects.filter(user=self.poster, transaction_type='dispute_forfeit').first()
+        self.assertIsNotNone(forfeit_ledger)
+        self.assertEqual(forfeit_ledger.amount, 15)
+
+    def test_repeated_dispute_creation_and_withdrawal_point_loss(self):
+        # Taker starts with 100 points
+        self.client.login(username='taker', password='password123')
+
+        # Cycle 1: deposit = 60, penalty = 15, refund = 45. Net loss = 15. Taker balance: 85.
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Dispute 1'})
+        dispute = Dispute.objects.get(task=self.task)
+        self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 85)
+
+        # Cycle 2: deposit = 60, penalty = 15, refund = 45. Net loss = 15. Taker balance: 70.
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Dispute 2'})
+        dispute.refresh_from_db()
+        self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 70)
+
+        # Cycle 3: deposit = 60, penalty = 15, refund = 45. Net loss = 15. Taker balance: 55.
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Dispute 3'})
+        dispute.refresh_from_db()
+        self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 55)
+
+        # Poster receives total 45 points from the 3 penalties (1000 + 45 = 1045)
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1045)
+
+        # Cycle 4: Taker now has 55 points, but bond required is 60 -> raise dispute fails due to insufficient balance!
+        response = self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Dispute 4'})
+        self.assertRedirects(response, reverse('my_tasks'))
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 55)
 
     def test_complete_disputed_task_refunds_deposit(self):
         # Taker raises dispute (deposit 60 deducted from 100 -> 40 left)
@@ -181,4 +230,53 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+    def test_withdrawal_penalty_minimum_applies(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Test min penalty',
+            deposit_amount=30,  # 25% of 30 is 7.5 (ceil 8), but min 10 applies
+            escrow_status='held'
+        )
+        self.assertEqual(dispute.withdrawal_penalty, 10)
+        self.assertEqual(dispute.net_refund, 20)
+
+    def test_expired_dispute_resolution_exempt_from_penalty(self):
+        from django.core.management import call_command
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Dispute reason'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        dispute.created_at = timezone.now() - timedelta(days=10)
+        dispute.save()
+
+        # Run management command
+        call_command('resolve_expired_disputes', days=7)
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.escrow_status, 'refunded')
+
+        # Taker balance: 40 + 300 (reward) + 60 (100% deposit refund without penalty) = 400
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 400)
+
+    def test_dispute_detail_template_renders_withdrawal_modal_and_amounts(self):
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Dispute reason'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Withdraw Dispute')
+        self.assertContains(response, 'Non-Refundable Withdrawal Penalty:')
+        self.assertContains(response, '-15 points')
+        self.assertContains(response, '+45 points')
+
 

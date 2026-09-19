@@ -23,6 +23,60 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if request.user == dispute.raised_by and dispute.status == 'open' %}
+            <div class="mt-8 pt-6 border-t border-gray-700">
+                <button type="button" onclick="openWithdrawModal()" class="bg-red-600 hover:bg-red-700 text-white font-semibold px-6 py-2.5 rounded-lg transition-colors shadow">
+                    Withdraw Dispute
+                </button>
+            </div>
+
+            <!-- Withdraw Dispute Confirmation Modal -->
+            <div id="withdraw-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 hidden">
+                <div class="bg-gray-800 rounded-2xl shadow-2xl p-8 max-w-md w-full border border-gray-700 text-gray-200">
+                    <h3 class="text-2xl font-bold text-white mb-3">Withdraw Dispute</h3>
+                    <p class="text-yellow-400 font-medium text-sm mb-4">
+                        Warning: Voluntarily withdrawing this dispute incurs a non-refundable withdrawal penalty awarded to the task poster.
+                    </p>
+                    
+                    <div class="bg-gray-900 p-4 rounded-lg border border-gray-700 space-y-2 mb-6 text-sm">
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Total Security Deposit Bond Held:</span>
+                            <span class="font-semibold text-white">{{ dispute.deposit_amount }} points</span>
+                        </div>
+                        <div class="flex justify-between text-red-400">
+                            <span>Non-Refundable Withdrawal Penalty:</span>
+                            <span class="font-semibold">-{{ dispute.withdrawal_penalty }} points</span>
+                        </div>
+                        <div class="border-t border-gray-700 pt-2 flex justify-between text-green-400 text-base font-bold">
+                            <span>Net Refund Amount:</span>
+                            <span>+{{ dispute.net_refund }} points</span>
+                        </div>
+                    </div>
+
+                    <form action="{% url 'withdraw_dispute' dispute.id %}" method="post">
+                        {% csrf_token %}
+                        <div class="flex justify-end space-x-4">
+                            <button type="button" onclick="closeWithdrawModal()" class="px-5 py-2 rounded-lg text-white bg-gray-600 hover:bg-gray-700 transition-colors">
+                                Cancel
+                            </button>
+                            <button type="submit" class="px-5 py-2 rounded-lg text-white font-semibold bg-red-600 hover:bg-red-700 transition-colors">
+                                Confirm Withdrawal
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <script>
+                function openWithdrawModal() {
+                    document.getElementById('withdraw-modal').classList.remove('hidden');
+                }
+                function closeWithdrawModal() {
+                    document.getElementById('withdraw-modal').classList.add('hidden');
+                }
+            </script>
+        {% endif %}
     </div>
 
 {% endblock %}

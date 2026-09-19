@@ -108,11 +108,8 @@
                             {% if task.conversation %}
                                 <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm">Go to Chat</a>
                             {% endif %}
-                            <form action="{% url 'withdraw_dispute' task.dispute.id %}" method="post" class="inline">
-                                <a href="{% url 'dispute_detail' task.dispute.id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors text-sm">View Dispute</a>
-                                {% csrf_token %}
-                                <button type="submit" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm">Withdraw Dispute</button>
-                            </form>
+                            <a href="{% url 'dispute_detail' task.dispute.id %}" class="inline-block bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors text-sm">View Dispute</a>
+                            <button type="button" onclick="openWithdrawModal('{{ task.dispute.id }}', '{{ task.dispute.deposit_amount }}', '{{ task.dispute.withdrawal_penalty }}', '{{ task.dispute.net_refund }}')" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm">Withdraw Dispute</button>
                         {% elif task.status == 'completed' %}
                             <p class="text-green-600 font-semibold">Task Completed</p>
                         {% else %}
@@ -203,5 +200,59 @@
     function closeDisputeModal() {
         disputeModal.classList.add('hidden');
     }
+
+    const withdrawDisputeModal = document.getElementById('withdraw-dispute-modal');
+    const withdrawDisputeForm = document.getElementById('withdraw-dispute-form');
+
+    function openWithdrawModal(disputeId, depositAmount, penaltyAmount, netRefund) {
+        if (withdrawDisputeForm) {
+            withdrawDisputeForm.action = `/dispute/withdraw/${disputeId}/`;
+        }
+        document.getElementById('withdraw-modal-deposit').textContent = depositAmount + ' points';
+        document.getElementById('withdraw-modal-penalty').textContent = '-' + penaltyAmount + ' points';
+        document.getElementById('withdraw-modal-net').textContent = '+' + netRefund + ' points';
+        if (withdrawDisputeModal) {
+            withdrawDisputeModal.classList.remove('hidden');
+        }
+    }
+
+    function closeWithdrawModal() {
+        if (withdrawDisputeModal) {
+            withdrawDisputeModal.classList.add('hidden');
+        }
+    }
 </script>
+
+<!-- Withdraw Dispute Modal -->
+<div id="withdraw-dispute-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 hidden">
+    <div class="bg-gray-100 rounded-2xl shadow-2xl p-8 max-w-md w-full border border-gray-300 text-gray-800">
+        <h3 class="text-2xl font-bold text-gray-800 mb-3">Withdraw Dispute</h3>
+        <p class="text-yellow-800 font-medium text-sm mb-4">
+            Warning: Voluntarily withdrawing this dispute incurs a non-refundable withdrawal penalty awarded to the task poster.
+        </p>
+        
+        <div class="bg-white p-4 rounded-lg border border-gray-300 space-y-2 mb-6 text-sm">
+            <div class="flex justify-between">
+                <span class="text-gray-600">Total Security Deposit Bond Held:</span>
+                <span id="withdraw-modal-deposit" class="font-semibold text-gray-800">0 points</span>
+            </div>
+            <div class="flex justify-between text-red-600">
+                <span>Non-Refundable Withdrawal Penalty:</span>
+                <span id="withdraw-modal-penalty" class="font-semibold">-0 points</span>
+            </div>
+            <div class="border-t border-gray-200 pt-2 flex justify-between text-green-600 text-base font-bold">
+                <span>Net Refund Amount:</span>
+                <span id="withdraw-modal-net">+0 points</span>
+            </div>
+        </div>
+
+        <form id="withdraw-dispute-form" method="post">
+            {% csrf_token %}
+            <div class="flex justify-end space-x-4">
+                <button type="button" onclick="closeWithdrawModal()" class="px-6 py-2 rounded-lg text-white bg-gray-600 hover:bg-gray-700 transition-colors">Cancel</button>
+                <button type="submit" class="px-6 py-2 rounded-lg text-white font-semibold bg-red-600 hover:bg-red-700 transition-colors">Confirm Withdrawal</button>
+            </div>
+        </form>
+    </div>
+</div>
 {% endblock %}
