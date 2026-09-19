@@ -83,6 +83,7 @@ class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
         ('resolved', 'Resolved'),
+        ('appealed', 'Appealed'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
@@ -96,6 +97,39 @@ class Dispute(models.Model):
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
+
+    # Resolution fields
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='resolved_disputes')
+    resolution_ruling = models.CharField(max_length=50, blank=True, null=True)
+    resolution_notes = models.TextField(blank=True, null=True)
+
+    # Appeal fields
+    appealed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='appealed_disputes')
+    appealed_at = models.DateTimeField(null=True, blank=True)
+    appeal_reason = models.TextField(blank=True, null=True)
+
+    @property
+    def is_appealable(self):
+        if self.status == 'resolved' and self.resolved_at and self.appealed_at is None:
+            from datetime import timedelta
+            return timezone.now() <= self.resolved_at + timedelta(hours=48)
+        return False
+
+    @property
+    def appeal_deadline(self):
+        if self.resolved_at:
+            from datetime import timedelta
+            return self.resolved_at + timedelta(hours=48)
+        return None
+
+    @property
+    def time_remaining_for_appeal(self):
+        if self.is_appealable:
+            from datetime import timedelta
+            remaining = (self.resolved_at + timedelta(hours=48)) - timezone.now()
+            return remaining if remaining.total_seconds() > 0 else None
+        return None
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
