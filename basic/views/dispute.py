@@ -1,8 +1,11 @@
+import os
+from datetime import timedelta
+from django.utils import timezone
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, Task, Notification, RewardLedger, DisputeEvidence
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -13,9 +16,14 @@ def dispute_detail_view(request, dispute_id):
     if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+    
+    evidences = dispute.evidences.all()
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'evidences': evidences,
+        'is_evidence_open': dispute.is_evidence_window_open,
+        'now': timezone.now(),
     }
     return render(request, 'dispute_detail.html', context)
 
@@ -42,6 +50,10 @@ def raise_dispute(request, task_id):
             )
             return redirect('my_tasks')
 
+        now = timezone.now()
+        evidence_deadline = now + timedelta(days=3)
+        expires_at = now + timedelta(days=7)
+
         with transaction.atomic():
             user_profile.rewards -= deposit_amount
             user_profile.save()
@@ -53,6 +65,8 @@ def raise_dispute(request, task_id):
                 dispute.status = 'open'
                 dispute.deposit_amount = deposit_amount
                 dispute.escrow_status = 'held'
+                dispute.evidence_deadline = evidence_deadline
+                dispute.expires_at = expires_at
                 dispute.save()
             else:
                 dispute = Dispute.objects.create(
@@ -60,7 +74,9 @@ def raise_dispute(request, task_id):
                     raised_by=request.user,
                     reason=reason,
                     deposit_amount=deposit_amount,
-                    escrow_status='held'
+                    escrow_status='held',
+                    evidence_deadline=evidence_deadline,
+                    expires_at=expires_at
                 )
 
             RewardLedger.objects.create(
@@ -85,7 +101,68 @@ def raise_dispute(request, task_id):
 
 @login_required(login_url='/login/')
 @require_POST
+def submit_dispute_evidence(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+
+    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+        messages.error(request, "You are not authorized to submit evidence for this dispute.")
+        return redirect('home')
+
+    if dispute.status != 'open':
+        messages.error(request, "This dispute is no longer open.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if not dispute.is_evidence_window_open:
+        messages.error(request, "The evidence submission window for this dispute has closed.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    description = request.POST.get('description', '').strip()
+    file = request.FILES.get('file')
+
+    if not description and not file:
+        messages.error(request, "Please provide a description or attach a file.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if file:
+        if file.size > 5 * 1024 * 1024:
+            messages.error(request, "File size cannot exceed 5MB.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+        ext = os.path.splitext(file.name)[1].lower().lstrip('.')
+        allowed_exts = ['png', 'jpg', 'jpeg', 'pdf', 'txt']
+        if ext not in allowed_exts:
+            messages.error(request, f"File format '.{ext}' is not allowed. Allowed formats: PNG, JPG, JPEG, PDF, TXT.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+    with transaction.atomic():
+        evidence = DisputeEvidence.objects.create(
+            dispute=dispute,
+            submitted_by=request.user,
+            description=description,
+            file=file
+        )
+
+        other_party = None
+        if request.user == task.posted_by:
+            other_party = task.taken_by
+        elif request.user == task.taken_by:
+            other_party = task.posted_by
+
+        if other_party:
+            Notification.objects.create(
+                recipient=other_party,
+                message=f"{request.user.username} submitted new evidence for dispute on task '{task.title}'.",
+                link=reverse('dispute_detail', args=[dispute.id])
+            )
+
+    messages.success(request, "Evidence submitted successfully.")
+    return redirect('dispute_detail', dispute_id=dispute.id)
+
+@login_required(login_url='/login/')
+@require_POST
 def withdraw_dispute(request, dispute_id):
+
     dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user)
     task = dispute.task
     with transaction.atomic():

@@ -3,7 +3,9 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, DisputeEvidence, Notification
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +183,220 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class DisputeEvidenceAndExpirationTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        self.other_user = User.objects.create_user(username='other', password='password123')
+        self.other_profile = UserProfile.objects.create(user=self.other_user, rewards=500)
+
+        self.task = Task.objects.create(
+            title="Evidence Test Task",
+            description="Test Description",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=timezone.now() + timedelta(days=2)
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_raise_dispute_sets_deadlines(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work submitted but unacknowledged'}
+        )
+        self.task.refresh_from_db()
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertIsNotNone(dispute.evidence_deadline)
+        self.assertIsNotNone(dispute.expires_at)
+        self.assertTrue(dispute.is_evidence_window_open)
+
+    def test_submit_evidence_success(self):
+        # Taker raises dispute
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work submitted'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+
+        # Poster logs in and submits counter-evidence
+        self.client.login(username='poster', password='password123')
+        test_file = SimpleUploadedFile("screenshot.png", b"file_content", content_type="image/png")
+        response = self.client.post(
+            reverse('submit_dispute_evidence', args=[dispute.id]),
+            {
+                'description': 'Here is proof of work quality',
+                'file': test_file
+            }
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+        evidence = DisputeEvidence.objects.filter(dispute=dispute, submitted_by=self.poster).first()
+        self.assertIsNotNone(evidence)
+        self.assertEqual(evidence.description, 'Here is proof of work quality')
+        self.assertTrue(evidence.file.name.endswith('.png'))
+
+        # Check notification sent to taker
+        notification = Notification.objects.filter(recipient=self.taker).first()
+        self.assertIsNotNone(notification)
+        self.assertIn('submitted new evidence', notification.message)
+
+    def test_non_participant_access_denied(self):
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Dispute reason'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+
+        # Other user attempts to view dispute
+        self.client.login(username='other', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertRedirects(response, reverse('home'))
+
+        # Other user attempts to submit evidence
+        response = self.client.post(
+            reverse('submit_dispute_evidence', args=[dispute.id]),
+            {'description': 'Unauthorized evidence'}
+        )
+        self.assertRedirects(response, reverse('home'))
+        self.assertEqual(DisputeEvidence.objects.count(), 0)
+
+    def test_file_upload_validation_invalid_extension(self):
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Dispute reason'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+
+        self.client.login(username='poster', password='password123')
+        invalid_file = SimpleUploadedFile("script.sh", b"echo hello", content_type="application/x-sh")
+        response = self.client.post(
+            reverse('submit_dispute_evidence', args=[dispute.id]),
+            {
+                'description': 'Attempting invalid file',
+                'file': invalid_file
+            }
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+        self.assertEqual(DisputeEvidence.objects.count(), 0)
+
+    def test_file_upload_validation_exceeds_max_size(self):
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Dispute reason'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+
+        self.client.login(username='poster', password='password123')
+        large_content = b'0' * (5 * 1024 * 1024 + 1)
+        large_file = SimpleUploadedFile("large_doc.pdf", large_content, content_type="application/pdf")
+        response = self.client.post(
+            reverse('submit_dispute_evidence', args=[dispute.id]),
+            {
+                'description': 'Oversized file',
+                'file': large_file
+            }
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+        self.assertEqual(DisputeEvidence.objects.count(), 0)
+
+    def test_evidence_submission_closed_after_deadline(self):
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Dispute reason'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+
+        # Set evidence_deadline in the past
+        dispute.evidence_deadline = timezone.now() - timedelta(hours=1)
+        dispute.save()
+
+        self.assertFalse(dispute.is_evidence_window_open)
+
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('submit_dispute_evidence', args=[dispute.id]),
+            {'description': 'Late evidence submission'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+        self.assertEqual(DisputeEvidence.objects.count(), 0)
+
+    def test_auto_resolution_command_poster_unresponsive(self):
+        # Taker raises dispute and submits evidence. Poster submits no evidence.
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Task completed but unapproved'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        DisputeEvidence.objects.create(
+            dispute=dispute,
+            submitted_by=self.taker,
+            description="Work screenshot proof"
+        )
+
+        # Expire dispute
+        dispute.expires_at = timezone.now() - timedelta(hours=1)
+        dispute.save()
+
+        call_command('resolve_expired_disputes')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+
+        # Taker should receive task reward (200) + deposit refund (50)
+        # Taker balance was 500 - 50 (deposit when raised) = 450 + 200 (task reward) + 50 (deposit refund) = 700
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 700)
+
+    def test_auto_resolution_command_taker_unresponsive(self):
+        self.poster_profile.rewards = 1000
+        self.poster_profile.save()
+
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.poster,
+            reason='Taker did not do work',
+            deposit_amount=50,
+            escrow_status='held',
+            evidence_deadline=timezone.now() - timedelta(hours=2),
+            expires_at=timezone.now() - timedelta(hours=1)
+        )
+        self.task.status = 'disputed'
+        self.task.save()
+
+        DisputeEvidence.objects.create(
+            dispute=dispute,
+            submitted_by=self.poster,
+            description="Evidence poster submitted"
+        )
+
+        call_command('resolve_expired_disputes')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'cancelled')
+
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1000 + 200 + 50)
+
 
