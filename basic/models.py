@@ -26,8 +26,32 @@ class UserProfile(models.Model):
     email_otp = models.CharField(max_length=6, blank=True, null=True)
     email_otp_created_at = models.DateTimeField(blank=True, null=True)
 
+    # User Reputation & Performance Metrics
+    reputation_score = models.IntegerField(default=100)
+    tasks_completed = models.PositiveIntegerField(default=0)
+    tasks_abandoned = models.PositiveIntegerField(default=0)
+
     def __str__(self):
         return self.user.username
+
+    @property
+    def reputation(self):
+        return self.reputation_score
+
+    @reputation.setter
+    def reputation(self, value):
+        self.reputation_score = max(0, value)
+
+    @property
+    def abandoned_tasks(self):
+        return self.tasks_abandoned
+
+    @abandoned_tasks.setter
+    def abandoned_tasks(self, value):
+        self.tasks_abandoned = value
+
+    def lower_reputation(self, amount=10):
+        self.reputation_score = max(0, self.reputation_score - amount)
 
 class Task(models.Model):
     STATUS_CHOICES = (
@@ -59,6 +83,10 @@ class Task(models.Model):
     def deposit_bond_amount(self):
         return max(50, math.ceil(self.reward * 0.20))
 
+    @property
+    def abandonment_penalty(self):
+        return max(50, math.ceil(self.reward * 0.20))
+
 class RewardLedger(models.Model):
     TRANSACTION_TYPES = (
         ('task_creation', 'Task Creation (Points Reserved)'),
@@ -68,11 +96,14 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('task_abandon_penalty', 'Task Abandonment Penalty'),
+        ('task_abandonment_penalty', 'Task Abandonment Penalty'),
+        ('task_abandonment', 'Task Abandonment Penalty'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
