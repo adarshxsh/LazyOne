@@ -136,6 +136,14 @@ def request_cancellation(request, task_id):
 def accept_cancellation(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, cancellation_requested=True)
     with transaction.atomic():
+        task = Task.objects.select_for_update().get(id=task.id)
+        if task.status != 'in_progress':
+            if task.status == 'disputed':
+                messages.error(request, "Cannot accept cancellation while a dispute is active on this task. Please resolve or withdraw the dispute first.")
+            else:
+                messages.error(request, "Cancellation can only be accepted for tasks that are currently in progress.")
+            return redirect('my_tasks')
+
         poster_profile = task.posted_by.userprofile
         poster_profile.rewards += task.reward
         poster_profile.save()
