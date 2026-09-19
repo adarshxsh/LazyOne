@@ -87,8 +87,13 @@ def raise_dispute(request, task_id):
 @require_POST
 def withdraw_dispute(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user)
-    task = dispute.task
     with transaction.atomic():
+        dispute = Dispute.objects.select_for_update().get(id=dispute.id)
+        task = dispute.task
+        if dispute.status != 'open' or task.status != 'disputed':
+            messages.error(request, "This dispute is no longer active or the task is not in disputed status.")
+            return redirect('my_tasks')
+
         dispute.refund_deposit(
             reason_description=f"Security deposit bond refunded for withdrawn dispute on task: '{task.title}'"
         )

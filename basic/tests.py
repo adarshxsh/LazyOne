@@ -182,3 +182,111 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+    def test_accept_cancellation_disputed_task_blocked(self):
+        # Poster requests cancellation
+        self.task.cancellation_requested = True
+        self.task.save()
+
+        # Taker raises a dispute
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Dispute reason'}
+        )
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+
+        poster_rewards_before = self.poster_profile.rewards
+
+        # Taker attempts to accept cancellation while task is disputed
+        response = self.client.get(reverse('accept_cancellation', args=[self.task.id]), follow=True)
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        # Task and dispute state must remain unchanged
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertEqual(dispute.status, 'open')
+        self.assertEqual(dispute.escrow_status, 'held')
+
+        # Poster reward balance should remain unchanged
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, poster_rewards_before)
+
+        # Message error check
+        messages_list = list(response.context['messages'])
+        self.assertTrue(any("Cannot accept cancellation while a dispute is active" in str(m) for m in messages_list))
+
+    def test_accept_cancellation_non_in_progress_blocked(self):
+        # Task is completed and cancellation_requested was set
+        self.task.status = 'completed'
+        self.task.cancellation_requested = True
+        self.task.save()
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.get(reverse('accept_cancellation', args=[self.task.id]), follow=True)
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+
+        messages_list = list(response.context['messages'])
+        self.assertTrue(any("Cancellation can only be accepted" in str(m) for m in messages_list))
+
+    def test_withdraw_dispute_already_resolved_blocked(self):
+        # Raise dispute then complete task (resolves dispute)
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Dispute reason'}
+        )
+        self.client.login(username='poster', password='password123')
+        self.client.get(reverse('complete_task', args=[self.task.id]))
+
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertEqual(dispute.status, 'resolved')
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+
+        # Taker tries to withdraw resolved dispute
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]), follow=True)
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        # Task should remain completed, NOT reverted to in_progress
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+
+        messages_list = list(response.context['messages'])
+        self.assertTrue(any("no longer active or the task is not in disputed status" in str(m) for m in messages_list))
+
+    def test_withdraw_dispute_non_disputed_task_blocked(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Open dispute manual',
+            deposit_amount=60,
+            escrow_status='held',
+            status='open'
+        )
+        # Task is in_progress, not disputed
+        self.assertEqual(self.task.status, 'in_progress')
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]), follow=True)
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'open')
+
+        messages_list = list(response.context['messages'])
+        self.assertTrue(any("no longer active or the task is not in disputed status" in str(m) for m in messages_list))
+
+
