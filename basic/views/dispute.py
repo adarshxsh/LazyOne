@@ -1,3 +1,4 @@
+import math
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
@@ -105,3 +106,104 @@ def withdraw_dispute(request, dispute_id):
         )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
+
+
+@login_required(login_url='/login/')
+@require_POST
+def resolve_dispute(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+
+    if dispute.status != 'open':
+        messages.error(request, "This dispute has already been resolved.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if not (request.user.is_staff or request.user == task.posted_by or request.user == task.taken_by):
+        messages.error(request, "You are not authorized to resolve this dispute.")
+        return redirect('home')
+
+    percent_str = (
+        request.POST.get('percent') or
+        request.POST.get('settlement_taker_share_percent') or
+        request.POST.get('taker_share_percent')
+    )
+    notes = (
+        request.POST.get('settlement_notes') or
+        request.POST.get('notes') or
+        request.POST.get('resolution_summary') or
+        ''
+    )
+    deposit_action = request.POST.get('deposit_action') or request.POST.get('deposit_handling') or 'refund'
+
+    try:
+        percent = int(percent_str)
+        if percent < 0 or percent > 100:
+            raise ValueError("Percentage out of range")
+    except (ValueError, TypeError):
+        messages.error(request, "Invalid percentage. Percentage must be an integer between 0 and 100.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    with transaction.atomic():
+        taker_amount = math.floor(task.reward * (percent / 100.0))
+        poster_amount = task.reward - taker_amount
+
+        # Distribute points to taker
+        if task.taken_by:
+            taker_profile = task.taken_by.userprofile
+            taker_profile.rewards += taker_amount
+            taker_profile.save()
+            RewardLedger.objects.create(
+                user=task.taken_by,
+                task=task,
+                amount=taker_amount,
+                transaction_type='dispute_partial_payout',
+                description=f"Dispute partial payout ({percent}%) for task: '{task.title}'"
+            )
+
+        # Distribute points to poster
+        poster_profile = task.posted_by.userprofile
+        poster_profile.rewards += poster_amount
+        poster_profile.save()
+        RewardLedger.objects.create(
+            user=task.posted_by,
+            task=task,
+            amount=poster_amount,
+            transaction_type='dispute_partial_refund',
+            description=f"Dispute partial refund ({100 - percent}%) for task: '{task.title}'"
+        )
+
+        # Process security deposit bond
+        if dispute.escrow_status == 'held':
+            if deposit_action == 'forfeit':
+                dispute.forfeit_deposit(
+                    beneficiary=task.posted_by,
+                    reason_description=f"Security deposit bond forfeited during dispute resolution for task: '{task.title}'"
+                )
+            else:
+                dispute.refund_deposit(
+                    reason_description=f"Security deposit bond refunded during dispute resolution for task: '{task.title}'"
+                )
+
+        # Transition status and update fields
+        dispute.settlement_taker_share_percent = percent
+        dispute.settlement_notes = notes
+        dispute.status = 'resolved'
+        dispute.save()
+
+        task.status = 'completed'
+        task.save()
+
+        # Send notifications
+        notify_users = [task.posted_by]
+        if task.taken_by and task.taken_by != task.posted_by:
+            notify_users.append(task.taken_by)
+
+        for user in notify_users:
+            Notification.objects.create(
+                recipient=user,
+                message=f"Dispute for task '{task.title}' resolved with {percent}% taker share.",
+                link=reverse('dispute_detail', args=[dispute.id])
+            )
+
+    messages.success(request, f"Dispute resolved successfully with a {percent}% / {100 - percent}% point split.")
+    return redirect('dispute_detail', dispute_id=dispute.id)
