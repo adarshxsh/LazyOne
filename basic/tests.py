@@ -144,9 +144,9 @@ class DisputeDepositBondTests(TestCase):
         self.assertEqual(dispute.escrow_status, 'refunded')
         self.assertEqual(dispute.status, 'resolved')
 
-        # Taker balance: 40 + 300 (task reward) + 60 (deposit refund) = 400
+        # Taker balance: 40 + 300 (task reward) + 60 (dispute deposit refund) + 60 (taker collateral refund) = 460
         self.taker_profile.refresh_from_db()
-        self.assertEqual(self.taker_profile.rewards, 400)
+        self.assertEqual(self.taker_profile.rewards, 460)
 
         # Check ledger entries for taker
         refund_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_refund').first()
@@ -181,4 +181,142 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class TakerCollateralStakingTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.poster = User.objects.create_user(username='poster2', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker2', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=200)
+
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="Available Task",
+            description="Task Description",
+            reward=300,  # deposit_bond_amount = 60
+            posted_by=self.poster,
+            status='available',
+            deadline=self.deadline
+        )
+
+    def test_take_task_insufficient_rewards(self):
+        self.taker_profile.rewards = 40  # Less than required 60
+        self.taker_profile.save()
+
+        self.client.login(username='taker2', password='password123')
+        response = self.client.get(reverse('take_task', args=[self.task.id]))
+
+        self.assertRedirects(response, reverse('my_tasks'))
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'available')
+        self.assertIsNone(self.task.taken_by)
+
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 40)
+
+        self.assertFalse(RewardLedger.objects.filter(user=self.taker, transaction_type='taker_collateral_deposit').exists())
+
+    def test_take_task_success(self):
+        self.client.login(username='taker2', password='password123')
+        response = self.client.get(reverse('take_task', args=[self.task.id]))
+
+        self.assertRedirects(response, reverse('my_tasks'))
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+        self.assertEqual(self.task.taken_by, self.taker)
+
+        # Balance reduced by 60: 200 - 60 = 140
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 140)
+
+        # Ledger check
+        ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='taker_collateral_deposit').first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, -60)
+
+    def test_complete_task_refunds_collateral_and_reward(self):
+        self.client.login(username='taker2', password='password123')
+        self.client.get(reverse('take_task', args=[self.task.id]))
+
+        self.client.login(username='poster2', password='password123')
+        response = self.client.get(reverse('complete_task', args=[self.task.id]))
+
+        self.assertRedirects(response, reverse('my_tasks'))
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+
+        # Taker balance: 140 + 300 (reward) + 60 (collateral refund) = 500
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 500)
+
+        completion_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='task_completion').first()
+        self.assertIsNotNone(completion_ledger)
+        self.assertEqual(completion_ledger.amount, 300)
+
+        refund_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='taker_collateral_refund').first()
+        self.assertIsNotNone(refund_ledger)
+        self.assertEqual(refund_ledger.amount, 60)
+
+    def test_accept_cancellation_refunds_collateral(self):
+        self.client.login(username='taker2', password='password123')
+        self.client.get(reverse('take_task', args=[self.task.id]))
+
+        # Poster requests cancellation
+        self.client.login(username='poster2', password='password123')
+        self.client.get(reverse('request_cancellation', args=[self.task.id]))
+
+        # Taker accepts cancellation
+        self.client.login(username='taker2', password='password123')
+        response = self.client.get(reverse('accept_cancellation', args=[self.task.id]))
+
+        self.assertRedirects(response, reverse('my_tasks'))
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'available')
+        self.assertIsNone(self.task.taken_by)
+
+        # Poster gets task reward refunded: 1000 + 300 = 1300
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1300)
+
+        # Taker gets collateral bond refunded: 140 + 60 = 200
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 200)
+
+        refund_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='taker_collateral_refund').first()
+        self.assertIsNotNone(refund_ledger)
+        self.assertEqual(refund_ledger.amount, 60)
+
+    def test_abandon_task_slashes_collateral_to_poster(self):
+        self.client.login(username='taker2', password='password123')
+        self.client.get(reverse('take_task', args=[self.task.id]))
+
+        # Taker abandons task
+        response = self.client.get(reverse('abandon_task', args=[self.task.id]))
+
+        self.assertRedirects(response, reverse('my_tasks'))
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'available')
+        self.assertIsNone(self.task.taken_by)
+
+        # Taker balance remains 140 (60 forfeited)
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 140)
+
+        # Poster balance increases by 60: 1000 + 60 = 1060
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1060)
+
+        # Dual RewardLedger entries for taker_collateral_slashed
+        poster_slashed = RewardLedger.objects.filter(user=self.poster, transaction_type='taker_collateral_slashed').first()
+        self.assertIsNotNone(poster_slashed)
+        self.assertEqual(poster_slashed.amount, 60)
+
+        taker_slashed = RewardLedger.objects.filter(user=self.taker, transaction_type='taker_collateral_slashed').first()
+        self.assertIsNotNone(taker_slashed)
+        self.assertEqual(taker_slashed.amount, 0)
+
 
