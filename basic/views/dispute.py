@@ -44,6 +44,8 @@ def raise_dispute(request, task_id):
 
         with transaction.atomic():
             user_profile.rewards -= deposit_amount
+            user_profile.disputes_raised += 1
+            user_profile.recalculate_reputation_and_risk()
             user_profile.save()
 
             if hasattr(task, 'dispute'):
@@ -97,6 +99,11 @@ def withdraw_dispute(request, dispute_id):
 
         task.status = 'in_progress'
         task.save()
+
+        user_profile = request.user.userprofile
+        user_profile.refresh_from_db()
+        user_profile.recalculate_reputation_and_risk()
+        user_profile.save()
 
         Notification.objects.create(
             recipient=task.posted_by,
