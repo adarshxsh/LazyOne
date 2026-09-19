@@ -2,6 +2,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from ..models import Task, Conversation, Notification, RewardLedger
+from ..services import expire_task, expire_overdue_tasks_service
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
@@ -60,7 +61,16 @@ def add_task(request):
 
 @login_required(login_url='/login/')
 def take_task(request, task_id):
-    task = get_object_or_404(Task, id=task_id, status='available')
+    task = get_object_or_404(Task, id=task_id)
+    if task.deadline and task.deadline < timezone.now():
+        expire_task(task)
+        messages.error(request, "This task has expired and cannot be taken.")
+        return redirect('my_tasks')
+
+    if task.status != 'available':
+        messages.error(request, "This task is no longer available.")
+        return redirect('my_tasks')
+
     if task.posted_by == request.user:
         messages.error(request, "You cannot take your own task.")
     else:
@@ -82,6 +92,11 @@ def take_task(request, task_id):
 @login_required(login_url='/login/')
 def complete_task(request, task_id):
     task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
+    if task.status == 'in_progress' and task.deadline and task.deadline < timezone.now():
+        expire_task(task)
+        messages.error(request, "This task has expired and can no longer be completed.")
+        return redirect('my_tasks')
+
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
         task_doer_profile.rewards += task.reward
@@ -172,6 +187,7 @@ def abandon_task(request, task_id):
 
 @login_required(login_url='/login/')
 def my_tasks(request):
+    expire_overdue_tasks_service()
     posted_tasks = Task.objects.filter(posted_by=request.user).order_by('-created_at')
     taken_tasks = Task.objects.filter(taken_by=request.user).order_by('-created_at')
     context = {'posted_tasks': posted_tasks, 'taken_tasks': taken_tasks}
