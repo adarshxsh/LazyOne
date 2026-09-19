@@ -100,6 +100,16 @@ class Dispute(models.Model):
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
 
+    @property
+    def withdrawal_penalty(self):
+        if self.deposit_amount <= 0:
+            return 0
+        return min(self.deposit_amount, max(10, math.ceil(self.deposit_amount * 0.25)))
+
+    @property
+    def net_refund(self):
+        return max(0, self.deposit_amount - self.withdrawal_penalty)
+
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
             user_profile = self.raised_by.userprofile

@@ -88,10 +88,46 @@ def raise_dispute(request, task_id):
 def withdraw_dispute(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user)
     task = dispute.task
+
+    if dispute.status != 'open':
+        messages.error(request, "This dispute is no longer open.")
+        return redirect('my_tasks')
+
     with transaction.atomic():
-        dispute.refund_deposit(
-            reason_description=f"Security deposit bond refunded for withdrawn dispute on task: '{task.title}'"
-        )
+        if dispute.escrow_status == 'held' and dispute.deposit_amount > 0:
+            penalty = dispute.withdrawal_penalty
+            net_refund = dispute.net_refund
+
+            # Refund net deposit to dispute raiser
+            taker_profile = dispute.raised_by.userprofile
+            taker_profile.rewards += net_refund
+            taker_profile.save()
+
+            # Credit penalty to task poster
+            poster_profile = task.posted_by.userprofile
+            poster_profile.rewards += penalty
+            poster_profile.save()
+
+            # Record net refund ledger for dispute raiser
+            RewardLedger.objects.create(
+                user=dispute.raised_by,
+                task=task,
+                amount=net_refund,
+                transaction_type='dispute_refund',
+                description=f"Partial security deposit bond refund ({net_refund} pts) for withdrawn dispute on task: '{task.title}'"
+            )
+
+            # Record penalty compensation ledger for task poster
+            RewardLedger.objects.create(
+                user=task.posted_by,
+                task=task,
+                amount=penalty,
+                transaction_type='dispute_forfeit',
+                description=f"Withdrawal penalty compensation ({penalty} pts) awarded from withdrawn dispute on task: '{task.title}'"
+            )
+
+            dispute.escrow_status = 'refunded'
+
         dispute.status = 'resolved'
         dispute.save()
 
@@ -103,5 +139,8 @@ def withdraw_dispute(request, dispute_id):
             message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
             link=reverse('my_tasks')
         )
-    messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
+    messages.success(
+        request,
+        f"You have successfully withdrawn the dispute for '{task.title}'. Refunded {dispute.net_refund} points ({dispute.withdrawal_penalty} points penalty deducted)."
+    )
     return redirect('my_tasks')
