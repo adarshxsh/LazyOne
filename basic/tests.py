@@ -57,7 +57,12 @@ class DisputeDepositBondTests(TestCase):
         self.client.login(username='taker', password='password123')
         response = self.client.post(
             reverse('raise_dispute', args=[self.task.id]),
-            {'reason': 'Work not clear'}
+            {
+                'category': 'incomplete_work',
+                'evidence_type': 'screenshot',
+                'evidence_details': 'The work provided is missing key requirements and is completely incomplete.',
+                'reason': 'Work not clear'
+            }
         )
 
         self.assertRedirects(response, reverse('my_tasks'))
@@ -73,7 +78,12 @@ class DisputeDepositBondTests(TestCase):
         self.client.login(username='taker', password='password123')
         response = self.client.post(
             reverse('raise_dispute', args=[self.task.id]),
-            {'reason': 'Unreasonable request'}
+            {
+                'category': 'incomplete_work',
+                'evidence_type': 'screenshot',
+                'evidence_details': 'The work provided is missing key requirements and is completely incomplete.',
+                'evidence_url': 'https://example.com/evidence.jpg'
+            }
         )
 
         # Deposit bond is 60. Taker balance was 100 -> now 40
@@ -87,6 +97,10 @@ class DisputeDepositBondTests(TestCase):
         self.assertEqual(dispute.deposit_amount, 60)
         self.assertEqual(dispute.escrow_status, 'held')
         self.assertEqual(dispute.status, 'open')
+        self.assertEqual(dispute.category, 'incomplete_work')
+        self.assertEqual(dispute.evidence_type, 'screenshot')
+        self.assertEqual(dispute.evidence_details, 'The work provided is missing key requirements and is completely incomplete.')
+        self.assertEqual(dispute.evidence_url, 'https://example.com/evidence.jpg')
         self.assertEqual(dispute.raised_by, self.taker)
 
         # Check ledger
@@ -99,7 +113,10 @@ class DisputeDepositBondTests(TestCase):
         self.client.login(username='taker', password='password123')
         self.client.post(
             reverse('raise_dispute', args=[self.task.id]),
-            {'reason': 'Dispute reason'}
+            {
+                'category': 'incomplete_work',
+                'evidence_details': 'The task deliverable was incomplete and did not meet basic expectations.'
+            }
         )
 
         dispute = Dispute.objects.get(task=self.task)
@@ -129,7 +146,10 @@ class DisputeDepositBondTests(TestCase):
         self.client.login(username='taker', password='password123')
         self.client.post(
             reverse('raise_dispute', args=[self.task.id]),
-            {'reason': 'Dispute reason'}
+            {
+                'category': 'quality_issue',
+                'evidence_details': 'The quality of the deliverable is unacceptable and defective.'
+            }
         )
 
         # Poster marks task as completed
@@ -157,6 +177,8 @@ class DisputeDepositBondTests(TestCase):
         dispute = Dispute.objects.create(
             task=self.task,
             raised_by=self.taker,
+            category='quality_issue',
+            evidence_details='False dispute details provided here for testing forfeit functionality.',
             reason='False dispute',
             deposit_amount=60,
             escrow_status='held'
@@ -181,4 +203,73 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+    def test_raise_dispute_missing_category(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {
+                'category': '',
+                'evidence_details': 'The work provided is missing key requirements and is completely incomplete.'
+            }
+        )
+        self.assertRedirects(response, reverse('my_tasks'))
+        self.assertFalse(Dispute.objects.filter(task=self.task).exists())
+
+    def test_raise_dispute_invalid_category(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {
+                'category': 'invalid_cat',
+                'evidence_details': 'The work provided is missing key requirements and is completely incomplete.'
+            }
+        )
+        self.assertRedirects(response, reverse('my_tasks'))
+        self.assertFalse(Dispute.objects.filter(task=self.task).exists())
+
+    def test_raise_dispute_short_evidence_details(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {
+                'category': 'incomplete_work',
+                'evidence_details': 'Too short'
+            }
+        )
+        self.assertRedirects(response, reverse('my_tasks'))
+        self.assertFalse(Dispute.objects.filter(task=self.task).exists())
+
+    def test_raise_dispute_invalid_evidence_url(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {
+                'category': 'incomplete_work',
+                'evidence_details': 'The work provided is missing key requirements and is completely incomplete.',
+                'evidence_url': 'invalid-url'
+            }
+        )
+        self.assertRedirects(response, reverse('my_tasks'))
+        self.assertFalse(Dispute.objects.filter(task=self.task).exists())
+
+    def test_dispute_detail_view_renders_category_and_evidence(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            category='incomplete_work',
+            evidence_type='screenshot',
+            evidence_details='Detailed explanation of missing requirements and defective output.',
+            evidence_url='https://example.com/proof.png',
+            reason='Incomplete work submitted',
+            deposit_amount=60,
+            escrow_status='held'
+        )
+        self.client.login(username='taker', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Incomplete Work')
+        self.assertContains(response, 'Screenshot / Image')
+        self.assertContains(response, 'https://example.com/proof.png')
+        self.assertContains(response, 'Detailed explanation of missing requirements')
 
