@@ -74,9 +74,7 @@
                         <a href="{% url 'friends' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'friends' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">Friends</a>
                         <a href="{% url 'notifications' %}" class="flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'notifications' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">
                             <span>Notifications</span>
-                            {% if unread_notifications_count > 0 %}
-                                <span class="ml-2 h-2.5 w-2.5 rounded-full bg-red-500"></span>
-                            {% endif %}
+                            <span id="unread-badge" class="ml-2 h-2.5 w-2.5 rounded-full bg-red-500 {% if unread_notifications_count == 0 %}hidden{% endif %}"></span>
                         </a>
                         <a href="{% url 'profile' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'profile' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">Profile</a>
                         <a href="{% url 'logout' %}" class="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 ml-4">Logout</a>
@@ -109,9 +107,7 @@
                     <a href="{% url 'friends' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'friends' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">Friends</a>
                     <a href="{% url 'notifications' %}" class="flex items-center block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'notifications' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">
                         <span>Notifications</span>
-                        {% if unread_notifications_count > 0 %}
-                            <span class="ml-2 h-2.5 w-2.5 rounded-full bg-red-500"></span>
-                        {% endif %}
+                        <span id="unread-badge-mobile" class="ml-2 h-2.5 w-2.5 rounded-full bg-red-500 {% if unread_notifications_count == 0 %}hidden{% endif %}"></span>
                     </a>
                     <a href="{% url 'profile' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'profile' %}text-cyan-600 bg-cyan-50/50 dark:bg-gray-700/50{% else %}text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white{% endif %}">Profile</a>
                     <a href="{% url 'logout' %}" class="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white">Logout</a>
@@ -127,10 +123,12 @@
         </div>
     </nav>
 
+    <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
     <main class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {% if user.is_authenticated and user.userprofile %}
             <div class="bg-white/80 backdrop-blur-lg p-4 rounded-xl mb-8 text-center shadow-lg border border-gray-200/50 dark:bg-gray-800/80 dark:border-gray-700/50">
-                <p class="text-lg text-gray-700 dark:text-gray-300">Your Reward Points: <strong class="text-cyan-600 font-semibold">{{ request.user.userprofile.rewards }}</strong> | Unread: {{ unread_notifications_count }}</p>
+                <p class="text-lg text-gray-700 dark:text-gray-300">Your Reward Points: <strong class="text-cyan-600 font-semibold">{{ request.user.userprofile.rewards }}</strong> | Unread: <span id="unread-count-text">{{ unread_notifications_count }}</span></p>
             </div>
         {% endif %}
         
@@ -233,6 +231,72 @@
                 }
                 lastScrollY = window.scrollY;
             });
+
+            {% if user.is_authenticated %}
+            (function() {
+                const wsScheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = wsScheme + '//' + window.location.host + '/ws/notifications/';
+                
+                try {
+                    const socket = new WebSocket(wsUrl);
+                    socket.onmessage = function(e) {
+                        const data = JSON.parse(e.data);
+                        if (data.type === 'notification_event') {
+                            const badge = document.getElementById('unread-badge');
+                            if (badge) {
+                                if (data.unread_count > 0) {
+                                    badge.classList.remove('hidden');
+                                } else {
+                                    badge.classList.add('hidden');
+                                }
+                            }
+                            const badgeMobile = document.getElementById('unread-badge-mobile');
+                            if (badgeMobile) {
+                                if (data.unread_count > 0) {
+                                    badgeMobile.classList.remove('hidden');
+                                } else {
+                                    badgeMobile.classList.add('hidden');
+                                }
+                            }
+                            const countText = document.getElementById('unread-count-text');
+                            if (countText && data.unread_count !== undefined) {
+                                countText.textContent = data.unread_count;
+                            }
+                            if (data.message) {
+                                showToast(data.message, data.link);
+                            }
+                        }
+                    };
+                    socket.onerror = function(err) {
+                        console.warn('Notification WebSocket error:', err);
+                    };
+                } catch (err) {
+                    console.warn('Notification WebSocket failed to initialize:', err);
+                }
+
+                function showToast(message, link) {
+                    const container = document.getElementById('toast-container');
+                    if (!container) return;
+                    const toast = document.createElement('div');
+                    toast.className = 'pointer-events-auto p-4 rounded-lg shadow-xl bg-cyan-600 text-white flex items-center justify-between space-x-4 max-w-md transition-all duration-300 transform translate-y-2 opacity-0';
+                    let content = `<span>${message}</span>`;
+                    if (link) {
+                        content += `<a href="${link}" class="underline font-semibold hover:text-cyan-200 text-sm ml-2">View</a>`;
+                    }
+                    toast.innerHTML = content;
+                    container.appendChild(toast);
+                    
+                    setTimeout(() => {
+                        toast.classList.remove('translate-y-2', 'opacity-0');
+                    }, 10);
+                    
+                    setTimeout(() => {
+                        toast.classList.add('opacity-0');
+                        setTimeout(() => toast.remove(), 300);
+                    }, 5000);
+                }
+            })();
+            {% endif %}
         });
     </script>
 </body>
