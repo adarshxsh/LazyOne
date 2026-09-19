@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, Notification
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +181,103 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+    def test_poster_raise_dispute_success(self):
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Taker is non-responsive and failed to deliver'}
+        )
+
+        # Deposit bond is 60. Poster balance was 1000 -> now 940
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 940)
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertEqual(dispute.deposit_amount, 60)
+        self.assertEqual(dispute.escrow_status, 'held')
+        self.assertEqual(dispute.status, 'open')
+        self.assertEqual(dispute.raised_by, self.poster)
+
+        # Check ledger
+        ledger = RewardLedger.objects.filter(user=self.poster, transaction_type='dispute_deposit').first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, -60)
+
+        # Check notification created for taker
+        notification = Notification.objects.filter(recipient=self.taker).first()
+        self.assertIsNotNone(notification)
+        self.assertIn("poster has raised a dispute", notification.message)
+
+    def test_poster_raise_dispute_insufficient_rewards(self):
+        self.poster_profile.rewards = 30
+        self.poster_profile.save()
+
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Taker is non-responsive'}
+        )
+
+        self.assertRedirects(response, reverse('my_tasks'))
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+        self.assertFalse(Dispute.objects.filter(task=self.task).exists())
+
+        # Balance should remain unchanged
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 30)
+
+    def test_third_party_cannot_raise_dispute(self):
+        third_party = User.objects.create_user(username='thirdparty', password='password123')
+        UserProfile.objects.create(user=third_party, rewards=500)
+
+        self.client.login(username='thirdparty', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Interfering in task'}
+        )
+
+        self.assertRedirects(response, reverse('my_tasks'))
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+        self.assertFalse(Dispute.objects.filter(task=self.task).exists())
+
+    def test_poster_withdraw_dispute_success(self):
+        # Poster raises dispute
+        self.client.login(username='poster', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Poster raised dispute'}
+        )
+
+        dispute = Dispute.objects.get(task=self.task)
+
+        # Poster withdraws dispute
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.escrow_status, 'refunded')
+        self.assertEqual(dispute.status, 'resolved')
+
+        # Poster balance restored: 940 + 60 = 1000
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1000)
+
+        # Check refund ledger for poster
+        ledger = RewardLedger.objects.filter(user=self.poster, transaction_type='dispute_refund').first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, 60)
+
+        # Check notification created for taker informing of withdrawal
+        notification = Notification.objects.filter(recipient=self.taker).order_by('-created_at').first()
+        self.assertIsNotNone(notification)
+        self.assertIn("has withdrawn the dispute", notification.message)
 
