@@ -63,11 +63,29 @@ def take_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, status='available')
     if task.posted_by == request.user:
         messages.error(request, "You cannot take your own task.")
+    elif request.user.userprofile.rewards < task.deposit_bond_amount:
+        messages.error(
+            request,
+            f"Insufficient reward points balance. You need at least {task.deposit_bond_amount} points as collateral deposit bond to take this task, but you only have {request.user.userprofile.rewards} points."
+        )
     else:
         with transaction.atomic():
+            taker_profile = request.user.userprofile
+            taker_profile.rewards -= task.deposit_bond_amount
+            taker_profile.save()
+
             task.status = 'in_progress'
             task.taken_by = request.user
             task.save()
+
+            RewardLedger.objects.create(
+                user=request.user,
+                task=task,
+                amount=-task.deposit_bond_amount,
+                transaction_type='taker_collateral_deposit',
+                description=f"Collateral deposit bond staked for task: '{task.title}'"
+            )
+
             conversation, created = Conversation.objects.get_or_create(task=task)
             if created:
                 conversation.participants.add(task.posted_by, task.taken_by)
@@ -76,7 +94,7 @@ def take_task(request, task_id):
                 message=f"{request.user.username} has taken your task: {task.title}",
                 link=reverse('my_tasks')
             )
-            messages.success(request, "Task has been assigned to you. A chat has been created.")
+            messages.success(request, f"Task has been assigned to you. {task.deposit_bond_amount} points locked as collateral deposit bond. A chat has been created.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
@@ -84,7 +102,7 @@ def complete_task(request, task_id):
     task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
-        task_doer_profile.rewards += task.reward
+        task_doer_profile.rewards += task.reward + task.deposit_bond_amount
         task_doer_profile.save()
         task.status = 'completed'
         task.save()
@@ -99,6 +117,10 @@ def complete_task(request, task_id):
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,
             transaction_type='task_completion', description=f"Completed task: '{task.title}'"
+        )
+        RewardLedger.objects.create(
+            user=task.taken_by, task=task, amount=task.deposit_bond_amount,
+            transaction_type='taker_collateral_refund', description=f"Collateral deposit bond refunded for completed task: '{task.title}'"
         )
         messages.success(request, f"Task marked as complete! {task.reward} points transferred to {task.taken_by.username}.")
     return redirect('my_tasks')
@@ -143,6 +165,13 @@ def accept_cancellation(request, task_id):
             user=task.posted_by, task=task, amount=task.reward,
             transaction_type='task_cancellation', description=f"Refund for cancelled task: '{task.title}'"
         )
+        taker_profile = request.user.userprofile
+        taker_profile.rewards += task.deposit_bond_amount
+        taker_profile.save()
+        RewardLedger.objects.create(
+            user=request.user, task=task, amount=task.deposit_bond_amount,
+            transaction_type='taker_collateral_refund', description=f"Collateral deposit bond refunded for cancelled task: '{task.title}'"
+        )
         task.status = 'available'
         task.taken_by = None
         task.cancellation_requested = False
@@ -159,12 +188,25 @@ def accept_cancellation(request, task_id):
 def abandon_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
     with transaction.atomic():
+        poster_profile = task.posted_by.userprofile
+        poster_profile.rewards += task.deposit_bond_amount
+        poster_profile.save()
+
+        RewardLedger.objects.create(
+            user=task.posted_by, task=task, amount=task.deposit_bond_amount,
+            transaction_type='taker_collateral_slashed', description=f"Slashed taker collateral bond received for abandoned task: '{task.title}'"
+        )
+        RewardLedger.objects.create(
+            user=request.user, task=task, amount=0,
+            transaction_type='taker_collateral_slashed', description=f"Collateral deposit bond forfeited for abandoning task: '{task.title}'"
+        )
+
         task.status = 'available'
         task.taken_by = None
         task.save()
         Notification.objects.create(
             recipient=task.posted_by,
-            message=f"{request.user.username} has abandoned your task: '{task.title}'. It is now available again.",
+            message=f"{request.user.username} has abandoned your task: '{task.title}'. You have been awarded their collateral bond of {task.deposit_bond_amount} points.",
             link=reverse('my_tasks')
         )
         messages.success(request, "You have abandoned the task. It is now available for others.")

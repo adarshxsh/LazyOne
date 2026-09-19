@@ -38,6 +38,7 @@
                                 <div class="text-right flex-shrink-0 ml-4">
                                     <p class="text-xl font-semibold text-cyan-600">{{ task.reward }}</p>
                                     <p class="text-xs text-gray-500 dark:text-gray-400">Points</p>
+                                    <p class="text-xs text-cyan-600 font-medium mt-1">Required Bond: {{ task.deposit_bond_amount }} pts</p>
                                 </div>
                             </div>
                             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Posted by: {{ task.posted_by.username }}</p>
@@ -47,7 +48,11 @@
                             {% if request.user.is_authenticated %}
                                 {% if task.posted_by != request.user %}
                                     <a href="{% url 'join_task_chat' task.id %}" class="text-sm font-medium text-cyan-600 hover:underline">Chat</a>
-                                    <a href="{% url 'take_task' task.id %}" class="inline-block bg-cyan-500 text-white font-semibold px-4 py-2 rounded-lg hover:bg-cyan-600 transition-colors text-sm">Take Task</a>
+                                    {% if request.user.userprofile.rewards >= task.deposit_bond_amount %}
+                                        <a href="{% url 'take_task' task.id %}" class="inline-block bg-cyan-500 text-white font-semibold px-4 py-2 rounded-lg hover:bg-cyan-600 transition-colors text-sm">Take Task</a>
+                                    {% else %}
+                                        <button disabled class="inline-block bg-gray-400 text-white font-semibold px-4 py-2 rounded-lg cursor-not-allowed opacity-60 text-sm" title="Insufficient points for required collateral bond ({{ task.deposit_bond_amount }} pts needed)">Take Task</button>
+                                    {% endif %}
                                 {% else %}
                                     <span class="text-sm text-gray-400 italic">This is your task</span>
                                 {% endif %}
