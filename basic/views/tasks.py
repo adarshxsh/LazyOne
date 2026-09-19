@@ -1,7 +1,7 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from ..models import Task, Conversation, Notification, RewardLedger
+from ..models import Task, Conversation, Notification, RewardLedger, UserProfile
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
@@ -159,15 +159,42 @@ def accept_cancellation(request, task_id):
 def abandon_task(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, status='in_progress')
     with transaction.atomic():
+        taker_profile, _ = UserProfile.objects.select_for_update().get_or_create(user=request.user)
+        penalty = task.abandonment_penalty
+
+        # Balance guardrail: rewards balance must never drop below 0
+        taker_profile.rewards = max(0, taker_profile.rewards - penalty)
+        taker_profile.tasks_abandoned = taker_profile.tasks_abandoned + 1
+        if hasattr(taker_profile, 'reputation_score'):
+            taker_profile.reputation_score = max(0, taker_profile.reputation_score - 10)
+        taker_profile.save()
+
+        # Record transaction in RewardLedger
+        RewardLedger.objects.create(
+            user=request.user,
+            task=task,
+            amount=-penalty,
+            transaction_type='task_abandon_penalty',
+            description=f"Task Abandonment Penalty for task: '{task.title}'"
+        )
+
+        # Clean up dispute if present
+        if hasattr(task, 'dispute'):
+            task.dispute.delete()
+
+        # Reset task status to available
         task.status = 'available'
         task.taken_by = None
+        task.cancellation_requested = False
         task.save()
+
+        # Notify task poster
         Notification.objects.create(
             recipient=task.posted_by,
-            message=f"{request.user.username} has abandoned your task: '{task.title}'. It is now available again.",
+            message=f"{request.user.username} has abandoned your task: '{task.title}' (a penalty of {penalty} points was applied). It is now available again.",
             link=reverse('my_tasks')
         )
-        messages.success(request, "You have abandoned the task. It is now available for others.")
+        messages.success(request, f"You have abandoned the task. A penalty of {penalty} points was deducted from your reward balance.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
