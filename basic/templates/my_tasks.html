@@ -84,6 +84,7 @@
                         <div>
                             <h3 class="text-lg font-bold text-gray-800">{{ task.title }}</h3>
                             <p class="text-sm text-gray-600 mt-1">Posted by: {{ task.posted_by.username }}</p>
+                            <p class="text-xs text-amber-600 font-medium mt-1">Collateral Staked: {{ task.deposit_bond_amount }} pts</p>
                             {% if task.deadline %}<p class="text-xs text-gray-500 mt-1">Deadline: {{ task.deadline|date:"F j, Y, g:i a" }}</p>{% endif %}
                         </div>
                         <div class="text-right flex-shrink-0 ml-4">
