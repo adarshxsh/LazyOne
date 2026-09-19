@@ -182,3 +182,91 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class TaskAbandonmentTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=100)
+
+        self.deadline = timezone.now() + timedelta(days=2)
+
+        # Standard task: reward = 300 -> penalty = 60
+        self.task = Task.objects.create(
+            title="Standard Task",
+            description="Standard Description",
+            reward=300,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=self.deadline
+        )
+        Conversation.objects.create(task=self.task)
+
+        # Small task: reward = 100 -> penalty = 50 (minimum floor)
+        self.small_task = Task.objects.create(
+            title="Small Task",
+            description="Small Description",
+            reward=100,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=self.deadline
+        )
+        Conversation.objects.create(task=self.small_task)
+
+    def test_abandon_task_deducts_penalty_and_logs_ledger(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.get(reverse('abandon_task', args=[self.task.id]))
+
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        # Taker balance: 100 - 60 = 40
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 40)
+
+        # Task state reset
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'available')
+        self.assertIsNone(self.task.taken_by)
+
+        # Ledger record created
+        ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='task_abandonment').first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, -60)
+        self.assertEqual(ledger.transaction_type, 'task_abandonment')
+
+        # Poster notified
+        from .models import Notification
+        notification = Notification.objects.filter(recipient=self.poster).first()
+        self.assertIsNotNone(notification)
+        self.assertIn("abandoned your task", notification.message)
+        self.assertIn("penalty of 60 points", notification.message)
+
+    def test_abandon_task_minimum_penalty_floor(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.get(reverse('abandon_task', args=[self.small_task.id]))
+
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        # Minimum penalty of 50 deducted: 100 - 50 = 50
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 50)
+
+        ledger = RewardLedger.objects.filter(user=self.taker, task=self.small_task, transaction_type='task_abandonment').first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, -50)
+
+    def test_rewards_dashboard_displays_abandonment_penalty(self):
+        self.client.login(username='taker', password='password123')
+        self.client.get(reverse('abandon_task', args=[self.task.id]))
+
+        response = self.client.get(reverse('rewards'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "-60")
+
+

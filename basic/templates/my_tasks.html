@@ -100,7 +100,7 @@
                                 {% if task.conversation %}
                                     <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-cyan-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-cyan-700 transition-colors text-sm">Go to Chat</a>
                                 {% endif %}
-                                <a href="{% url 'abandon_task' task.id %}" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm">Abandon Task</a>
+                                <a href="{% url 'abandon_task' task.id %}" onclick="return confirm('Are you sure you want to abandon this task? A penalty of {{ task.abandonment_penalty }} points will be deducted from your reward balance.');" class="inline-block bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm">Abandon Task</a>
                                 <button onclick="openDisputeModal('{{ task.id }}', '{{ task.deposit_bond_amount }}')" class="inline-block bg-red-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm">Raise Dispute</button>
                             {% endif %}
                         {% elif task.status == 'disputed' %}
