@@ -13,10 +13,25 @@
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
+            <p><strong>Category:</strong> <span class="px-2 py-1 text-sm rounded-full bg-cyan-500/20 text-cyan-300 font-semibold">{{ dispute.get_category_display }}</span></p>
             <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+        </div>
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400">Evidence Proof</h3>
+            <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-2">
+                <p><strong>Evidence Type:</strong> {{ dispute.get_evidence_type_display }}</p>
+                <div>
+                    <strong>Evidence Details:</strong>
+                    <p class="mt-1 text-gray-300">{{ dispute.evidence_details|default:dispute.reason|linebreaksbr }}</p>
+                </div>
+                {% if dispute.evidence_url %}
+                <p><strong>Attached Proof Media:</strong> <a href="{{ dispute.evidence_url }}" target="_blank" rel="noopener noreferrer" class="text-cyan-400 hover:underline break-all">{{ dispute.evidence_url }}</a></p>
+                {% endif %}
+            </div>
         </div>
 
         <div>
