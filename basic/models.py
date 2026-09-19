@@ -89,9 +89,27 @@ class Dispute(models.Model):
         ('refunded', 'Refunded'),
         ('forfeited', 'Forfeited'),
     )
+    CATEGORY_CHOICES = (
+        ('incomplete_work', 'Incomplete Work'),
+        ('quality_issue', 'Quality Defect'),
+        ('unresponsive_partner', 'Unresponsive Partner'),
+        ('payment_dispute', 'Payment Dispute'),
+        ('other', 'Other'),
+    )
+    EVIDENCE_TYPE_CHOICES = (
+        ('screenshot', 'Screenshot / Image'),
+        ('document', 'Document'),
+        ('chat_log', 'Chat Log'),
+        ('link', 'External Link'),
+        ('other', 'Other'),
+    )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
+    category = models.CharField(max_length=50, choices=CATEGORY_CHOICES, default='other')
+    evidence_type = models.CharField(max_length=50, choices=EVIDENCE_TYPE_CHOICES, default='other', blank=True)
+    evidence_details = models.TextField(blank=True, default='')
+    evidence_url = models.URLField(max_length=500, blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
