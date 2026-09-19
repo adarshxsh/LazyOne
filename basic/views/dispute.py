@@ -5,6 +5,46 @@ from django.db import transaction
 from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+import logging
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
+
+logger = logging.getLogger(__name__)
+
+def broadcast_dispute_update(dispute, notification=None):
+    try:
+        channel_layer = get_channel_layer()
+        if not channel_layer:
+            return
+
+        dispute_group = f"dispute_{dispute.id}"
+        async_to_sync(channel_layer.group_send)(
+            dispute_group,
+            {
+                'type': 'dispute_updated',
+                'dispute_id': dispute.id,
+                'status': dispute.status,
+                'status_display': dispute.get_status_display(),
+                'escrow_status': dispute.escrow_status,
+                'escrow_status_display': dispute.get_escrow_status_display(),
+                'message': f"Dispute status updated to {dispute.get_status_display()}"
+            }
+        )
+
+        if notification and notification.recipient:
+            recipient_group = f"user_{notification.recipient.id}"
+            unread_count = Notification.objects.filter(recipient=notification.recipient, is_read=False).count()
+            async_to_sync(channel_layer.group_send)(
+                recipient_group,
+                {
+                    'type': 'notification_event',
+                    'message': notification.message,
+                    'link': notification.link,
+                    'unread_count': unread_count
+                }
+            )
+    except Exception as e:
+        logger.error(f"Error broadcasting dispute WebSocket update: {e}")
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
@@ -74,11 +114,12 @@ def raise_dispute(request, task_id):
             task.status = 'disputed'
             task.save()
 
-            Notification.objects.create(
+            notif = Notification.objects.create(
                 recipient=task.posted_by,
                 message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
                 link=reverse('dispute_detail', args=[dispute.id])
             )
+            broadcast_dispute_update(dispute, notification=notif)
         messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
@@ -98,10 +139,11 @@ def withdraw_dispute(request, dispute_id):
         task.status = 'in_progress'
         task.save()
 
-        Notification.objects.create(
+        notif = Notification.objects.create(
             recipient=task.posted_by,
             message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
             link=reverse('my_tasks')
         )
+        broadcast_dispute_update(dispute, notification=notif)
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')

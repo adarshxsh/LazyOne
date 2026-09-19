@@ -13,8 +13,8 @@
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
+            <p><strong>Status:</strong> <span id="dispute-status-badge" class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span id="dispute-escrow-status" class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
         </div>
@@ -25,4 +25,38 @@
         </div>
     </div>
 
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const disputeId = {{ dispute.id }};
+            const wsScheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = wsScheme + '//' + window.location.host + '/ws/dispute/' + disputeId + '/';
+            
+            try {
+                const socket = new WebSocket(wsUrl);
+                socket.onmessage = function(e) {
+                    const data = JSON.parse(e.data);
+                    if (data.type === 'dispute_updated') {
+                        const statusBadge = document.getElementById('dispute-status-badge');
+                        if (statusBadge && data.status_display) {
+                            statusBadge.textContent = data.status_display;
+                            if (data.status === 'open') {
+                                statusBadge.className = 'px-2 py-1 text-sm rounded-full bg-yellow-500/20 text-yellow-300';
+                            } else {
+                                statusBadge.className = 'px-2 py-1 text-sm rounded-full bg-green-500/20 text-green-300';
+                            }
+                        }
+                        const escrowStatus = document.getElementById('dispute-escrow-status');
+                        if (escrowStatus && data.escrow_status_display) {
+                            escrowStatus.textContent = data.escrow_status_display;
+                        }
+                    }
+                };
+                socket.onerror = function(err) {
+                    console.warn('Dispute WebSocket error:', err);
+                };
+            } catch (err) {
+                console.warn('Dispute WebSocket failed to initialize:', err);
+            }
+        });
+    </script>
 {% endblock %}

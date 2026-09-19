@@ -182,3 +182,107 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+from channels.testing import WebsocketCommunicator
+from LazyOne.asgi import application
+from asgiref.sync import sync_to_async
+
+class DisputeWebSocketTests(TestCase):
+    def setUp(self):
+        self.poster = User.objects.create_user(username='ws_poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='ws_taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        self.other_user = User.objects.create_user(username='ws_other', password='password123')
+        self.other_profile = UserProfile.objects.create(user=self.other_user, rewards=1000)
+
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="WS Test Task",
+            description="WS Test Description",
+            reward=300,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=self.deadline
+        )
+        Conversation.objects.create(task=self.task)
+
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Initial dispute reason',
+            deposit_amount=60,
+            escrow_status='held',
+            status='open'
+        )
+
+    async def test_websocket_connect_authenticated_participant(self):
+        communicator = WebsocketCommunicator(
+            application,
+            f"/ws/dispute/{self.dispute.id}/"
+        )
+        communicator.scope["user"] = self.taker
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+        await communicator.disconnect()
+
+    async def test_websocket_connect_unauthorized_user_rejected(self):
+        communicator = WebsocketCommunicator(
+            application,
+            f"/ws/dispute/{self.dispute.id}/"
+        )
+        communicator.scope["user"] = self.other_user
+        connected, _ = await communicator.connect()
+        self.assertFalse(connected)
+
+    async def test_websocket_connect_unauthenticated_rejected(self):
+        from django.contrib.auth.models import AnonymousUser
+        communicator = WebsocketCommunicator(
+            application,
+            f"/ws/dispute/{self.dispute.id}/"
+        )
+        communicator.scope["user"] = AnonymousUser()
+        connected, _ = await communicator.connect()
+        self.assertFalse(connected)
+
+    async def test_notifications_websocket_connect(self):
+        communicator = WebsocketCommunicator(
+            application,
+            "/ws/notifications/"
+        )
+        communicator.scope["user"] = self.poster
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+        await communicator.disconnect()
+
+    async def test_raise_dispute_broadcast(self):
+        await sync_to_async(self.dispute.delete)()
+        self.task.status = 'in_progress'
+        await sync_to_async(self.task.save)()
+
+        dispute_communicator = WebsocketCommunicator(
+            application,
+            "/ws/notifications/"
+        )
+        dispute_communicator.scope["user"] = self.poster
+        connected, _ = await dispute_communicator.connect()
+        self.assertTrue(connected)
+
+        client = Client()
+        await sync_to_async(client.force_login)(self.taker)
+        response = await sync_to_async(client.post)(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Realtime dispute test'}
+        )
+        self.assertEqual(response.status_code, 302)
+
+        response_event = await dispute_communicator.receive_json_from()
+        self.assertEqual(response_event['type'], 'notification_event')
+        self.assertIn('ws_taker has raised a dispute', response_event['message'])
+
+        await dispute_communicator.disconnect()
+
+
