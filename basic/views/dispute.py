@@ -33,7 +33,7 @@ def raise_dispute(request, task_id):
             messages.error(request, "A reason is required to raise a dispute.")
             return redirect('my_tasks')
 
-        deposit_amount = task.deposit_bond_amount
+        deposit_amount = task.deposit_bond_amount_for_user(request.user)
         user_profile = request.user.userprofile
         if user_profile.rewards < deposit_amount:
             messages.error(
@@ -105,3 +105,96 @@ def withdraw_dispute(request, dispute_id):
         )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def resolve_dispute(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+
+    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+        messages.error(request, "You are not authorized to resolve this dispute.")
+        return redirect('home')
+
+    winner_type = request.POST.get('winner')  # 'poster' or 'taker'
+    if winner_type not in ['poster', 'taker']:
+        messages.error(request, "Invalid dispute resolution choice.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    winner_user = task.posted_by if winner_type == 'poster' else task.taken_by
+    loser_user = task.taken_by if winner_type == 'poster' else task.posted_by
+
+    with transaction.atomic():
+        dispute.status = 'resolved'
+        if dispute.escrow_status == 'held':
+            if winner_user == dispute.raised_by:
+                dispute.refund_deposit(
+                    reason_description=f"Security deposit bond refunded upon winning dispute for task: '{task.title}'"
+                )
+                winner_profile = winner_user.userprofile
+                winner_profile.disputes_won += 1
+                winner_profile.update_reputation(15, save=False)
+                winner_profile.save()
+
+                loser_profile = loser_user.userprofile
+                loser_profile.disputes_lost += 1
+                loser_profile.update_reputation(-25, save=False)
+                loser_profile.save()
+            else:
+                dispute.forfeit_deposit(
+                    beneficiary=winner_user,
+                    reason_description=f"Security deposit bond forfeited to {winner_user.username} upon winning dispute for task: '{task.title}'"
+                )
+        else:
+            dispute.save()
+            winner_profile = winner_user.userprofile
+            winner_profile.disputes_won += 1
+            winner_profile.update_reputation(15, save=False)
+            winner_profile.save()
+
+            loser_profile = loser_user.userprofile
+            loser_profile.disputes_lost += 1
+            loser_profile.update_reputation(-25, save=False)
+            loser_profile.save()
+
+        if winner_type == 'taker':
+            task.status = 'completed'
+            taker_profile = task.taken_by.userprofile
+            taker_profile.rewards += task.reward
+            taker_profile.tasks_completed += 1
+            taker_profile.update_reputation(10, save=False)
+            taker_profile.save()
+            RewardLedger.objects.create(
+                user=task.taken_by,
+                task=task,
+                amount=task.reward,
+                transaction_type='task_completion',
+                description=f"Completed task via dispute resolution: '{task.title}'"
+            )
+        else:
+            task.status = 'cancelled'
+            poster_profile = task.posted_by.userprofile
+            poster_profile.rewards += task.reward
+            poster_profile.save()
+            RewardLedger.objects.create(
+                user=task.posted_by,
+                task=task,
+                amount=task.reward,
+                transaction_type='task_cancellation',
+                description=f"Refund for disputed task: '{task.title}'"
+            )
+        task.save()
+
+        Notification.objects.create(
+            recipient=loser_user,
+            message=f"Dispute for task '{task.title}' has been resolved in favor of {winner_user.username}.",
+            link=reverse('dispute_detail', args=[dispute.id])
+        )
+        Notification.objects.create(
+            recipient=winner_user,
+            message=f"Dispute for task '{task.title}' has been resolved in your favor.",
+            link=reverse('dispute_detail', args=[dispute.id])
+        )
+
+    messages.success(request, f"Dispute resolved in favor of {winner_user.username}.")
+    return redirect('dispute_detail', dispute_id=dispute.id)

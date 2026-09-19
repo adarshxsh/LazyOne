@@ -15,7 +15,7 @@ def ping(request):
 
 @login_required(login_url='/login/')
 def profile_view(request):
-    db = apps.get_app_config('basic').firestore_db # Get Firestore client
+    db = getattr(apps.get_app_config('basic'), 'firestore_db', None) # Get Firestore client
     profile, created = UserProfile.objects.get_or_create(user=request.user)
     if request.method == 'POST':
         # Update Django model
@@ -52,6 +52,13 @@ def profile_view(request):
                     'phone_number': profile.phone_number,
                     'is_phone_verified': profile.is_phone_verified,
                     'instagram_username': profile.instagram_username,
+                    'reputation_score': profile.reputation_score,
+                    'risk_tier': profile.risk_tier,
+                    'tasks_completed': profile.tasks_completed,
+                    'tasks_posted': profile.tasks_posted,
+                    'tasks_cancelled': profile.tasks_cancelled,
+                    'disputes_won': profile.disputes_won,
+                    'disputes_lost': profile.disputes_lost,
                 }, merge=True) # merge=True prevents overwriting the whole document
                 messages.success(request, 'Profile updated in Firebase.')
             except Exception as e:
@@ -122,7 +129,7 @@ def update_closeness(request, friendship_id):
 
 @login_required(login_url='/login/')
 def verify_phone_token(request):
-    db = apps.get_app_config('basic').firestore_db # Get Firestore client
+    db = getattr(apps.get_app_config('basic'), 'firestore_db', None) # Get Firestore client
     if request.method == 'POST':
         try:
             data = json.loads(request.body)
