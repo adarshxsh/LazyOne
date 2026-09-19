@@ -1,9 +1,10 @@
 from django.test import TestCase, Client
+from django.core.management import call_command
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, Notification
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +182,154 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class EnforceTaskDeadlinesTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.poster = User.objects.create_user(username='poster2', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker2', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+    def test_enforce_deadlines_overdue_available_task(self):
+        past_deadline = timezone.now() - timedelta(hours=2)
+        task = Task.objects.create(
+            title="Overdue Available Task",
+            description="Description",
+            reward=200,
+            posted_by=self.poster,
+            status='available',
+            deadline=past_deadline
+        )
+
+        call_command('enforce_task_deadlines')
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'cancelled')
+
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1200)
+
+        ledger = RewardLedger.objects.filter(
+            user=self.poster,
+            task=task,
+            transaction_type='task_cancellation'
+        ).first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, 200)
+
+        notification = Notification.objects.filter(recipient=self.poster).first()
+        self.assertIsNotNone(notification)
+        self.assertEqual(notification.link, reverse('my_tasks'))
+
+    def test_enforce_deadlines_overdue_in_progress_task(self):
+        past_deadline = timezone.now() - timedelta(hours=3)
+        task = Task.objects.create(
+            title="Overdue In Progress Task",
+            description="Description",
+            reward=300,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=past_deadline
+        )
+
+        call_command('enforce_task_deadlines')
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'cancelled')
+
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1300)
+
+        ledger = RewardLedger.objects.filter(
+            user=self.poster,
+            task=task,
+            transaction_type='task_cancellation'
+        ).first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, 300)
+
+        poster_notif = Notification.objects.filter(recipient=self.poster).first()
+        self.assertIsNotNone(poster_notif)
+        self.assertEqual(poster_notif.link, reverse('my_tasks'))
+
+        taker_notif = Notification.objects.filter(recipient=self.taker).first()
+        self.assertIsNotNone(taker_notif)
+        self.assertEqual(taker_notif.link, reverse('my_tasks'))
+
+    def test_enforce_deadlines_ignores_future_and_disputed_tasks(self):
+        future_deadline = timezone.now() + timedelta(hours=5)
+        future_task = Task.objects.create(
+            title="Future Task",
+            description="Description",
+            reward=100,
+            posted_by=self.poster,
+            status='available',
+            deadline=future_deadline
+        )
+
+        past_deadline = timezone.now() - timedelta(hours=1)
+        disputed_task = Task.objects.create(
+            title="Disputed Task",
+            description="Description",
+            reward=150,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed',
+            deadline=past_deadline
+        )
+
+        call_command('enforce_task_deadlines')
+
+        future_task.refresh_from_db()
+        self.assertEqual(future_task.status, 'available')
+
+        disputed_task.refresh_from_db()
+        self.assertEqual(disputed_task.status, 'disputed')
+
+    def test_home_feed_filters_expired_available_tasks(self):
+        future_task = Task.objects.create(
+            title="Active Task",
+            description="Description",
+            reward=100,
+            posted_by=self.poster,
+            status='available',
+            deadline=timezone.now() + timedelta(hours=5)
+        )
+        expired_task = Task.objects.create(
+            title="Expired Task",
+            description="Description",
+            reward=100,
+            posted_by=self.poster,
+            status='available',
+            deadline=timezone.now() - timedelta(hours=1)
+        )
+
+        response = self.client.get(reverse('home'))
+        self.assertEqual(response.status_code, 200)
+        available_tasks = list(response.context['available_tasks'])
+        self.assertIn(future_task, available_tasks)
+        self.assertNotIn(expired_task, available_tasks)
+
+    def test_take_task_expired_returns_error(self):
+        expired_task = Task.objects.create(
+            title="Expired Available Task",
+            description="Description",
+            reward=100,
+            posted_by=self.poster,
+            status='available',
+            deadline=timezone.now() - timedelta(hours=1)
+        )
+
+        self.client.login(username='taker2', password='password123')
+        response = self.client.get(reverse('take_task', args=[expired_task.id]), follow=True)
+        self.assertRedirects(response, reverse('home'))
+
+        expired_task.refresh_from_db()
+        self.assertEqual(expired_task.status, 'available')
+        self.assertIsNone(expired_task.taken_by)
+
 
