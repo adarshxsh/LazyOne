@@ -68,11 +68,13 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('jury_reward', 'Jury Reward Points'),
+        ('dispute_payout', 'Dispute Resolution Payout'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=30, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -192,3 +194,36 @@ class Notification(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+
+class Jury(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='jury_pool')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jury_assignments')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Juror {self.juror.username} for Dispute {self.dispute.id}"
+
+
+JuryPool = Jury
+
+
+class JuryVote(models.Model):
+    VOTE_CHOICES = (
+        ('poster', 'Poster Wins'),
+        ('taker', 'Taker Wins'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jury_votes')
+    vote = models.CharField(max_length=20, choices=VOTE_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"{self.juror.username} voted {self.vote} on Dispute {self.dispute.id}"
+
