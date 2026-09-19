@@ -182,3 +182,136 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class StateMachineAndLockingTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        self.other_user = User.objects.create_user(username='other', password='password123')
+        self.other_profile = UserProfile.objects.create(user=self.other_user, rewards=500)
+
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="Locking Task",
+            description="Testing state transitions",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=self.deadline
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_accept_cancellation_success(self):
+        self.client.login(username='poster', password='password123')
+        self.client.get(reverse('request_cancellation', args=[self.task.id]))
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.cancellation_requested)
+
+        self.client.login(username='taker', password='password123')
+        initial_poster_rewards = self.poster_profile.rewards
+        response = self.client.get(reverse('accept_cancellation', args=[self.task.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'available')
+        self.assertIsNone(self.task.taken_by)
+        self.assertFalse(self.task.cancellation_requested)
+
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, initial_poster_rewards + 200)
+
+    def test_accept_cancellation_fails_if_not_requested(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.get(reverse('accept_cancellation', args=[self.task.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+        self.assertEqual(self.task.taken_by, self.taker)
+
+    def test_accept_cancellation_fails_if_status_disputed(self):
+        self.client.login(username='poster', password='password123')
+        self.client.get(reverse('request_cancellation', args=[self.task.id]))
+
+        self.client.login(username='taker', password='password123')
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Problem'})
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+
+        response = self.client.get(reverse('accept_cancellation', args=[self.task.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+
+    def test_accept_cancellation_unauthorized_user(self):
+        self.client.login(username='poster', password='password123')
+        self.client.get(reverse('request_cancellation', args=[self.task.id]))
+
+        self.client.login(username='other', password='password123')
+        response = self.client.get(reverse('accept_cancellation', args=[self.task.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+
+    def test_withdraw_dispute_fails_if_dispute_already_resolved(self):
+        self.client.login(username='taker', password='password123')
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Issue'})
+        dispute = Dispute.objects.get(task=self.task)
+
+        self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+
+    def test_withdraw_dispute_unauthorized_user(self):
+        self.client.login(username='taker', password='password123')
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Issue'})
+        dispute = Dispute.objects.get(task=self.task)
+
+        self.client.login(username='other', password='password123')
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'open')
+
+    def test_complete_task_fails_if_already_completed(self):
+        self.client.login(username='poster', password='password123')
+        self.client.get(reverse('complete_task', args=[self.task.id]))
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+
+        self.taker_profile.refresh_from_db()
+        rewards_after_first = self.taker_profile.rewards
+
+        response = self.client.get(reverse('complete_task', args=[self.task.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, rewards_after_first)
+
+    def test_complete_task_unauthorized_user(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.get(reverse('complete_task', args=[self.task.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+
+

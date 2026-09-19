@@ -102,7 +102,7 @@ class Dispute(models.Model):
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
-            user_profile = self.raised_by.userprofile
+            user_profile = UserProfile.objects.select_for_update().get(user=self.raised_by)
             user_profile.rewards += self.deposit_amount
             user_profile.save()
 
@@ -120,7 +120,7 @@ class Dispute(models.Model):
     def forfeit_deposit(self, beneficiary=None, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
             if beneficiary:
-                beneficiary_profile = beneficiary.userprofile
+                beneficiary_profile = UserProfile.objects.select_for_update().get(user=beneficiary)
                 beneficiary_profile.rewards += self.deposit_amount
                 beneficiary_profile.save()
                 RewardLedger.objects.create(
