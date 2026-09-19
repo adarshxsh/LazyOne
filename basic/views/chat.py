@@ -1,6 +1,6 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
-from ..models import Conversation, Message, Notification
+from ..models import Conversation, Message, Notification, DisputeVote
 from django.contrib.auth.models import User
 from django.http import HttpResponseForbidden, JsonResponse
 from django.urls import reverse
@@ -23,11 +23,17 @@ def chat_view(request, conversation_id):
         messages.error(request, "Chat not found.")
         return redirect('home')
 
+    is_read_only = False
     if request.user not in conversation.participants.all():
-        logger.warning("Step 2: User is not a participant. Redirecting to home.")
-        messages.error(request, "You are not authorized to view this chat.")
-        return redirect('home') # Redirect to home page
-    logger.info("Step 2: User is a valid participant.")
+        if conversation.task and conversation.task.status == 'disputed':
+            is_read_only = True
+            logger.info("Step 2: User is not a participant, but viewing a disputed task chat in read-only mode.")
+        else:
+            logger.warning("Step 2: User is not a participant. Redirecting to home.")
+            messages.error(request, "You are not authorized to view this chat.")
+            return redirect('home') # Redirect to home page
+    else:
+        logger.info("Step 2: User is a valid participant.")
 
     try:
         # This is for the Django-based message system, which we are bypassing for Firestore.
@@ -49,7 +55,35 @@ def chat_view(request, conversation_id):
     except Exception as e:
         logger.error(f"ERROR at Step 4 (Marking notifications): {e}")
 
-    context = {'conversation': conversation, 'messages': messages_list}
+    dispute = None
+    user_vote = None
+    poster_votes = 0
+    taker_votes = 0
+    user_is_involved = False
+    can_vote = False
+
+    if conversation.task and hasattr(conversation.task, 'dispute'):
+        dispute = conversation.task.dispute
+        dispute_votes = dispute.votes.all()
+        if request.user.is_authenticated:
+            user_vote = dispute_votes.filter(voter=request.user).first()
+            user_is_involved = (request.user == conversation.task.posted_by or request.user == conversation.task.taken_by)
+        poster_votes = dispute_votes.filter(voted_for=conversation.task.posted_by).count()
+        if conversation.task.taken_by:
+            taker_votes = dispute_votes.filter(voted_for=conversation.task.taken_by).count()
+        can_vote = (dispute.status == 'open' and not user_is_involved and user_vote is None and request.user.is_authenticated)
+
+    context = {
+        'conversation': conversation,
+        'messages': messages_list,
+        'is_read_only': is_read_only,
+        'dispute': dispute,
+        'user_vote': user_vote,
+        'poster_votes': poster_votes,
+        'taker_votes': taker_votes,
+        'user_is_involved': user_is_involved,
+        'can_vote': can_vote,
+    }
     
     logger.info(f"--- CHAT_VIEW END: Successfully rendering template. ---")
     return render(request, 'chat.html', context)
