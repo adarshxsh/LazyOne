@@ -7,6 +7,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.db.models import Q
 from datetime import datetime, timedelta
+from ..broadcasting import broadcast_dispute_update
 
 
 @login_required(login_url='/login/')
@@ -95,6 +96,11 @@ def complete_task(request, task_id):
             )
             task.dispute.status = 'resolved'
             task.dispute.save()
+            transaction.on_commit(lambda d=task.dispute, t=task: broadcast_dispute_update(
+                d,
+                'dispute_resolved',
+                f"Dispute resolved upon task completion for task: '{t.title}'"
+            ))
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,

@@ -5,6 +5,7 @@ from django.db import transaction
 from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+from ..broadcasting import broadcast_dispute_update
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
@@ -79,6 +80,11 @@ def raise_dispute(request, task_id):
                 message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
                 link=reverse('dispute_detail', args=[dispute.id])
             )
+            transaction.on_commit(lambda d=dispute, t=task: broadcast_dispute_update(
+                d,
+                'dispute_raised',
+                f"{request.user.username} has raised a dispute for task: '{t.title}'"
+            ))
         messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
@@ -103,5 +109,10 @@ def withdraw_dispute(request, dispute_id):
             message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
             link=reverse('my_tasks')
         )
+        transaction.on_commit(lambda d=dispute, t=task: broadcast_dispute_update(
+            d,
+            'dispute_withdrawn',
+            f"{request.user.username} has withdrawn the dispute for '{t.title}'"
+        ))
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')

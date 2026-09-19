@@ -1,8 +1,9 @@
-from django.test import TestCase, Client
+from django.test import TestCase, TransactionTestCase, Client
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
+from asgiref.sync import sync_to_async
 from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
 
 
@@ -181,4 +182,107 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+from channels.testing import WebsocketCommunicator
+from LazyOne.asgi import application
+from basic.broadcasting import broadcast_dispute_update
+
+class DisputeWebSocketTests(TransactionTestCase):
+    def setUp(self):
+        self.poster = User.objects.create_user(username='poster_ws', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker_ws', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        self.task = Task.objects.create(
+            title="WebSocket Task",
+            description="WebSocket Description",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress'
+        )
+
+    async def test_websocket_global_dispute_broadcasting(self):
+        communicator = WebsocketCommunicator(application, "/ws/disputes/")
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+
+        # Create dispute and broadcast
+        dispute = await Dispute.objects.acreate(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Unmet expectations",
+            deposit_amount=50,
+            escrow_status='held',
+            status='open'
+        )
+
+        broadcast_dispute_update(dispute, 'dispute_raised', "New dispute raised")
+
+        response = await communicator.receive_json_from()
+        self.assertEqual(response.get('type'), 'dispute_update')
+        self.assertEqual(response.get('event'), 'dispute_raised')
+        self.assertEqual(response['dispute']['id'], dispute.id)
+        self.assertEqual(response['task']['id'], self.task.id)
+
+        await communicator.disconnect()
+
+    async def test_websocket_dispute_specific_channel(self):
+        dispute = await Dispute.objects.acreate(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Detail channel test",
+            deposit_amount=50,
+            escrow_status='held',
+            status='open'
+        )
+
+        communicator = WebsocketCommunicator(application, f"/ws/dispute/{dispute.id}/")
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+
+        broadcast_dispute_update(dispute, 'dispute_withdrawn', "Dispute withdrawn")
+
+        response = await communicator.receive_json_from()
+        self.assertEqual(response.get('type'), 'dispute_update')
+        self.assertEqual(response.get('event'), 'dispute_withdrawn')
+        self.assertEqual(response['dispute']['id'], dispute.id)
+
+        await communicator.disconnect()
+
+    async def test_websocket_ping_pong(self):
+        communicator = WebsocketCommunicator(application, "/ws/disputes/")
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+
+        await communicator.send_json_to({'type': 'ping'})
+        response = await communicator.receive_json_from()
+        self.assertEqual(response, {'type': 'pong'})
+
+        await communicator.disconnect()
+
+    async def test_raise_dispute_view_broadcasts_websocket(self):
+        communicator = WebsocketCommunicator(application, "/ws/disputes/")
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+
+        client = Client()
+        await sync_to_async(client.login)(username='taker_ws', password='password123')
+        response = await sync_to_async(client.post)(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'View broadcast test'}
+        )
+        self.assertEqual(response.status_code, 302)
+
+        ws_msg = await communicator.receive_json_from()
+        self.assertEqual(ws_msg.get('type'), 'dispute_update')
+        self.assertEqual(ws_msg.get('event'), 'dispute_raised')
+        self.assertEqual(ws_msg['task']['id'], self.task.id)
+
+        await communicator.disconnect()
+
+
 
