@@ -34,16 +34,19 @@ def raise_dispute(request, task_id):
             return redirect('my_tasks')
 
         deposit_amount = task.deposit_bond_amount
+        filing_fee = task.filing_fee_amount
+        total_required = deposit_amount + filing_fee
+
         user_profile = request.user.userprofile
-        if user_profile.rewards < deposit_amount:
+        if user_profile.rewards < total_required:
             messages.error(
                 request,
-                f"Insufficient reward points balance. You need at least {deposit_amount} points as a deposit bond to raise a dispute, but you only have {user_profile.rewards} points."
+                f"Insufficient reward points balance. You need at least {total_required} points ({deposit_amount} deposit bond + {filing_fee} filing fee) to raise a dispute, but you only have {user_profile.rewards} points."
             )
             return redirect('my_tasks')
 
         with transaction.atomic():
-            user_profile.rewards -= deposit_amount
+            user_profile.rewards -= total_required
             user_profile.save()
 
             if hasattr(task, 'dispute'):
@@ -52,6 +55,7 @@ def raise_dispute(request, task_id):
                 dispute.reason = reason
                 dispute.status = 'open'
                 dispute.deposit_amount = deposit_amount
+                dispute.filing_fee = filing_fee
                 dispute.escrow_status = 'held'
                 dispute.save()
             else:
@@ -60,6 +64,7 @@ def raise_dispute(request, task_id):
                     raised_by=request.user,
                     reason=reason,
                     deposit_amount=deposit_amount,
+                    filing_fee=filing_fee,
                     escrow_status='held'
                 )
 
@@ -71,15 +76,25 @@ def raise_dispute(request, task_id):
                 description=f"Security deposit bond held for dispute on task: '{task.title}'"
             )
 
+            RewardLedger.objects.create(
+                user=request.user,
+                task=task,
+                amount=-filing_fee,
+                transaction_type='dispute_filing_fee',
+                description=f"Non-refundable filing fee deducted for dispute on task: '{task.title}'"
+            )
+
             task.status = 'disputed'
             task.save()
 
-            Notification.objects.create(
-                recipient=task.posted_by,
-                message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
-                link=reverse('dispute_detail', args=[dispute.id])
-            )
-        messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
+            counterparty = task.posted_by if request.user == task.taken_by else task.taken_by
+            if counterparty:
+                Notification.objects.create(
+                    recipient=counterparty,
+                    message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
+                    link=reverse('dispute_detail', args=[dispute.id])
+                )
+        messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond and {filing_fee} points filing fee deducted.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
 
@@ -88,20 +103,61 @@ def raise_dispute(request, task_id):
 def withdraw_dispute(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user)
     task = dispute.task
+
+    if dispute.status != 'open':
+        messages.error(request, "This dispute is no longer open.")
+        return redirect('my_tasks')
+
     with transaction.atomic():
-        dispute.refund_deposit(
-            reason_description=f"Security deposit bond refunded for withdrawn dispute on task: '{task.title}'"
-        )
+        if dispute.escrow_status == 'held' and dispute.deposit_amount > 0:
+            penalty = dispute.withdrawal_penalty
+            net_refund = dispute.net_refund
+
+            # Refund net deposit to dispute raiser
+            raiser_profile = dispute.raised_by.userprofile
+            raiser_profile.rewards += net_refund
+            raiser_profile.save()
+
+            # Credit penalty compensation to counterparty
+            counterparty = task.posted_by if request.user == task.taken_by else task.taken_by
+            if counterparty:
+                counterparty_profile = counterparty.userprofile
+                counterparty_profile.rewards += penalty
+                counterparty_profile.save()
+
+                RewardLedger.objects.create(
+                    user=counterparty,
+                    task=task,
+                    amount=penalty,
+                    transaction_type='dispute_forfeit',
+                    description=f"Withdrawal penalty compensation ({penalty} pts) awarded from frivolous dispute on task: '{task.title}'"
+                )
+
+            RewardLedger.objects.create(
+                user=dispute.raised_by,
+                task=task,
+                amount=net_refund,
+                transaction_type='dispute_refund',
+                description=f"Security deposit bond partial refund ({net_refund} pts) after withdrawal penalty for dispute on task: '{task.title}'"
+            )
+
+            dispute.escrow_status = 'refunded'
+
         dispute.status = 'resolved'
         dispute.save()
 
         task.status = 'in_progress'
         task.save()
 
-        Notification.objects.create(
-            recipient=task.posted_by,
-            message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
-            link=reverse('my_tasks')
-        )
-    messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
+        counterparty = task.posted_by if request.user == task.taken_by else task.taken_by
+        if counterparty:
+            Notification.objects.create(
+                recipient=counterparty,
+                message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
+                link=reverse('my_tasks')
+            )
+    messages.success(
+        request,
+        f"You have successfully withdrawn the dispute for '{task.title}'. Refunded {dispute.net_refund} points ({dispute.withdrawal_penalty} points penalty deducted)."
+    )
     return redirect('my_tasks')
