@@ -182,3 +182,217 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class ProRataDisputeSettlementTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Users
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=200)
+
+        self.other_user = User.objects.create_user(username='other', password='password123')
+        self.other_profile = UserProfile.objects.create(user=self.other_user, rewards=500)
+
+        self.staff_user = User.objects.create_user(username='staff', password='password123', is_staff=True)
+        self.staff_profile = UserProfile.objects.create(user=self.staff_user, rewards=1000)
+
+        # Create task: reward = 300
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="Pro Rata Task",
+            description="Task for pro rata testing",
+            reward=300,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed',
+            deadline=self.deadline
+        )
+        Conversation.objects.create(task=self.task)
+
+        # Raise dispute (deposit bond = 60, taker balance was 200 -> 140 left)
+        self.taker_profile.rewards = 140
+        self.taker_profile.save()
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Partial completion dispute",
+            deposit_amount=60,
+            escrow_status='held',
+            status='open'
+        )
+
+    def test_resolve_dispute_60_40_split(self):
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('resolve_dispute', args=[self.dispute.id]),
+            {
+                'percent': '60',
+                'deposit_action': 'refund',
+                'settlement_notes': '60% work completed satisfactorily'
+            }
+        )
+
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+
+        # Check task & dispute status
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.dispute.settlement_taker_share_percent, 60)
+        self.assertEqual(self.dispute.settlement_notes, '60% work completed satisfactorily')
+        self.assertEqual(self.dispute.escrow_status, 'refunded')
+
+        # Check point distributions
+        # Taker: 140 (initial remaining) + math.floor(300 * 0.6) = 180 + 60 (refund) = 380
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 380)
+
+        # Poster: 1000 + (300 - 180) = 1120
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1120)
+
+        # Check RewardLedger entries
+        payout_ledger = RewardLedger.objects.filter(
+            user=self.taker, task=self.task, transaction_type='dispute_partial_payout'
+        ).first()
+        self.assertIsNotNone(payout_ledger)
+        self.assertEqual(payout_ledger.amount, 180)
+
+        refund_ledger = RewardLedger.objects.filter(
+            user=self.poster, task=self.task, transaction_type='dispute_partial_refund'
+        ).first()
+        self.assertIsNotNone(refund_ledger)
+        self.assertEqual(refund_ledger.amount, 120)
+
+        # Financial integrity: sum equals reward
+        self.assertEqual(payout_ledger.amount + refund_ledger.amount, self.task.reward)
+
+    def test_resolve_dispute_custom_amounts(self):
+        self.client.login(username='staff', password='password123')
+        response = self.client.post(
+            reverse('resolve_dispute', args=[self.dispute.id]),
+            {
+                'doer_amount': '200',
+                'poster_amount': '100',
+                'deposit_action': 'refund'
+            }
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.doer_amount, 200)
+        self.assertEqual(self.dispute.poster_amount, 100)
+        self.assertEqual(self.dispute.status, 'resolved')
+
+    def test_resolve_dispute_preset_split(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(
+            reverse('resolve_dispute', args=[self.dispute.id]),
+            {
+                'split_preset': '50_50',
+                'deposit_action': 'refund'
+            }
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.doer_amount, 150)
+        self.assertEqual(self.dispute.poster_amount, 150)
+
+    def test_resolve_dispute_forfeit_deposit(self):
+        self.client.login(username='poster', password='password123')
+        self.client.post(
+            reverse('resolve_dispute', args=[self.dispute.id]),
+            {
+                'percent': '30',
+                'deposit_action': 'forfeit',
+                'settlement_notes': '30% work done, deposit forfeited'
+            }
+        )
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.escrow_status, 'forfeited')
+
+        # Taker: 140 + floor(300 * 0.3) = 140 + 90 = 230
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 230)
+
+        # Poster: 1000 + (300 - 90) + 60 (forfeited bond) = 1270
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1270)
+
+    def test_resolve_dispute_unauthorized_user(self):
+        self.client.login(username='other', password='password123')
+        response = self.client.post(
+            reverse('resolve_dispute', args=[self.dispute.id]),
+            {'percent': '50'}
+        )
+
+        self.assertRedirects(response, reverse('home'))
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'open')
+
+    def test_resolve_dispute_invalid_percentage(self):
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('resolve_dispute', args=[self.dispute.id]),
+            {'percent': '150'}
+        )
+
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'open')
+
+    def test_resolve_dispute_sum_mismatch(self):
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('resolve_dispute', args=[self.dispute.id]),
+            {
+                'doer_amount': '100',
+                'poster_amount': '100'  # Sum 200 != task.reward 300
+            }
+        )
+
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'open')
+
+    def test_complete_task_with_percentage_split(self):
+        task2 = Task.objects.create(
+            title="Partial Completion Task",
+            description="Task description",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=self.deadline
+        )
+        self.poster_profile.rewards = 800  # paid 200 out of 1000
+        self.poster_profile.save()
+        self.taker_profile.rewards = 100
+        self.taker_profile.save()
+
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('complete_task', args=[task2.id]),
+            {'percent': '70'}
+        )
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        task2.refresh_from_db()
+        self.assertEqual(task2.status, 'completed')
+
+        # Taker gets 70% of 200 = 140 => 100 + 140 = 240
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 240)
+
+        # Poster refunded 30% of 200 = 60 => 800 + 60 = 860
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 860)
+

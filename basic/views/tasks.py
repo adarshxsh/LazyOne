@@ -1,3 +1,4 @@
+import math
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -82,10 +83,40 @@ def take_task(request, task_id):
 @login_required(login_url='/login/')
 def complete_task(request, task_id):
     task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
+    
+    percent_str = request.POST.get('percent') or request.POST.get('percentage') or request.GET.get('percent') or '100'
+    try:
+        percent = int(percent_str)
+        if percent < 0 or percent > 100:
+            raise ValueError("Percentage out of range")
+    except (ValueError, TypeError):
+        percent = 100
+
     with transaction.atomic():
-        task_doer_profile = task.taken_by.userprofile
-        task_doer_profile.rewards += task.reward
-        task_doer_profile.save()
+        taker_amount = math.floor(task.reward * (percent / 100.0))
+        poster_amount = task.reward - taker_amount
+
+        if task.taken_by:
+            task_doer_profile = task.taken_by.userprofile
+            task_doer_profile.rewards += taker_amount
+            task_doer_profile.save()
+
+            RewardLedger.objects.create(
+                user=task.taken_by, task=task, amount=taker_amount,
+                transaction_type='task_completion', description=f"Completed task: '{task.title}' ({percent}%)"
+            )
+
+        if poster_amount > 0:
+            poster_profile = task.posted_by.userprofile
+            poster_profile.rewards += poster_amount
+            poster_profile.save()
+
+            RewardLedger.objects.create(
+                user=task.posted_by, task=task, amount=poster_amount,
+                transaction_type='dispute_partial_refund' if hasattr(task, 'dispute') else 'task_cancellation',
+                description=f"Partial refund for task: '{task.title}' ({100 - percent}%)"
+            )
+
         task.status = 'completed'
         task.save()
 
@@ -94,13 +125,14 @@ def complete_task(request, task_id):
                 reason_description=f"Security deposit bond refunded upon dispute resolution for task: '{task.title}'"
             )
             task.dispute.status = 'resolved'
+            task.dispute.doer_amount = taker_amount
+            task.dispute.poster_amount = poster_amount
+            task.dispute.settlement_taker_share_percent = percent
+            task.dispute.settled_at = timezone.now()
+            task.dispute.resolved_by = request.user
             task.dispute.save()
 
-        RewardLedger.objects.create(
-            user=task.taken_by, task=task, amount=task.reward,
-            transaction_type='task_completion', description=f"Completed task: '{task.title}'"
-        )
-        messages.success(request, f"Task marked as complete! {task.reward} points transferred to {task.taken_by.username}.")
+        messages.success(request, f"Task marked as complete! {taker_amount} points transferred to {task.taken_by.username if task.taken_by else 'taker'}.")
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
