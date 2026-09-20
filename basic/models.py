@@ -1,7 +1,9 @@
 import math
+import random
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.urls import reverse
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -141,6 +143,66 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class Jury(models.Model):
+    dispute = models.OneToOneField(Dispute, on_delete=models.CASCADE, related_name='jury')
+    jurors = models.ManyToManyField(User, related_name='jury_panels')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Jury Panel for {self.dispute}"
+
+class JuryVote(models.Model):
+    VOTE_CHOICES = (
+        ('poster_wins', 'Poster Wins'),
+        ('taker_wins', 'Taker Wins'),
+    )
+    jury = models.ForeignKey(Jury, on_delete=models.CASCADE, related_name='votes')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jury_votes')
+    vote = models.CharField(max_length=20, choices=VOTE_CHOICES)
+    voted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('jury', 'juror')
+
+    def __str__(self):
+        return f"Vote by {self.juror.username}: {self.vote}"
+
+def create_jury_for_dispute(dispute, panel_size=3):
+    task = dispute.task
+    excluded_ids = [task.posted_by.id]
+    if task.taken_by:
+        excluded_ids.append(task.taken_by.id)
+
+    eligible_users = User.objects.filter(
+        is_active=True,
+        userprofile__rewards__gt=0
+    ).exclude(id__in=excluded_ids).order_by('id')
+
+    eligible_list = list(eligible_users)
+    count = len(eligible_list)
+
+    if count == 0:
+        k = 0
+    elif count >= panel_size:
+        k = panel_size
+    else:
+        k = count if count % 2 == 1 else max(1, count - 1)
+
+    selected_jurors = random.sample(eligible_list, k) if k > 0 else []
+
+    jury, created = Jury.objects.get_or_create(dispute=dispute)
+    jury.jurors.set(selected_jurors)
+    jury.save()
+
+    dispute_link = reverse('dispute_detail', args=[dispute.id])
+    for juror in selected_jurors:
+        Notification.objects.create(
+            recipient=juror,
+            message=f"You have been selected as a neutral juror for dispute on task: '{task.title}'.",
+            link=dispute_link
+        )
+    return jury
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
