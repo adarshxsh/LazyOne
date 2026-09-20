@@ -68,11 +68,13 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('juror_reward', 'Juror Reward Points Awarded'),
+        ('dispute_penalty', 'Dispute Penalty Bond Forfeited'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -117,16 +119,41 @@ class Dispute(models.Model):
             self.escrow_status = 'refunded'
             self.save()
 
-    def forfeit_deposit(self, beneficiary=None, reason_description=None):
+    def forfeit_deposit(self, beneficiary=None, jurors=None, juror_reward_amount=None, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
-            if beneficiary:
+            remaining_bond = self.deposit_amount
+
+            # Disburse juror rewards if jurors are specified
+            if jurors:
+                num_jurors = len(jurors) if isinstance(jurors, (list, tuple, set)) else jurors.count()
+                if num_jurors > 0:
+                    if juror_reward_amount is not None:
+                        reward_per_juror = juror_reward_amount
+                    else:
+                        reward_per_juror = self.deposit_amount // num_jurors if not beneficiary else (self.deposit_amount // (num_jurors + 1))
+
+                    for juror in jurors:
+                        if reward_per_juror > 0:
+                            juror_profile = juror.userprofile
+                            juror_profile.rewards += reward_per_juror
+                            juror_profile.save()
+                            RewardLedger.objects.create(
+                                user=juror,
+                                task=self.task,
+                                amount=reward_per_juror,
+                                transaction_type='juror_reward',
+                                description=f"Juror reward for dispute resolution on task: '{self.task.title}'"
+                            )
+                            remaining_bond -= reward_per_juror
+
+            if beneficiary and remaining_bond > 0:
                 beneficiary_profile = beneficiary.userprofile
-                beneficiary_profile.rewards += self.deposit_amount
+                beneficiary_profile.rewards += remaining_bond
                 beneficiary_profile.save()
                 RewardLedger.objects.create(
                     user=beneficiary,
                     task=self.task,
-                    amount=self.deposit_amount,
+                    amount=remaining_bond,
                     transaction_type='dispute_refund',
                     description=f"Forfeited dispute deposit bond awarded from task: '{self.task.title}'"
                 )
@@ -135,8 +162,8 @@ class Dispute(models.Model):
             RewardLedger.objects.create(
                 user=self.raised_by,
                 task=self.task,
-                amount=0,
-                transaction_type='dispute_forfeit',
+                amount=-self.deposit_amount,
+                transaction_type='dispute_penalty',
                 description=desc
             )
             self.escrow_status = 'forfeited'
