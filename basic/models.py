@@ -68,11 +68,19 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('appeal_deposit', 'Appeal Deposit Bond Held'),
+        ('appeal_refund', 'Appeal Deposit Bond Refunded'),
+        ('appeal_forfeit', 'Appeal Deposit Bond Forfeited'),
+        ('slashing_penalty', 'Slashing Penalty Deducted'),
+        ('slashing_reward', 'Slashing Reward Awarded'),
+        ('juror_stake', 'Juror Stake Held'),
+        ('juror_slash', 'Juror Stake Slashed'),
+        ('juror_reward', 'Juror Reward Awarded'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -82,7 +90,15 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('pending_consensus', 'Pending Consensus'),
+        ('appealed', 'Appealed'),
+        ('senior_review', 'Senior Review'),
         ('resolved', 'Resolved'),
+        ('slashed', 'Slashed'),
+    )
+    STAGE_CHOICES = (
+        ('initial', 'Initial Panel'),
+        ('senior', 'Senior Panel'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
@@ -93,12 +109,40 @@ class Dispute(models.Model):
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    stage = models.CharField(max_length=20, choices=STAGE_CHOICES, default='initial')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    
+    # Appeal Attributes
+    appealed_at = models.DateTimeField(null=True, blank=True)
+    appeal_window_expires_at = models.DateTimeField(null=True, blank=True)
+    appeal_reason = models.TextField(blank=True, null=True)
+    appealed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='dispute_appeals')
+    appeal_deposit_amount = models.PositiveIntegerField(default=0)
+    appeal_escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+
+    # Consensus Threshold Verification
+    consensus_reached = models.BooleanField(default=False)
+    consensus_percentage = models.FloatField(default=0.0)
+    winning_choice = models.CharField(max_length=20, null=True, blank=True) # 'poster' or 'taker'
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def is_appealable(self):
+        """
+        Returns True if the dispute can be appealed (initial consensus reached, pending_consensus or open status,
+        within 48-hour appeal window).
+        """
+        if self.stage != 'initial':
+            return False
+        if not self.consensus_reached and self.status != 'pending_consensus':
+            return False
+        if self.appeal_window_expires_at and timezone.now() > self.appeal_window_expires_at:
+            return False
+        return True
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -141,6 +185,88 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+    def refund_appeal_deposit(self, reason_description=None):
+        if self.appeal_escrow_status == 'held' and self.appeal_deposit_amount > 0 and self.appealed_by:
+            user_profile = self.appealed_by.userprofile
+            user_profile.rewards += self.appeal_deposit_amount
+            user_profile.save()
+
+            desc = reason_description or f"Appeal deposit bond refunded for task: '{self.task.title}'"
+            RewardLedger.objects.create(
+                user=self.appealed_by,
+                task=self.task,
+                amount=self.appeal_deposit_amount,
+                transaction_type='appeal_refund',
+                description=desc
+            )
+            self.appeal_escrow_status = 'refunded'
+            self.save()
+
+    def forfeit_appeal_deposit(self, beneficiary=None, reason_description=None):
+        if self.appeal_escrow_status == 'held' and self.appeal_deposit_amount > 0 and self.appealed_by:
+            if beneficiary:
+                beneficiary_profile = beneficiary.userprofile
+                beneficiary_profile.rewards += self.appeal_deposit_amount
+                beneficiary_profile.save()
+                RewardLedger.objects.create(
+                    user=beneficiary,
+                    task=self.task,
+                    amount=self.appeal_deposit_amount,
+                    transaction_type='appeal_refund',
+                    description=f"Forfeited appeal deposit bond awarded from task: '{self.task.title}'"
+                )
+
+            desc = reason_description or f"Appeal deposit bond forfeited for task: '{self.task.title}'"
+            RewardLedger.objects.create(
+                user=self.appealed_by,
+                task=self.task,
+                amount=0,
+                transaction_type='appeal_forfeit',
+                description=desc
+            )
+            self.appeal_escrow_status = 'forfeited'
+            self.save()
+
+
+class JuryAssignment(models.Model):
+    STAGE_CHOICES = (
+        ('initial', 'Initial Panel'),
+        ('senior', 'Senior Panel'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='jury_assignments')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jury_assignments')
+    stage = models.CharField(max_length=20, choices=STAGE_CHOICES, default='initial')
+    staked_amount = models.PositiveIntegerField(default=50)
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Juror {self.juror.username} assigned to {self.dispute.task.title} ({self.stage})"
+
+
+class DisputeVote(models.Model):
+    STAGE_CHOICES = (
+        ('initial', 'Initial Panel'),
+        ('senior', 'Senior Panel'),
+    )
+    CHOICE_CHOICES = (
+        ('poster', 'Poster'),
+        ('taker', 'Taker'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    stage = models.CharField(max_length=20, choices=STAGE_CHOICES, default='initial')
+    choice = models.CharField(max_length=20, choices=CHOICE_CHOICES)
+    voted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'voter', 'stage')
+
+    def __str__(self):
+        return f"Vote by {self.voter.username} on {self.dispute.task.title}: {self.choice} ({self.stage})"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)

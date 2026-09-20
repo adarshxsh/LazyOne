@@ -12,16 +12,145 @@
         </div>
 
         <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
-            <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            <h3 class="text-xl font-semibold text-cyan-400">Dispute Governance & Status</h3>
+            <div class="mt-2 space-y-1">
+                <p>
+                    <strong>Status:</strong> 
+                    <span class="px-2 py-1 text-sm rounded-full 
+                        {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300
+                        {% elif dispute.status == 'pending_consensus' %}bg-blue-500/20 text-blue-300
+                        {% elif dispute.status == 'senior_review' or dispute.status == 'appealed' %}bg-purple-500/20 text-purple-300
+                        {% elif dispute.status == 'slashed' %}bg-red-500/20 text-red-300
+                        {% else %}bg-green-500/20 text-green-300{% endif %}">
+                        {{ dispute.get_status_display }}
+                    </span>
+                </p>
+                <p><strong>Stage:</strong> <span class="px-2 py-1 text-sm rounded-full bg-cyan-500/20 text-cyan-300">{{ dispute.get_stage_display }}</span></p>
+                <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
+                <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
+                <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y, g:i a" }}</p>
+            </div>
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
-            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 mt-2">{{ dispute.reason|linebreaksbr }}</p>
+        </div>
+
+        <!-- Consensus Quorum & Voting Status -->
+        <div class="bg-gray-800/60 p-6 rounded-xl border border-gray-700 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Consensus Quorum & Voting Progress</h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+                <div class="bg-gray-900/40 p-4 rounded-lg border border-gray-700">
+                    <p class="text-sm text-gray-400">Poster Votes</p>
+                    <p class="text-2xl font-bold text-white">{{ poster_votes }}</p>
+                </div>
+                <div class="bg-gray-900/40 p-4 rounded-lg border border-gray-700">
+                    <p class="text-sm text-gray-400">Taker Votes</p>
+                    <p class="text-2xl font-bold text-white">{{ taker_votes }}</p>
+                </div>
+                <div class="bg-gray-900/40 p-4 rounded-lg border border-gray-700">
+                    <p class="text-sm text-gray-400">Supermajority Quorum</p>
+                    <p class="text-2xl font-bold {% if dispute.consensus_percentage >= 66 %}text-green-400{% else %}text-yellow-400{% endif %}">
+                        {{ dispute.consensus_percentage }}% / 66% Min
+                    </p>
+                </div>
+            </div>
+
+            {% if dispute.consensus_reached %}
+                <p class="text-sm text-green-400 font-medium">
+                    ✓ Supermajority consensus (66%+) achieved in favor of: <span class="capitalize font-bold">{{ dispute.winning_choice }}</span>.
+                </p>
+            {% else %}
+                <p class="text-sm text-yellow-400 font-medium">
+                    ⏳ Voting in progress. At least 66% supermajority quorum required for resolution.
+                </p>
+            {% endif %}
+
+            <!-- Juror Voting Actions -->
+            {% if can_vote %}
+                <div class="mt-4 pt-4 border-t border-gray-700">
+                    <h4 class="text-lg font-semibold text-white mb-2">Cast Your Juror Vote ({{ dispute.get_stage_display }})</h4>
+                    <form action="{% url 'cast_dispute_vote' dispute.id %}" method="POST" class="flex items-center space-x-4">
+                        {% csrf_token %}
+                        <button type="submit" name="choice" value="poster" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg transition-colors">
+                            Vote for Poster ({{ dispute.task.posted_by.username }})
+                        </button>
+                        <button type="submit" name="choice" value="taker" class="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white font-medium rounded-lg transition-colors">
+                            Vote for Taker ({{ dispute.task.taken_by.username }})
+                        </button>
+                    </form>
+                </div>
+            {% elif user_vote %}
+                <div class="mt-2 text-sm text-gray-400">
+                    You cast your juror vote for: <strong class="text-cyan-300 capitalize">{{ user_vote.choice }}</strong> ({{ user_vote.get_stage_display }}).
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Appeal Section -->
+        {% if is_participant %}
+            <div class="bg-gray-800/60 p-6 rounded-xl border border-gray-700 space-y-4">
+                <h3 class="text-xl font-semibold text-cyan-400">Dispute Appeal Governance</h3>
+
+                {% if dispute.stage == 'senior' %}
+                    <p class="text-purple-300 font-medium">
+                        Senior review panel activated. Appealed by {{ dispute.appealed_by.username }} with {{ dispute.appeal_deposit_amount }} points bond.
+                    </p>
+                    {% if dispute.appeal_reason %}
+                        <p class="text-sm text-gray-300 bg-gray-900/50 p-3 rounded border border-gray-700">
+                            <strong>Appeal Reason:</strong> {{ dispute.appeal_reason }}
+                        </p>
+                    {% endif %}
+                {% elif is_appealable %}
+                    <div class="space-y-3">
+                        <p class="text-yellow-300">
+                            Initial ruling pending consensus. You may file a formal dispute appeal within the 48-hour window by posting a {{ appeal_bond_amount }} points appeal bond.
+                        </p>
+                        {% if time_remaining %}
+                            <p class="text-sm text-gray-400">
+                                Time remaining to appeal: <span class="font-bold text-white">{{ time_remaining }}</span>
+                            </p>
+                        {% endif %}
+
+                        <form action="{% url 'file_appeal' dispute.id %}" method="POST" class="space-y-3 mt-3">
+                            {% csrf_token %}
+                            <div>
+                                <label for="appeal_reason" class="block text-sm font-medium text-gray-300">Reason for Appeal</label>
+                                <textarea id="appeal_reason" name="appeal_reason" rows="3" required class="w-full mt-1 bg-gray-900 border border-gray-700 rounded-lg p-2 text-white focus:ring-cyan-500 focus:border-cyan-500" placeholder="State your rationale for contesting the initial ruling..."></textarea>
+                            </div>
+                            <button type="submit" class="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-medium rounded-lg transition-colors">
+                                File Appeal (Post {{ appeal_bond_amount }} Points Bond)
+                            </button>
+                        </form>
+                    </div>
+                {% else %}
+                    <p class="text-sm text-gray-400">
+                        Dispute is not currently in an appeal window or 48 hours have elapsed.
+                    </p>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        <!-- Withdrawal / Finalize Option -->
+        <div class="flex items-center space-x-4 pt-4">
+            {% if dispute.raised_by == request.user and dispute.status == 'open' %}
+                <form action="{% url 'withdraw_dispute' dispute.id %}" method="POST">
+                    {% csrf_token %}
+                    <button type="submit" onclick="return confirm('Are you sure you want to withdraw this dispute? Your deposit bond will be refunded.')" class="px-4 py-2 bg-red-600/80 hover:bg-red-600 text-white font-medium rounded-lg transition-colors">
+                        Withdraw Dispute
+                    </button>
+                </form>
+            {% endif %}
+
+            {% if dispute.status == 'pending_consensus' and time_remaining is None %}
+                <form action="{% url 'finalize_dispute' dispute.id %}" method="POST">
+                    {% csrf_token %}
+                    <button type="submit" class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white font-medium rounded-lg transition-colors">
+                        Finalize Resolution (Appeal Window Expired)
+                    </button>
+                </form>
+            {% endif %}
         </div>
     </div>
 
