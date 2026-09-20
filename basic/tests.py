@@ -3,7 +3,8 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from django.core.management import call_command
+from .models import UserProfile, Task, Dispute, DisputeJurorAssignment, RewardLedger, Conversation, Notification
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +182,229 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class DisputeDeadlineAndTimeoutTests(TestCase):
+    def setUp(self):
+        self.poster = User.objects.create_user(username='poster_dt', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker_dt', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        self.juror1 = User.objects.create_user(username='juror1', password='password123')
+        self.juror1_profile = UserProfile.objects.create(user=self.juror1, rewards=500)
+
+        self.juror2 = User.objects.create_user(username='juror2', password='password123')
+        self.juror2_profile = UserProfile.objects.create(user=self.juror2, rewards=500)
+
+        self.juror3 = User.objects.create_user(username='juror3', password='password123')
+        self.juror3_profile = UserProfile.objects.create(user=self.juror3, rewards=500)
+
+        self.replacement_user = User.objects.create_user(username='replacement_juror', password='password123')
+        self.replacement_profile = UserProfile.objects.create(user=self.replacement_user, rewards=500)
+
+        self.task = Task.objects.create(
+            title="Dispute Timeout Task",
+            description="Task for deadline testing",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed'
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_dispute_fields_defaults(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Deadline test reason",
+            deposit_amount=50,
+            escrow_status='held'
+        )
+        self.assertEqual(dispute.juror_response_window_hours, 24)
+        self.assertEqual(dispute.quorum_threshold, 3)
+        self.assertIsNotNone(dispute.voting_deadline)
+        self.assertGreater(dispute.voting_deadline, timezone.now())
+
+        assignment = DisputeJurorAssignment.objects.create(
+            dispute=dispute,
+            juror=self.juror1
+        )
+        self.assertIsNotNone(assignment.response_deadline)
+        self.assertEqual(assignment.status, 'assigned')
+
+    def test_juror_response_timeout_and_replacement(self):
+        now = timezone.now()
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Juror timeout test",
+            deposit_amount=50,
+            escrow_status='held',
+            voting_deadline=now + timedelta(hours=48),
+            juror_response_window_hours=24,
+            quorum_threshold=3
+        )
+
+        assignment = DisputeJurorAssignment.objects.create(
+            dispute=dispute,
+            juror=self.juror1,
+            assigned_at=now - timedelta(hours=30),
+            response_deadline=now - timedelta(hours=6),
+            status='assigned'
+        )
+
+        call_command('process_dispute_timeouts')
+
+        assignment.refresh_from_db()
+        self.assertEqual(assignment.status, 'timed_out')
+
+        # Check juror notification
+        juror_notif = Notification.objects.filter(recipient=self.juror1).first()
+        self.assertIsNotNone(juror_notif)
+        self.assertIn("expired", juror_notif.message)
+
+        # Check replacement assignment created
+        replacements = DisputeJurorAssignment.objects.filter(dispute=dispute, status='assigned')
+        self.assertEqual(replacements.count(), 1)
+        new_assignment = replacements.first()
+        self.assertNotEqual(new_assignment.juror, self.juror1)
+        self.assertNotIn(new_assignment.juror, [self.poster, self.taker])
+
+        # Check replacement notification
+        repl_notif = Notification.objects.filter(recipient=new_assignment.juror).first()
+        self.assertIsNotNone(repl_notif)
+        self.assertIn("replacement juror", repl_notif.message)
+
+    def test_voting_deadline_expiration_with_quorum_taker_wins(self):
+        now = timezone.now()
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Taker wins test",
+            deposit_amount=50,
+            escrow_status='held',
+            voting_deadline=now - timedelta(hours=1),
+            juror_response_window_hours=24,
+            quorum_threshold=3
+        )
+
+        DisputeJurorAssignment.objects.create(
+            dispute=dispute, juror=self.juror1, status='voted', vote_choice='taker'
+        )
+        DisputeJurorAssignment.objects.create(
+            dispute=dispute, juror=self.juror2, status='voted', vote_choice='taker'
+        )
+        DisputeJurorAssignment.objects.create(
+            dispute=dispute, juror=self.juror3, status='voted', vote_choice='poster'
+        )
+
+        self.taker_profile.rewards = 450
+        self.taker_profile.save()
+
+        call_command('process_dispute_timeouts')
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.escrow_status, 'refunded')
+
+        # Taker profile gets 450 + 200 (task reward) + 50 (deposit refund) = 700
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 700)
+
+        # Ledger check
+        reward_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='task_completion').first()
+        self.assertIsNotNone(reward_ledger)
+        self.assertEqual(reward_ledger.amount, 200)
+
+    def test_voting_deadline_expiration_with_quorum_poster_wins(self):
+        now = timezone.now()
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Poster wins test",
+            deposit_amount=50,
+            escrow_status='held',
+            voting_deadline=now - timedelta(hours=1),
+            juror_response_window_hours=24,
+            quorum_threshold=3
+        )
+
+        DisputeJurorAssignment.objects.create(
+            dispute=dispute, juror=self.juror1, status='voted', vote_choice='poster'
+        )
+        DisputeJurorAssignment.objects.create(
+            dispute=dispute, juror=self.juror2, status='voted', vote_choice='poster'
+        )
+        DisputeJurorAssignment.objects.create(
+            dispute=dispute, juror=self.juror3, status='voted', vote_choice='taker'
+        )
+
+        self.poster_profile.rewards = 1000
+        self.poster_profile.save()
+
+        call_command('process_dispute_timeouts')
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'cancelled')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.escrow_status, 'refunded')
+
+        # Poster profile gets 1000 + 200 (reward refund) = 1200
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1200)
+
+        # Taker gets deposit refund (50)
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 550)
+
+    def test_voting_deadline_expiration_without_quorum_fallback_resolution(self):
+        now = timezone.now()
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Fallback test",
+            deposit_amount=50,
+            escrow_status='held',
+            voting_deadline=now - timedelta(hours=1),
+            juror_response_window_hours=24,
+            quorum_threshold=3
+        )
+
+        # Only 1 vote cast (less than quorum threshold 3)
+        DisputeJurorAssignment.objects.create(
+            dispute=dispute, juror=self.juror1, status='voted', vote_choice='taker'
+        )
+
+        self.poster_profile.rewards = 1000
+        self.poster_profile.save()
+
+        call_command('process_dispute_timeouts')
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'cancelled')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.escrow_status, 'refunded')
+
+        # Poster gets 1000 + 200 = 1200
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1200)
+
+        # Taker gets 500 + 50 deposit refund = 550
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 550)
+
+        # Notifications sent to poster, taker, and juror1
+        poster_notif = Notification.objects.filter(recipient=self.poster).first()
+        self.assertIsNotNone(poster_notif)
+        self.assertIn("Fallback settlement", poster_notif.message)
+
 

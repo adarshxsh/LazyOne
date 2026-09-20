@@ -2,6 +2,7 @@ import math
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from datetime import timedelta
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -95,10 +96,20 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    voting_deadline = models.DateTimeField(null=True, blank=True)
+    juror_response_window_hours = models.PositiveIntegerField(default=24)
+    quorum_threshold = models.PositiveIntegerField(default=3)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def save(self, *args, **kwargs):
+        if not self.voting_deadline:
+            window_hours = self.juror_response_window_hours or 24
+            base_time = timezone.now()
+            self.voting_deadline = base_time + timedelta(hours=window_hours * 3)
+        super().save(*args, **kwargs)
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -141,6 +152,37 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class DisputeJurorAssignment(models.Model):
+    STATUS_CHOICES = (
+        ('assigned', 'Assigned'),
+        ('voted', 'Voted'),
+        ('timed_out', 'Timed Out'),
+    )
+    VOTE_CHOICES = (
+        ('poster', 'Poster'),
+        ('taker', 'Taker'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='juror_assignments')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_assignments')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    response_deadline = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='assigned')
+    vote_choice = models.CharField(max_length=20, choices=VOTE_CHOICES, null=True, blank=True)
+    voted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Juror {self.juror.username} assigned to dispute #{self.dispute.id} ({self.status})"
+
+    def save(self, *args, **kwargs):
+        if not self.response_deadline:
+            base_time = self.assigned_at or timezone.now()
+            window = self.dispute.juror_response_window_hours if self.dispute else 24
+            self.response_deadline = base_time + timedelta(hours=window)
+        super().save(*args, **kwargs)
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
