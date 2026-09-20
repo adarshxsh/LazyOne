@@ -3,26 +3,185 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
+    <h2 class="text-3xl font-bold text-white mb-4">Dispute Lifecycle Details</h2>
 
-    <div class="space-y-6 text-gray-300">
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+    <div class="space-y-8 text-gray-300">
+        <!-- Task Info -->
+        <div class="bg-gray-800/60 p-6 rounded-lg border border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Task in Question</h3>
+            <p class="text-lg font-medium text-white">{{ dispute.task.title }}</p>
+            <p class="text-sm text-gray-400 mt-1">Reward: <span class="text-yellow-400">{{ dispute.task.reward }} points</span> | Posted by: {{ dispute.task.posted_by.username }} | Assigned to: {{ dispute.task.taken_by.username|default:"Unassigned" }}</p>
         </div>
 
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
-            <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+        <!-- Dispute Status & Lifecycle Phase -->
+        <div class="bg-gray-800/60 p-6 rounded-lg border border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-3">Lifecycle Phase Status</h3>
+            <div class="flex flex-wrap items-center gap-4 text-sm">
+                <span class="px-3 py-1.5 rounded-full font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                    Current Phase: {{ dispute.get_status_display }}
+                </span>
+                <span class="px-3 py-1 rounded-full bg-yellow-500/20 text-yellow-300 border border-yellow-500/40">
+                    Escrow: {{ dispute.get_escrow_status_display }} ({{ dispute.deposit_amount }} pts)
+                </span>
+                <span class="text-gray-400">
+                    Raised by: <strong class="text-white">{{ dispute.raised_by.username }}</strong> on {{ dispute.created_at|date:"F d, Y" }}
+                </span>
+            </div>
+
+            <!-- Reason -->
+            <div class="mt-4">
+                <h4 class="text-md font-semibold text-gray-300 mb-1">Reason for Dispute</h4>
+                <p class="bg-gray-900/60 p-4 rounded-lg border border-gray-700 text-gray-200">{{ dispute.reason|linebreaksbr }}</p>
+            </div>
+
+            {% if dispute.status in 'open,evidence_phase,voting_phase,appeal_phase' %}
+            <div class="mt-4">
+                <form action="{% url 'advance_dispute_phase' dispute.id %}" method="post" class="inline">
+                    {% csrf_token %}
+                    <button type="submit" class="bg-cyan-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-cyan-700 transition-colors text-sm">
+                        Advance to Next Phase &rarr;
+                    </button>
+                </form>
+            </div>
+            {% endif %}
         </div>
 
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
-            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+        <!-- Section 1: Evidence Submissions -->
+        <div class="bg-gray-800/60 p-6 rounded-lg border border-gray-700 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">1. Evidence Submissions</h3>
+            {% if evidence_entries %}
+                <div class="space-y-3">
+                    {% for entry in evidence_entries %}
+                        <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700 space-y-1">
+                            <div class="flex justify-between text-xs text-gray-400">
+                                <span>Submitted by: <strong class="text-cyan-300">{{ entry.submitted_by.username }}</strong></span>
+                                <span>{{ entry.created_at|date:"M d, Y H:i" }}</span>
+                            </div>
+                            <p class="text-sm text-gray-200 mt-1">{{ entry.description }}</p>
+                            {% if entry.evidence_url %}
+                                <p class="text-xs text-cyan-400"><a href="{{ entry.evidence_url }}" target="_blank" class="hover:underline">Evidence Link: {{ entry.evidence_url }}</a></p>
+                            {% endif %}
+                            {% if entry.file %}
+                                <p class="text-xs text-cyan-400"><a href="{{ entry.file.url }}" target="_blank" class="hover:underline">Attached File: {{ entry.file.name }}</a></p>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-sm text-gray-400">No evidence submitted yet.</p>
+            {% endif %}
+
+            {% if can_submit_evidence %}
+                <div class="mt-4 pt-4 border-t border-gray-700">
+                    <h4 class="text-md font-semibold text-cyan-300 mb-2">Submit Evidence</h4>
+                    <form action="{% url 'submit_evidence' dispute.id %}" method="post" enctype="multipart/form-data" class="space-y-3">
+                        {% csrf_token %}
+                        <div>
+                            <textarea name="description" rows="3" required placeholder="Describe your evidence details..." class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 text-sm"></textarea>
+                        </div>
+                        <div>
+                            <input type="url" name="evidence_url" placeholder="Screenshot or Document URL (optional)" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 text-sm">
+                        </div>
+                        <div>
+                            <input type="file" name="file" class="text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-cyan-600 file:text-white hover:file:bg-cyan-700">
+                        </div>
+                        <button type="submit" class="bg-cyan-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-cyan-700 transition-colors text-sm">
+                            Submit Evidence
+                        </button>
+                    </form>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Section 2: Peer Review & Voting -->
+        <div class="bg-gray-800/60 p-6 rounded-lg border border-gray-700 space-y-4">
+            <div class="flex justify-between items-center">
+                <h3 class="text-xl font-semibold text-cyan-400">2. Community Peer Review & Voting</h3>
+                <div class="text-sm text-gray-300 space-x-4">
+                    <span>Poster Votes: <strong class="text-green-400">{{ poster_votes }}</strong></span>
+                    <span>Taker Votes: <strong class="text-cyan-400">{{ taker_votes }}</strong></span>
+                </div>
+            </div>
+
+            {% if votes %}
+                <div class="space-y-3">
+                    {% for vote in votes %}
+                        <div class="bg-gray-900/60 p-3 rounded-lg border border-gray-700 flex justify-between items-center">
+                            <div>
+                                <span class="text-sm font-semibold text-white">{{ vote.voter.username }}</span>
+                                <span class="text-xs text-gray-400 ml-2">Voted for: <strong class="text-cyan-300 uppercase">{{ vote.choice }}</strong></span>
+                                {% if vote.justification %}
+                                    <p class="text-xs text-gray-300 mt-1">"{{ vote.justification }}"</p>
+                                {% endif %}
+                            </div>
+                            <span class="text-xs text-gray-500">{{ vote.created_at|date:"M d, H:i" }}</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-sm text-gray-400">No peer votes cast yet.</p>
+            {% endif %}
+
+            {% if can_vote %}
+                <div class="mt-4 pt-4 border-t border-gray-700">
+                    <h4 class="text-md font-semibold text-cyan-300 mb-2">Cast Peer Vote</h4>
+                    <form action="{% url 'submit_vote' dispute.id %}" method="post" class="space-y-3">
+                        {% csrf_token %}
+                        <div class="flex items-center space-x-6 text-sm">
+                            <label class="flex items-center space-x-2 cursor-pointer">
+                                <input type="radio" name="choice" value="poster" required class="text-cyan-500 focus:ring-cyan-500">
+                                <span>Vote in favor of Task Poster ({{ task.posted_by.username }})</span>
+                            </label>
+                            <label class="flex items-center space-x-2 cursor-pointer">
+                                <input type="radio" name="choice" value="taker" required class="text-cyan-500 focus:ring-cyan-500">
+                                <span>Vote in favor of Task Taker ({{ task.taken_by.username }})</span>
+                            </label>
+                        </div>
+                        <div>
+                            <input type="text" name="justification" placeholder="Brief justification for your vote (optional)" class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 text-sm">
+                        </div>
+                        <button type="submit" class="bg-green-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm">
+                            Cast Vote
+                        </button>
+                    </form>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Section 3: Appeals & Final Settlement -->
+        <div class="bg-gray-800/60 p-6 rounded-lg border border-gray-700 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">3. Appeals & Final Settlement</h3>
+
+            {% if appeals %}
+                <div class="space-y-3">
+                    {% for appeal in appeals %}
+                        <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700 space-y-1">
+                            <div class="flex justify-between text-xs text-gray-400">
+                                <span>Appellant: <strong class="text-yellow-300">{{ appeal.appellant.username }}</strong></span>
+                                <span>Status: <strong class="text-cyan-300 uppercase">{{ appeal.get_status_display }}</strong></span>
+                            </div>
+                            <p class="text-sm text-gray-200 mt-1">{{ appeal.reason }}</p>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-sm text-gray-400">No appeals filed.</p>
+            {% endif %}
+
+            {% if can_appeal %}
+                <div class="mt-4 pt-4 border-t border-gray-700">
+                    <h4 class="text-md font-semibold text-cyan-300 mb-2">File Formal Appeal</h4>
+                    <form action="{% url 'submit_appeal' dispute.id %}" method="post" class="space-y-3">
+                        {% csrf_token %}
+                        <div>
+                            <textarea name="reason" rows="3" required placeholder="Provide justification for appealing the voting outcome..." class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 text-sm"></textarea>
+                        </div>
+                        <button type="submit" class="bg-yellow-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors text-sm">
+                            Submit Appeal
+                        </button>
+                    </form>
+                </div>
+            {% endif %}
         </div>
     </div>
-
 {% endblock %}

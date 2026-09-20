@@ -1,7 +1,8 @@
-import math
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.core.exceptions import ValidationError
+import math
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -82,13 +83,30 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('evidence_phase', 'Evidence Phase'),
+        ('voting_phase', 'Voting Phase'),
+        ('appeal_phase', 'Appeal Phase'),
+        ('settled', 'Settled'),
+        ('withdrawn', 'Withdrawn'),
         ('resolved', 'Resolved'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
         ('refunded', 'Refunded'),
         ('forfeited', 'Forfeited'),
+        ('disbursed', 'Disbursed'),
     )
+
+    ALLOWED_TRANSITIONS = {
+        'open': ['evidence_phase', 'withdrawn', 'resolved'],
+        'evidence_phase': ['voting_phase', 'withdrawn', 'resolved'],
+        'voting_phase': ['appeal_phase', 'withdrawn', 'resolved'],
+        'appeal_phase': ['settled', 'withdrawn', 'resolved'],
+        'settled': [],
+        'withdrawn': [],
+        'resolved': [],
+    }
+
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
@@ -99,6 +117,15 @@ class Dispute(models.Model):
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def transition_to(self, target_status):
+        allowed = self.ALLOWED_TRANSITIONS.get(self.status, [])
+        if target_status not in allowed:
+            raise ValidationError(
+                f"Invalid state transition from '{self.status}' to '{target_status}'."
+            )
+        self.status = target_status
+        self.save()
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -141,6 +168,52 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidence_entries')
+    submitted_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_evidence_submissions')
+    description = models.TextField()
+    evidence_url = models.CharField(max_length=500, blank=True, default='')
+    file = models.FileField(upload_to='dispute_evidence/', blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Evidence by {self.submitted_by.username} on Dispute {self.dispute.id}"
+
+
+class DisputeVote(models.Model):
+    CHOICES = (
+        ('poster', 'Poster'),
+        ('taker', 'Taker'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    choice = models.CharField(max_length=10, choices=CHOICES)
+    justification = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'voter')
+
+    def __str__(self):
+        return f"Vote by {self.voter.username} for {self.choice} on Dispute {self.dispute.id}"
+
+
+class DisputeAppeal(models.Model):
+    STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('upheld', 'Upheld'),
+        ('rejected', 'Rejected'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='appeals')
+    appellant = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_appeals')
+    reason = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Appeal by {self.appellant.username} on Dispute {self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
