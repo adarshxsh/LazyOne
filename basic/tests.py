@@ -182,3 +182,177 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class OpenCommunityJuryVotingTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Users
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=200)
+
+        self.juror1 = User.objects.create_user(username='juror1', password='password123')
+        UserProfile.objects.create(user=self.juror1, rewards=500)
+
+        self.juror2 = User.objects.create_user(username='juror2', password='password123')
+        UserProfile.objects.create(user=self.juror2, rewards=500)
+
+        self.juror3 = User.objects.create_user(username='juror3', password='password123')
+        UserProfile.objects.create(user=self.juror3, rewards=500)
+
+        # Task & Conversation
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="Community Dispute Task",
+            description="Task Description",
+            reward=300,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed',
+            deadline=self.deadline
+        )
+        self.conversation = Conversation.objects.create(task=self.task)
+        self.conversation.participants.add(self.poster, self.taker)
+
+        # Dispute (raised by taker, deposit bond 60)
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Work completed but not acknowledged",
+            deposit_amount=60,
+            escrow_status='held',
+            status='open'
+        )
+
+    def test_view_authorization_authenticated_non_participant(self):
+        # Authenticated non-participant can view dispute detail page
+        self.client.login(username='juror1', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Community Dispute Task")
+        self.assertContains(response, "Community Jury Voting Progress")
+
+    def test_participant_voting_blocked(self):
+        # Task poster cannot vote
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('submit_dispute_vote', args=[self.dispute.id]),
+            {'voted_for': self.poster.id}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(self.dispute.votes.count(), 0)
+
+        # Task taker cannot vote
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(
+            reverse('submit_dispute_vote', args=[self.dispute.id]),
+            {'voted_for': self.taker.id}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(self.dispute.votes.count(), 0)
+
+    def test_non_participant_voting_and_uniqueness(self):
+        # Juror1 votes for taker
+        self.client.login(username='juror1', password='password123')
+        response = self.client.post(
+            reverse('submit_dispute_vote', args=[self.dispute.id]),
+            {'voted_for': self.taker.id, 'feedback': 'Work looks done'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(self.dispute.votes.count(), 1)
+        vote = self.dispute.votes.first()
+        self.assertEqual(vote.voter, self.juror1)
+        self.assertEqual(vote.voted_for, self.taker)
+
+        # Juror1 tries to vote again -> blocked by unique constraint
+        response = self.client.post(
+            reverse('submit_dispute_vote', args=[self.dispute.id]),
+            {'voted_for': self.poster.id}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(self.dispute.votes.count(), 1)
+
+    def test_consensus_resolution_favor_poster(self):
+        # Juror1 votes for poster
+        self.client.login(username='juror1', password='password123')
+        self.client.post(reverse('submit_dispute_vote', args=[self.dispute.id]), {'voted_for': self.poster.id})
+
+        # Juror2 votes for taker
+        self.client.login(username='juror2', password='password123')
+        self.client.post(reverse('submit_dispute_vote', args=[self.dispute.id]), {'voted_for': self.taker.id})
+
+        # Dispute remains open at 2 votes
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'open')
+
+        # Juror3 votes for poster (3rd vote -> 2/3 for poster > 50%)
+        self.client.login(username='juror3', password='password123')
+        self.client.post(reverse('submit_dispute_vote', args=[self.dispute.id]), {'voted_for': self.poster.id})
+
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+        self.poster_profile.refresh_from_db()
+        self.taker_profile.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.task.status, 'cancelled')
+        # Poster refunded reward 300: 1000 + 300 = 1300
+        self.assertEqual(self.poster_profile.rewards, 1300)
+        # Taker deposit bond forfeited
+        self.assertEqual(self.dispute.escrow_status, 'forfeited')
+
+        # Check ledger
+        poster_ledger = RewardLedger.objects.filter(user=self.poster, transaction_type='task_cancellation').first()
+        self.assertIsNotNone(poster_ledger)
+        self.assertEqual(poster_ledger.amount, 300)
+
+    def test_consensus_resolution_favor_taker(self):
+        # 3 jurors vote for taker
+        self.client.login(username='juror1', password='password123')
+        self.client.post(reverse('submit_dispute_vote', args=[self.dispute.id]), {'voted_for': self.taker.id})
+
+        self.client.login(username='juror2', password='password123')
+        self.client.post(reverse('submit_dispute_vote', args=[self.dispute.id]), {'voted_for': self.taker.id})
+
+        self.client.login(username='juror3', password='password123')
+        self.client.post(reverse('submit_dispute_vote', args=[self.dispute.id]), {'voted_for': self.taker.id})
+
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+        self.taker_profile.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.task.status, 'completed')
+        # Taker awarded task reward (300) + deposit bond refund (60): 200 + 300 + 60 = 560
+        self.assertEqual(self.taker_profile.rewards, 560)
+        self.assertEqual(self.dispute.escrow_status, 'refunded')
+
+        # Check ledger
+        completion_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='task_completion').first()
+        self.assertIsNotNone(completion_ledger)
+        self.assertEqual(completion_ledger.amount, 300)
+
+    def test_closed_dispute_voting_blocked(self):
+        self.dispute.status = 'resolved'
+        self.dispute.save()
+
+        self.client.login(username='juror1', password='password123')
+        response = self.client.post(
+            reverse('submit_dispute_vote', args=[self.dispute.id]),
+            {'voted_for': self.taker.id}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(self.dispute.votes.count(), 0)
+
+    def test_chat_view_read_only_access(self):
+        # Non-participant juror can view disputed chat in read-only mode
+        self.client.login(username='juror1', password='password123')
+        response = self.client.get(reverse('chat_view', args=[self.conversation.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['is_read_only'])
+        self.assertContains(response, "read-only mode")
+
+

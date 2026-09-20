@@ -2,7 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, DisputeVote, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,14 +10,204 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
-        messages.error(request, "You are not authorized to view this dispute.")
-        return redirect('home')
+
+    votes = dispute.votes.all()
+    total_votes_count = votes.count()
+    poster_votes_count = votes.filter(voted_for=task.posted_by).count()
+    taker_votes_count = votes.filter(voted_for=task.taken_by).count() if task.taken_by else 0
+
+    quorum_target = 3
+    quorum_percentage = min(100, int((total_votes_count / quorum_target) * 100))
+
+    poster_percentage = int((poster_votes_count / total_votes_count) * 100) if total_votes_count > 0 else 0
+    taker_percentage = int((taker_votes_count / total_votes_count) * 100) if total_votes_count > 0 else 0
+
+    user_vote = None
+    if request.user.is_authenticated:
+        user_vote = votes.filter(voter=request.user).first()
+
+    is_participant = (request.user == task.posted_by) or (task.taken_by and request.user == task.taken_by)
+    can_vote = request.user.is_authenticated and (not is_participant) and (dispute.status == 'open') and (user_vote is None)
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'total_votes_count': total_votes_count,
+        'poster_votes_count': poster_votes_count,
+        'taker_votes_count': taker_votes_count,
+        'quorum_target': quorum_target,
+        'quorum_percentage': quorum_percentage,
+        'poster_percentage': poster_percentage,
+        'taker_percentage': taker_percentage,
+        'user_vote': user_vote,
+        'is_participant': is_participant,
+        'can_vote': can_vote,
     }
     return render(request, 'dispute_detail.html', context)
+
+def evaluate_consensus(dispute):
+    """
+    Evaluates current jury votes for a dispute.
+    If total votes >= 3 and a clear majority (>50%) is reached, resolves the dispute.
+    Must be called within an atomic transaction.
+    """
+    if dispute.status != 'open':
+        return False
+
+    task = dispute.task
+    votes = dispute.votes.all()
+    total_votes = votes.count()
+    if total_votes < 3:
+        return False
+
+    poster_votes = votes.filter(voted_for=task.posted_by).count()
+    taker_votes = votes.filter(voted_for=task.taken_by).count() if task.taken_by else 0
+
+    threshold = total_votes / 2.0
+
+    if poster_votes > threshold:
+        # Poster wins!
+        dispute.status = 'resolved'
+        dispute.save()
+
+        task.status = 'cancelled'
+        task.save()
+
+        # Refund task reward to poster
+        poster_profile = task.posted_by.userprofile
+        poster_profile.rewards += task.reward
+        poster_profile.save()
+
+        RewardLedger.objects.create(
+            user=task.posted_by,
+            task=task,
+            amount=task.reward,
+            transaction_type='task_cancellation',
+            description=f"Refund for cancelled task via dispute consensus: '{task.title}'"
+        )
+
+        # Deposit bond handling
+        if dispute.raised_by == task.taken_by:
+            dispute.forfeit_deposit(
+                reason_description=f"Security deposit bond forfeited for dispute on task: '{task.title}'"
+            )
+        elif dispute.raised_by == task.posted_by:
+            dispute.refund_deposit(
+                reason_description=f"Security deposit bond refunded for dispute on task: '{task.title}'"
+            )
+
+        # Notifications
+        Notification.objects.create(
+            recipient=task.posted_by,
+            message=f"Community jury resolved dispute for task '{task.title}' in your favor.",
+            link=reverse('dispute_detail', args=[dispute.id])
+        )
+        if task.taken_by:
+            Notification.objects.create(
+                recipient=task.taken_by,
+                message=f"Community jury resolved dispute for task '{task.title}' in favor of {task.posted_by.username}.",
+                link=reverse('dispute_detail', args=[dispute.id])
+            )
+        return True
+
+    elif taker_votes > threshold and task.taken_by:
+        # Taker wins!
+        dispute.status = 'resolved'
+        dispute.save()
+
+        task.status = 'completed'
+        task.save()
+
+        # Transfer task reward to taker
+        taker_profile = task.taken_by.userprofile
+        taker_profile.rewards += task.reward
+        taker_profile.save()
+
+        RewardLedger.objects.create(
+            user=task.taken_by,
+            task=task,
+            amount=task.reward,
+            transaction_type='task_completion',
+            description=f"Reward awarded for completed task via dispute consensus: '{task.title}'"
+        )
+
+        # Deposit bond handling
+        if dispute.raised_by == task.taken_by:
+            dispute.refund_deposit(
+                reason_description=f"Security deposit bond refunded for resolved dispute on task: '{task.title}'"
+            )
+        elif dispute.raised_by == task.posted_by:
+            dispute.forfeit_deposit(
+                beneficiary=task.taken_by,
+                reason_description=f"Security deposit bond forfeited for dispute on task: '{task.title}'"
+            )
+
+        # Notifications
+        Notification.objects.create(
+            recipient=task.posted_by,
+            message=f"Community jury resolved dispute for task '{task.title}' in favor of {task.taken_by.username}.",
+            link=reverse('dispute_detail', args=[dispute.id])
+        )
+        Notification.objects.create(
+            recipient=task.taken_by,
+            message=f"Community jury resolved dispute for task '{task.title}' in your favor.",
+            link=reverse('dispute_detail', args=[dispute.id])
+        )
+        return True
+
+    return False
+
+@login_required(login_url='/login/')
+@require_POST
+def submit_dispute_vote(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+
+    if dispute.status != 'open':
+        messages.error(request, "This dispute is no longer open for voting.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if request.user == task.posted_by or (task.taken_by and request.user == task.taken_by):
+        messages.error(request, "Task participants are not allowed to vote on their own dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    voted_for_id = request.POST.get('voted_for')
+    feedback = request.POST.get('feedback', '').strip()
+
+    if not voted_for_id:
+        messages.error(request, "Please select a participant to vote for.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    target_user = None
+    if str(voted_for_id) == str(task.posted_by.id) or voted_for_id == 'posted_by':
+        target_user = task.posted_by
+    elif task.taken_by and (str(voted_for_id) == str(task.taken_by.id) or voted_for_id == 'taken_by'):
+        target_user = task.taken_by
+
+    if not target_user:
+        messages.error(request, "Invalid vote target.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    with transaction.atomic():
+        if DisputeVote.objects.filter(dispute=dispute, voter=request.user).exists():
+            messages.error(request, "You have already cast your vote on this dispute.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+        DisputeVote.objects.create(
+            dispute=dispute,
+            voter=request.user,
+            voted_for=target_user,
+            feedback=feedback
+        )
+
+        resolved = evaluate_consensus(dispute)
+        if resolved:
+            messages.success(request, f"Your vote has been submitted! Consensus was reached and dispute for '{task.title}' has been resolved.")
+        else:
+            messages.success(request, "Your vote has been recorded successfully.")
+
+    return redirect('dispute_detail', dispute_id=dispute.id)
+
 
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
