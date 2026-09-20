@@ -13,15 +13,84 @@
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' or dispute.status == 'voting' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Voting Phase:</strong> <span class="px-2 py-1 text-sm rounded-full bg-cyan-500/20 text-cyan-300">{{ dispute.get_voting_phase_display }}</span></p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            {% if dispute.commit_deadline %}
+                <p><strong>Commit Window Closes:</strong> {{ dispute.commit_deadline|date:"F d, Y H:i" }}</p>
+            {% endif %}
+            {% if dispute.reveal_deadline %}
+                <p><strong>Reveal Window Closes:</strong> {{ dispute.reveal_deadline|date:"F d, Y H:i" }}</p>
+            {% endif %}
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+        </div>
+
+        <!-- Commit-Reveal Voting Section -->
+        <div class="bg-gray-900/60 p-6 rounded-lg border border-gray-700 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Peer Jury Adjudication</h3>
+
+            {% if is_commit_phase %}
+                <p class="text-yellow-400 text-sm">🔒 Secret Ballot Active: Commit Phase is open. Intermediate tallies and vote choices are hidden.</p>
+                {% if can_commit %}
+                    <form action="{% url 'submit_vote_commitment' dispute.id %}" method="POST" class="space-y-4 max-w-md">
+                        {% csrf_token %}
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-1">Your Vote Choice:</label>
+                            <select name="vote" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white" required>
+                                <option value="poster">Poster ({{ dispute.task.posted_by.username }})</option>
+                                <option value="taker">Taker ({{ dispute.task.taken_by.username }})</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-1">Secret Salt Phrase (min 8 chars):</label>
+                            <input type="password" name="salt" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white" placeholder="Enter salt (min 8 chars)" minlength="8" required>
+                        </div>
+                        <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white font-medium px-4 py-2 rounded">
+                            Submit Secret Vote Commitment
+                        </button>
+                    </form>
+                {% elif user_vote and user_vote.status == 'committed' %}
+                    <p class="text-green-400">✓ Your secret vote commitment has been submitted. Please return during the Reveal Phase to verify and reveal your vote choice.</p>
+                {% endif %}
+            {% elif is_reveal_phase %}
+                <p class="text-cyan-300 text-sm">🔓 Reveal Phase Active: Submit your vote choice and salt phrase to verify your commitment.</p>
+                {% if can_reveal %}
+                    <form action="{% url 'submit_vote_reveal' dispute.id %}" method="POST" class="space-y-4 max-w-md">
+                        {% csrf_token %}
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-1">Your Vote Choice:</label>
+                            <select name="choice" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white" required>
+                                <option value="poster">Poster ({{ dispute.task.posted_by.username }})</option>
+                                <option value="taker">Taker ({{ dispute.task.taken_by.username }})</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-1">Secret Salt Phrase:</label>
+                            <input type="password" name="salt" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white" placeholder="Enter salt phrase" minlength="8" required>
+                        </div>
+                        <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-4 py-2 rounded">
+                            Verify & Reveal Vote
+                        </button>
+                    </form>
+                {% elif user_vote and user_vote.status == 'revealed' %}
+                    <p class="text-green-400">✓ Your vote has been verified and revealed successfully!</p>
+                {% endif %}
+            {% endif %}
+
+            {% if not is_commit_phase and poster_votes is not None %}
+                <div class="mt-4 pt-4 border-t border-gray-700">
+                    <h4 class="text-lg font-medium text-gray-200 mb-2">Verified Vote Tallies</h4>
+                    <p>Poster Votes: <span class="text-emerald-400 font-bold">{{ poster_votes }}</span></p>
+                    <p>Taker Votes: <span class="text-emerald-400 font-bold">{{ taker_votes }}</span></p>
+                    <p>Total Revealed Votes: <span class="text-cyan-400 font-bold">{{ total_votes }}</span></p>
+                </div>
+            {% endif %}
         </div>
     </div>
 

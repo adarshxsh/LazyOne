@@ -68,11 +68,14 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('juror_reward', 'Juror Reward Allocation'),
+        ('juror_stake', 'Juror Stake Lock'),
+        ('juror_slash', 'Juror Stake Slash'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -82,23 +85,88 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('voting', 'Voting'),
         ('resolved', 'Resolved'),
+        ('expired', 'Expired'),
+        ('withdrawn', 'Withdrawn'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
         ('refunded', 'Refunded'),
         ('forfeited', 'Forfeited'),
     )
+    VOTING_PHASE_CHOICES = (
+        ('commit', 'Commit Phase'),
+        ('reveal', 'Reveal Phase'),
+        ('closed', 'Closed Phase'),
+    )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    voting_phase = models.CharField(max_length=20, choices=VOTING_PHASE_CHOICES, default='commit')
+    commit_deadline = models.DateTimeField(null=True, blank=True)
+    reveal_deadline = models.DateTimeField(null=True, blank=True)
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def check_and_update_phase(self):
+        now = timezone.now()
+        updated = False
+        if self.status != 'resolved' and self.voting_phase == 'commit' and self.commit_deadline and now > self.commit_deadline:
+            self.voting_phase = 'reveal'
+            updated = True
+            self.save()
+        if self.status != 'resolved' and self.voting_phase == 'reveal' and self.reveal_deadline and now > self.reveal_deadline:
+            self.voting_phase = 'closed'
+            updated = True
+            self.save()
+            self.expire_unrevealed_votes_and_settle()
+        return updated
+
+    def is_commit_phase(self):
+        self.check_and_update_phase()
+        if self.status == 'resolved' or self.voting_phase != 'commit':
+            return False
+        if self.commit_deadline and timezone.now() > self.commit_deadline:
+            return False
+        return True
+
+    def is_reveal_phase(self):
+        self.check_and_update_phase()
+        if self.status == 'resolved' or self.voting_phase != 'reveal':
+            return False
+        if self.reveal_deadline and timezone.now() > self.reveal_deadline:
+            return False
+        return True
+
+    def start_voting_phase(self, commit_minutes=30, reveal_minutes=30):
+        now = timezone.now()
+        self.status = 'voting'
+        self.voting_phase = 'commit'
+        self.commit_deadline = now + timezone.timedelta(minutes=commit_minutes)
+        self.reveal_deadline = self.commit_deadline + timezone.timedelta(minutes=reveal_minutes)
+        self.save()
+
+    def expire_unrevealed_votes_and_settle(self):
+        # Exclude unrevealed commitments and mark them as expired
+        unrevealed_votes = self.votes.filter(status='committed')
+        for vote in unrevealed_votes:
+            vote.status = 'expired'
+            vote.save()
+
+        unrevealed_assignments = self.jury_assignments.filter(status__in=['assigned', 'committed'])
+        for assignment in unrevealed_assignments:
+            assignment.status = 'expired'
+            assignment.save()
+
+        # Finalize settlement using valid revealed votes
+        from basic.views.dispute import finalize_dispute_settlement
+        finalize_dispute_settlement(self)
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -141,6 +209,52 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class JuryAssignment(models.Model):
+    STATUS_CHOICES = (
+        ('assigned', 'Assigned'),
+        ('committed', 'Committed'),
+        ('revealed', 'Revealed'),
+        ('expired', 'Expired'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='jury_assignments')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jury_assignments')
+    staked_amount = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='assigned')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Juror {self.juror.username} for Dispute {self.dispute.id}"
+
+class DisputeVote(models.Model):
+    STATUS_CHOICES = (
+        ('committed', 'Committed'),
+        ('revealed', 'Revealed'),
+        ('expired', 'Expired'),
+    )
+    CHOICE_CHOICES = (
+        ('poster', 'Poster'),
+        ('taker', 'Taker'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    commitment_hash = models.CharField(max_length=64)
+    choice = models.CharField(max_length=20, choices=CHOICE_CHOICES, null=True, blank=True)
+    salt = models.CharField(max_length=255, null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='committed')
+    committed_at = models.DateTimeField(auto_now_add=True)
+    revealed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Vote by {self.juror.username} on Dispute {self.dispute.id} ({self.status})"
+
+JurorVote = DisputeVote
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
