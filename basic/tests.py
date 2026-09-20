@@ -182,3 +182,136 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class DisputeVotingDeadlineCronTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.poster = User.objects.create_user(username='poster_cron', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker_cron', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        self.task = Task.objects.create(
+            title="Cron Task",
+            description="Cron Description",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=timezone.now() + timedelta(days=1)
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_raise_dispute_populates_voting_and_evidence_deadlines(self):
+        self.client.login(username='taker_cron', password='password123')
+        start_time = timezone.now()
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work disagreement'}
+        )
+        self.assertEqual(response.status_code, 302)
+
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertIsNotNone(dispute.voting_deadline)
+        self.assertIsNotNone(dispute.evidence_deadline)
+        self.assertGreaterEqual(dispute.voting_deadline, start_time + timedelta(hours=71))
+        self.assertGreaterEqual(dispute.evidence_deadline, start_time + timedelta(hours=23))
+        self.assertFalse(dispute.is_voting_expired)
+        self.assertFalse(dispute.is_evidence_expired)
+
+    def test_dispute_detail_view_renders_deadlines(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Need review',
+            deposit_amount=50,
+            escrow_status='held',
+            voting_deadline=timezone.now() + timedelta(hours=5)
+        )
+        self.client.login(username='taker_cron', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Voting Deadline:")
+        self.assertContains(response, "remaining")
+
+    def test_resolve_expired_disputes_command_poster_raised(self):
+        # Create a dispute raised by poster expired 1 hour ago
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.poster,
+            reason='Unresponsive taker',
+            deposit_amount=50,
+            escrow_status='held',
+            voting_deadline=timezone.now() - timedelta(hours=1)
+        )
+        self.task.status = 'disputed'
+        self.task.save()
+
+        from django.core.management import call_command
+        call_command('resolve_expired_disputes')
+
+        dispute.refresh_from_db()
+        self.task.refresh_from_db()
+        self.poster_profile.refresh_from_db()
+
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(self.task.status, 'cancelled')
+        # Poster gets task reward (200) + deposit refund (50) -> 1000 + 200 + 50 = 1250
+        self.assertEqual(self.poster_profile.rewards, 1250)
+        self.assertEqual(dispute.escrow_status, 'refunded')
+
+        ledger = RewardLedger.objects.filter(user=self.poster, transaction_type='task_cancellation').first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, 200)
+
+    def test_resolve_expired_disputes_command_taker_raised(self):
+        # Create a dispute raised by taker expired 1 hour ago
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Unresponsive poster',
+            deposit_amount=50,
+            escrow_status='held',
+            voting_deadline=timezone.now() - timedelta(hours=1)
+        )
+        self.task.status = 'disputed'
+        self.task.save()
+
+        from django.core.management import call_command
+        call_command('resolve_expired_disputes')
+
+        dispute.refresh_from_db()
+        self.task.refresh_from_db()
+        self.taker_profile.refresh_from_db()
+
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(self.task.status, 'completed')
+        # Taker gets task reward (200) + deposit refund (50) -> 500 + 200 + 50 = 750
+        self.assertEqual(self.taker_profile.rewards, 750)
+        self.assertEqual(dispute.escrow_status, 'refunded')
+
+        ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='task_completion').first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, 200)
+
+    def test_cron_resolve_expired_disputes_endpoint(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Expired endpoint test',
+            deposit_amount=50,
+            escrow_status='held',
+            voting_deadline=timezone.now() - timedelta(hours=2)
+        )
+        self.task.status = 'disputed'
+        self.task.save()
+
+        response = self.client.get(reverse('cron_resolve_expired_disputes'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['status'], 'ok')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+
+

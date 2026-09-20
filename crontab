@@ -1,0 +1,3 @@
+# Cron job configuration for LazyOne dispute voting deadline resolver worker
+# Runs hourly at minute 0
+0 * * * * cd /app/LazyOne && PYTHONPATH=/app/LazyOne python manage.py resolve_expired_disputes >> /var/log/lazyone_cron.log 2>&1
