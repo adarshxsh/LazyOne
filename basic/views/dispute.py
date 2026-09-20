@@ -71,6 +71,14 @@ def raise_dispute(request, task_id):
                 description=f"Security deposit bond held for dispute on task: '{task.title}'"
             )
 
+            RewardLedger.objects.create(
+                user=task.posted_by,
+                task=task,
+                amount=task.reward,
+                transaction_type='dispute_escrow_lock',
+                description=f"Task reward points locked in dispute escrow for task: '{task.title}'"
+            )
+
             task.status = 'disputed'
             task.save()
 
@@ -91,6 +99,13 @@ def withdraw_dispute(request, dispute_id):
     with transaction.atomic():
         dispute.refund_deposit(
             reason_description=f"Security deposit bond refunded for withdrawn dispute on task: '{task.title}'"
+        )
+        RewardLedger.objects.create(
+            user=task.posted_by,
+            task=task,
+            amount=task.reward,
+            transaction_type='dispute_escrow_release',
+            description=f"Task reward points released from dispute escrow for task: '{task.title}'"
         )
         dispute.status = 'resolved'
         dispute.save()
