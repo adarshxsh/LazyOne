@@ -89,12 +89,24 @@ class Dispute(models.Model):
         ('refunded', 'Refunded'),
         ('forfeited', 'Forfeited'),
     )
+    VERDICT_CHOICES = (
+        ('pending', 'Pending'),
+        ('posted_by', 'In Favor of Task Poster'),
+        ('taken_by', 'In Favor of Task Assignee'),
+    )
+    JUROR_POOL_STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('assigned', 'Assigned'),
+        ('completed', 'Completed'),
+    )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    verdict = models.CharField(max_length=20, choices=VERDICT_CHOICES, default='pending', null=True, blank=True)
+    juror_pool_status = models.CharField(max_length=20, choices=JUROR_POOL_STATUS_CHOICES, default='pending', null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -141,6 +153,25 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class DisputeJuror(models.Model):
+    VOTE_CHOICES = (
+        ('pending', 'Pending'),
+        ('posted_by', 'In Favor of Task Poster'),
+        ('taken_by', 'In Favor of Task Assignee'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='jurors')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='juror_assignments')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    vote = models.CharField(max_length=20, choices=VOTE_CHOICES, default='pending')
+    voted_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        unique_together = ('dispute', 'user')
+
+    def __str__(self):
+        return f"Juror {self.user.username} for Dispute {self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
