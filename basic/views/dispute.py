@@ -1,5 +1,6 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User
 from django.contrib import messages
 from django.db import transaction
 from ..models import Dispute, Task, Notification, RewardLedger
@@ -105,3 +106,62 @@ def withdraw_dispute(request, dispute_id):
         )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def resolve_dispute(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+    if dispute.status != 'open':
+        messages.error(request, "Dispute is already resolved.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if not (request.user.is_staff or request.user in [task.posted_by, task.taken_by]):
+        messages.error(request, "You are not authorized to resolve this dispute.")
+        return redirect('home')
+
+    winner_id = request.POST.get('winner_id')
+    winner = User.objects.filter(id=winner_id).first() if winner_id else None
+    action = request.POST.get('action')  # 'forfeit', 'refund', 'complete', 'cancel'
+    juror_ids = request.POST.getlist('juror_ids')
+    jurors = list(User.objects.filter(id__in=juror_ids)) if juror_ids else None
+
+    with transaction.atomic():
+        dispute.status = 'resolved'
+        dispute.save()
+
+        if action == 'forfeit' or (winner and winner != dispute.raised_by):
+            dispute.forfeit_deposit(beneficiary=winner, jurors=jurors)
+        else:
+            dispute.refund_deposit()
+
+        if action == 'complete' or (winner and winner == task.taken_by):
+            task.status = 'completed'
+            task.save()
+            if task.taken_by:
+                task_doer_profile = task.taken_by.userprofile
+                task_doer_profile.rewards += task.reward
+                task_doer_profile.save()
+                RewardLedger.objects.create(
+                    user=task.taken_by,
+                    task=task,
+                    amount=task.reward,
+                    transaction_type='task_completion',
+                    description=f"Completed task upon dispute resolution: '{task.title}'"
+                )
+        elif action == 'cancel' or (winner and winner == task.posted_by):
+            task.status = 'cancelled'
+            task.save()
+            poster_profile = task.posted_by.userprofile
+            poster_profile.rewards += task.reward
+            poster_profile.save()
+            RewardLedger.objects.create(
+                user=task.posted_by,
+                task=task,
+                amount=task.reward,
+                transaction_type='task_cancellation',
+                description=f"Refund for cancelled task upon dispute resolution: '{task.title}'"
+            )
+
+        messages.success(request, "Dispute resolved successfully.")
+    return redirect('dispute_detail', dispute_id=dispute.id)
