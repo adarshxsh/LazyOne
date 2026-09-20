@@ -2,8 +2,11 @@ from django.test import TestCase, Client
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
+from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, DisputeEvidence, DisputeVote, DisputeAppeal
+from .views.dispute import advance_dispute_phase, settle_dispute
 
 
 class DisputeDepositBondTests(TestCase):
@@ -17,6 +20,10 @@ class DisputeDepositBondTests(TestCase):
         # Task taker
         self.taker = User.objects.create_user(username='taker', password='password123')
         self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=100)
+
+        # Community peer reviewer
+        self.peer = User.objects.create_user(username='peer_reviewer', password='password123')
+        self.peer_profile = UserProfile.objects.create(user=self.peer, rewards=500)
 
         # Create task: reward = 300, 20% = 60 (> 50 minimum)
         self.deadline = timezone.now() + timedelta(days=2)
@@ -44,13 +51,10 @@ class DisputeDepositBondTests(TestCase):
         Conversation.objects.create(task=self.small_task)
 
     def test_deposit_bond_calculation(self):
-        # 20% of 300 = 60 (> 50)
         self.assertEqual(self.task.deposit_bond_amount, 60)
-        # 20% of 100 = 20 (< 50, so minimum 50 applies)
         self.assertEqual(self.small_task.deposit_bond_amount, 50)
 
     def test_raise_dispute_insufficient_rewards(self):
-        # Set taker rewards to 30 (less than 60 required)
         self.taker_profile.rewards = 30
         self.taker_profile.save()
 
@@ -65,7 +69,6 @@ class DisputeDepositBondTests(TestCase):
         self.assertEqual(self.task.status, 'in_progress')
         self.assertFalse(Dispute.objects.filter(task=self.task).exists())
 
-        # Balance should remain unchanged
         self.taker_profile.refresh_from_db()
         self.assertEqual(self.taker_profile.rewards, 30)
 
@@ -76,7 +79,6 @@ class DisputeDepositBondTests(TestCase):
             {'reason': 'Unreasonable request'}
         )
 
-        # Deposit bond is 60. Taker balance was 100 -> now 40
         self.taker_profile.refresh_from_db()
         self.assertEqual(self.taker_profile.rewards, 40)
 
@@ -86,16 +88,14 @@ class DisputeDepositBondTests(TestCase):
         dispute = Dispute.objects.get(task=self.task)
         self.assertEqual(dispute.deposit_amount, 60)
         self.assertEqual(dispute.escrow_status, 'held')
-        self.assertEqual(dispute.status, 'open')
+        self.assertEqual(dispute.status, 'evidence_phase')
         self.assertEqual(dispute.raised_by, self.taker)
 
-        # Check ledger
         ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_deposit').first()
         self.assertIsNotNone(ledger)
         self.assertEqual(ledger.amount, -60)
 
     def test_withdraw_dispute_success(self):
-        # First raise dispute
         self.client.login(username='taker', password='password123')
         self.client.post(
             reverse('raise_dispute', args=[self.task.id]),
@@ -104,7 +104,6 @@ class DisputeDepositBondTests(TestCase):
 
         dispute = Dispute.objects.get(task=self.task)
 
-        # Withdraw dispute
         response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
         self.assertRedirects(response, reverse('my_tasks'))
 
@@ -113,26 +112,22 @@ class DisputeDepositBondTests(TestCase):
 
         dispute.refresh_from_db()
         self.assertEqual(dispute.escrow_status, 'refunded')
-        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.status, 'withdrawn')
 
-        # Balance restored: 40 + 60 = 100
         self.taker_profile.refresh_from_db()
         self.assertEqual(self.taker_profile.rewards, 100)
 
-        # Check refund ledger
         ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_refund').first()
         self.assertIsNotNone(ledger)
         self.assertEqual(ledger.amount, 60)
 
     def test_complete_disputed_task_refunds_deposit(self):
-        # Taker raises dispute (deposit 60 deducted from 100 -> 40 left)
         self.client.login(username='taker', password='password123')
         self.client.post(
             reverse('raise_dispute', args=[self.task.id]),
             {'reason': 'Dispute reason'}
         )
 
-        # Poster marks task as completed
         self.client.login(username='poster', password='password123')
         response = self.client.get(reverse('complete_task', args=[self.task.id]))
         self.assertRedirects(response, reverse('my_tasks'))
@@ -142,13 +137,11 @@ class DisputeDepositBondTests(TestCase):
 
         dispute = Dispute.objects.get(task=self.task)
         self.assertEqual(dispute.escrow_status, 'refunded')
-        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.status, 'settled')
 
-        # Taker balance: 40 + 300 (task reward) + 60 (deposit refund) = 400
         self.taker_profile.refresh_from_db()
         self.assertEqual(self.taker_profile.rewards, 400)
 
-        # Check ledger entries for taker
         refund_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_refund').first()
         self.assertIsNotNone(refund_ledger)
         self.assertEqual(refund_ledger.amount, 60)
@@ -164,21 +157,151 @@ class DisputeDepositBondTests(TestCase):
         self.taker_profile.rewards = 40
         self.taker_profile.save()
 
-        # Forfeit deposit bond to poster
         dispute.forfeit_deposit(beneficiary=self.poster)
 
         dispute.refresh_from_db()
         self.assertEqual(dispute.escrow_status, 'forfeited')
 
-        # Taker rewards remain 40 (already deducted when raised)
         self.taker_profile.refresh_from_db()
         self.assertEqual(self.taker_profile.rewards, 40)
 
-        # Poster gets 1000 + 60 = 1060
         self.poster_profile.refresh_from_db()
         self.assertEqual(self.poster_profile.rewards, 1060)
 
-        # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+    def test_fsm_invalid_state_transition_raises_validation_error(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='FSM test',
+            status='open'
+        )
+
+        # Illegal transition: open directly to settled
+        with self.assertRaises(ValidationError):
+            dispute.transition_to('settled')
+
+        # Sequential transitions
+        dispute.transition_to('evidence_phase')
+        self.assertEqual(dispute.status, 'evidence_phase')
+
+        # Illegal transition: evidence_phase directly to settled
+        with self.assertRaises(ValidationError):
+            dispute.transition_to('settled')
+
+        dispute.transition_to('voting_phase')
+        self.assertEqual(dispute.status, 'voting_phase')
+
+        dispute.transition_to('appeal_phase')
+        self.assertEqual(dispute.status, 'appeal_phase')
+
+        dispute.transition_to('settled')
+        self.assertEqual(dispute.status, 'settled')
+
+    def test_evidence_submission_phase(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Evidence testing',
+            status='evidence_phase'
+        )
+
+        # Disputing party submits evidence
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(
+            reverse('submit_evidence', args=[dispute.id]),
+            {'description': 'Screenshot evidence of completed work', 'evidence_url': 'https://example.com/screenshot.png'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+        self.assertEqual(DisputeEvidence.objects.filter(dispute=dispute).count(), 1)
+        evidence = DisputeEvidence.objects.get(dispute=dispute)
+        self.assertEqual(evidence.submitted_by, self.taker)
+        self.assertEqual(evidence.evidence_url, 'https://example.com/screenshot.png')
+
+        # Non-participant blocked from submitting evidence
+        self.client.login(username='peer_reviewer', password='password123')
+        response = self.client.post(
+            reverse('submit_evidence', args=[dispute.id]),
+            {'description': 'Unauthorized evidence'}
+        )
+        self.assertEqual(DisputeEvidence.objects.filter(dispute=dispute).count(), 1)
+
+    def test_voting_phase_and_peer_voting(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Voting test',
+            status='voting_phase'
+        )
+
+        # Peer reviewer submits vote
+        self.client.login(username='peer_reviewer', password='password123')
+        response = self.client.post(
+            reverse('submit_vote', args=[dispute.id]),
+            {'choice': 'taker', 'justification': 'Evidence supports taker'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+        self.assertEqual(DisputeVote.objects.filter(dispute=dispute).count(), 1)
+        vote = DisputeVote.objects.get(dispute=dispute)
+        self.assertEqual(vote.voter, self.peer)
+        self.assertEqual(vote.choice, 'taker')
+
+        # Task participant blocked from voting
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('submit_vote', args=[dispute.id]),
+            {'choice': 'taker', 'justification': 'Self vote'}
+        )
+        self.assertEqual(DisputeVote.objects.filter(dispute=dispute).count(), 1)
+
+    def test_appeal_phase_submission(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Appeal test',
+            status='appeal_phase'
+        )
+
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('submit_appeal', args=[dispute.id]),
+            {'reason': 'Fresh justification appealing voting result'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+        self.assertEqual(DisputeAppeal.objects.filter(dispute=dispute).count(), 1)
+        appeal = DisputeAppeal.objects.get(dispute=dispute)
+        self.assertEqual(appeal.appellant, self.poster)
+
+    def test_sla_expiration_command_and_settlement(self):
+        self.taker_profile.rewards = 40
+        self.taker_profile.save()
+
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='SLA expiration test',
+            deposit_amount=60,
+            escrow_status='held',
+            status='appeal_phase'
+        )
+        dispute.created_at = timezone.now() - timedelta(days=2)
+        dispute.save()
+
+        # Peer vote cast for taker
+        DisputeVote.objects.create(dispute=dispute, voter=self.peer, choice='taker')
+
+        call_command('resolve_expired_disputes', days=1)
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'settled')
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 400) # 40 remaining + 300 reward + 60 refund
