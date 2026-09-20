@@ -1,4 +1,5 @@
 from django.test import TestCase, Client
+from django.core.management import call_command
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
@@ -113,7 +114,7 @@ class DisputeDepositBondTests(TestCase):
 
         dispute.refresh_from_db()
         self.assertEqual(dispute.escrow_status, 'refunded')
-        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.status, 'withdrawn')
 
         # Balance restored: 40 + 60 = 100
         self.taker_profile.refresh_from_db()
@@ -181,4 +182,91 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+    def test_poster_raise_dispute_success(self):
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Taker is unresponsive'}
+        )
+
+        # Deposit bond is 60. Poster balance was 1000 -> now 940
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 940)
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+
+        dispute = self.task.dispute
+        self.assertIsNotNone(dispute)
+        self.assertEqual(dispute.deposit_amount, 60)
+        self.assertEqual(dispute.escrow_status, 'held')
+        self.assertEqual(dispute.status, 'open')
+        self.assertEqual(dispute.raised_by, self.poster)
+
+        # Check ledger
+        ledger = RewardLedger.objects.filter(user=self.poster, transaction_type='dispute_deposit').first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, -60)
+
+    def test_withdraw_and_reraise_dispute_creates_new_instance(self):
+        # 1. Taker raises dispute
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Initial dispute by taker'}
+        )
+        dispute1 = self.task.active_dispute
+        self.assertIsNotNone(dispute1)
+
+        # 2. Taker withdraws dispute
+        self.client.post(reverse('withdraw_dispute', args=[dispute1.id]))
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+        dispute1.refresh_from_db()
+        self.assertEqual(dispute1.status, 'withdrawn')
+
+        # 3. Poster raises dispute on same task
+        self.client.login(username='poster', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Re-raised dispute by poster'}
+        )
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+
+        # Verify historical records preservation
+        disputes = self.task.disputes.order_by('created_at')
+        self.assertEqual(disputes.count(), 2)
+
+        d1, d2 = disputes[0], disputes[1]
+        self.assertEqual(d1.id, dispute1.id)
+        self.assertEqual(d1.status, 'withdrawn')
+        self.assertEqual(d1.raised_by, self.taker)
+
+        self.assertEqual(d2.status, 'open')
+        self.assertEqual(d2.raised_by, self.poster)
+        self.assertEqual(self.task.active_dispute.id, d2.id)
+
+    def test_resolve_expired_disputes_command_poster_and_taker(self):
+        # Poster-raised dispute
+        self.client.login(username='poster', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Unresponsive taker'}
+        )
+        dispute = self.task.active_dispute
+        # Backdate creation to 8 days ago
+        dispute.created_at = timezone.now() - timedelta(days=8)
+        dispute.save()
+
+        call_command('resolve_expired_disputes', days=7)
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'cancelled')
+
 
