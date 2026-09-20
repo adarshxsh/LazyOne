@@ -59,6 +59,14 @@ class Task(models.Model):
     def deposit_bond_amount(self):
         return max(50, math.ceil(self.reward * 0.20))
 
+    @property
+    def active_dispute(self):
+        return self.disputes.filter(status='open').first()
+
+    @property
+    def dispute(self):
+        return self.active_dispute or self.disputes.order_by('-created_at').first()
+
 class RewardLedger(models.Model):
     TRANSACTION_TYPES = (
         ('task_creation', 'Task Creation (Points Reserved)'),
@@ -83,13 +91,14 @@ class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
         ('resolved', 'Resolved'),
+        ('withdrawn', 'Withdrawn'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
         ('refunded', 'Refunded'),
         ('forfeited', 'Forfeited'),
     )
-    task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='disputes')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
