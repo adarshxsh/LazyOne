@@ -13,8 +13,10 @@
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
+            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' or dispute.status == 'voting' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Worker Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
+            <p><strong>Poster Deposit Bond:</strong> {{ dispute.poster_deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_poster_deposit_status_display }}</span>)</p>
+            <p><strong>Total Juror Stake Pool:</strong> {{ dispute.total_juror_stake }} points</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
         </div>
@@ -23,6 +25,56 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400">Jury Voting & Consensus</h3>
+            <p class="text-sm text-gray-400 mb-2">Poster Votes: {{ poster_votes }} | Taker Votes: {{ taker_votes }} | Total Votes: {{ total_votes }}</p>
+
+            {% if user_vote %}
+                <div class="bg-cyan-900/30 border border-cyan-500 p-4 rounded-lg text-cyan-200">
+                    <p>You voted as a juror for <strong>{{ user_vote.get_voted_option_display }}</strong> with a mandatory stake commitment of <strong>{{ user_vote.staked_amount }} points</strong>.</p>
+                </div>
+            {% elif can_vote %}
+                <div class="bg-gray-800/80 p-5 rounded-lg border border-gray-700">
+                    <p class="mb-3 font-semibold text-white">Cast Your Vote as a Community Juror</p>
+                    <p class="text-xs text-yellow-400 mb-4">Submitting a vote requires locking a mandatory <strong>{{ juror_stake_amount }} point stake bond</strong> from your profile balance. Winning majority voters receive their stake back plus a pro-rata dividend payout; minority votes are slashed.</p>
+                    <form action="{% url 'vote_dispute' dispute.id %}" method="post" class="flex space-x-4">
+                        {% csrf_token %}
+                        <button type="submit" name="voted_option" value="poster" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-5 py-2 rounded-lg transition-colors">
+                            Vote for Poster ({{ task.posted_by.username }})
+                        </button>
+                        <button type="submit" name="voted_option" value="taker" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-5 py-2 rounded-lg transition-colors">
+                            Vote for Taker ({{ task.taken_by.username }})
+                        </button>
+                    </form>
+                </div>
+            {% elif is_participant %}
+                <p class="text-sm text-gray-400 italic">As a task participant, you cannot vote as a juror on this dispute.</p>
+            {% endif %}
+        </div>
+
+        {% if dispute.status != 'resolved' and dispute.status != 'withdrawn' %}
+            <div class="pt-4 border-t border-gray-800 flex items-center space-x-4">
+                {% if user.is_staff or is_participant %}
+                    <form action="{% url 'resolve_dispute' dispute.id %}" method="post" class="inline">
+                        {% csrf_token %}
+                        {% if user.is_staff %}
+                            <div class="flex items-center space-x-3">
+                                <label class="text-sm font-medium">Staff Override Outcome:</label>
+                                <select name="winner" class="bg-gray-800 border border-gray-700 rounded px-3 py-1 text-white">
+                                    <option value="">Based on Jury Vote Tally</option>
+                                    <option value="poster">Poster Wins</option>
+                                    <option value="taker">Taker Wins</option>
+                                </select>
+                                <button type="submit" class="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors">Resolve Dispute</button>
+                            </div>
+                        {% else %}
+                            <button type="submit" class="bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors">Resolve Dispute by Jury Consensus</button>
+                        {% endif %}
+                    </form>
+                {% endif %}
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}
