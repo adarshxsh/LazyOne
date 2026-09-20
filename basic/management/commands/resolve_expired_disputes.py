@@ -21,8 +21,8 @@ class Command(BaseCommand):
         now = timezone.now()
         expiry_threshold = now - timedelta(days=days)
 
-        # Find open disputes created before the expiration window
-        expired_disputes = Dispute.objects.filter(status='open', created_at__lte=expiry_threshold)
+        # Find open/peer_review disputes created before the expiration window
+        expired_disputes = Dispute.objects.filter(status__in=['open', 'peer_review'], created_at__lte=expiry_threshold)
 
         count = 0
         for dispute in expired_disputes:
