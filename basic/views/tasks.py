@@ -93,6 +93,7 @@ def complete_task(request, task_id):
             task.dispute.refund_deposit(
                 reason_description=f"Security deposit bond refunded upon dispute resolution for task: '{task.title}'"
             )
+            task.dispute.resolve_jury_stakes()
             task.dispute.status = 'resolved'
             task.dispute.save()
 
