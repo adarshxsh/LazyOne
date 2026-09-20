@@ -1,4 +1,4 @@
-from django.test import TestCase, Client
+from django.test import TestCase, Client, override_settings
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
@@ -6,6 +6,7 @@ from datetime import timedelta
 from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
 
 
+@override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
 class DisputeDepositBondTests(TestCase):
     def setUp(self):
         self.client = Client()
@@ -181,4 +182,159 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+@override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
+class JurorSelectionAndVotingTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Task poster & taker
+        self.poster = User.objects.create_user(username='poster_juror_test', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker_juror_test', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        # Direct friend of poster
+        self.friend_poster = User.objects.create_user(username='friend_poster', password='password123')
+        self.friend_poster_profile = UserProfile.objects.create(user=self.friend_poster)
+        self.poster_profile.friends.add(self.friend_poster_profile)
+
+        # Direct friend of taker
+        self.friend_taker = User.objects.create_user(username='friend_taker', password='password123')
+        self.friend_taker_profile = UserProfile.objects.create(user=self.friend_taker)
+        self.taker_profile.friends.add(self.friend_taker_profile)
+
+        # 1-hop mutual connection (friend of friend_poster)
+        self.mutual_friend = User.objects.create_user(username='mutual_friend', password='password123')
+        self.mutual_friend_profile = UserProfile.objects.create(user=self.mutual_friend)
+        self.friend_poster_profile.friends.add(self.mutual_friend_profile)
+
+        # Neutral eligible candidate users (j1, j2, j3, j4)
+        self.juror_candidates = []
+        for i in range(1, 6):
+            u = User.objects.create_user(username=f'neutral_juror_{i}', password='password123')
+            UserProfile.objects.create(user=u, rewards=500)
+            self.juror_candidates.append(u)
+
+        # Create active task
+        self.task = Task.objects.create(
+            title="Juror Test Task",
+            description="Juror Test Description",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=timezone.now() + timedelta(days=2)
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_get_exclusion_set(self):
+        from basic.services.juror_selection import ORMFilteredJurorSelectionService
+        exclusion_set = ORMFilteredJurorSelectionService.get_exclusion_set(self.task)
+
+        # Disputants excluded
+        self.assertIn(self.poster.id, exclusion_set)
+        self.assertIn(self.taker.id, exclusion_set)
+
+        # 1st degree direct friends excluded
+        self.assertIn(self.friend_poster.id, exclusion_set)
+        self.assertIn(self.friend_taker.id, exclusion_set)
+
+        # 1-hop mutual connection excluded
+        self.assertIn(self.mutual_friend.id, exclusion_set)
+
+        # Neutral candidates should NOT be in exclusion set
+        for candidate in self.juror_candidates:
+            self.assertNotIn(candidate.id, exclusion_set)
+
+    def test_raise_dispute_selects_and_assigns_jurors(self):
+        self.client.login(username='taker_juror_test', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work disagreement'}
+        )
+
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertEqual(dispute.juror_pool_status, 'assigned')
+        self.assertEqual(dispute.jurors.count(), 3)
+
+        # Check assigned jurors are unbiased
+        assigned_user_ids = set(dispute.jurors.values_list('user_id', flat=True))
+        from basic.services.juror_selection import ORMFilteredJurorSelectionService
+        exclusion_set = ORMFilteredJurorSelectionService.get_exclusion_set(dispute)
+        for u_id in assigned_user_ids:
+            self.assertNotIn(u_id, exclusion_set)
+
+    def test_cast_juror_vote_and_automated_settlement(self):
+        # Raise dispute
+        self.client.login(username='taker_juror_test', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work disagreement'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        assigned_jurors = list(dispute.jurors.all())
+        self.assertEqual(len(assigned_jurors), 3)
+
+        j1 = assigned_jurors[0].user
+        j2 = assigned_jurors[1].user
+
+        # Juror 1 votes for poster
+        self.client.login(username=j1.username, password='password123')
+        res1 = self.client.post(reverse('cast_juror_vote', args=[dispute.id]), {'vote': 'posted_by'})
+        self.assertRedirects(res1, reverse('dispute_detail', args=[dispute.id]))
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'open') # 1 vote is not majority
+
+        # Juror 2 votes for poster -> majority (2/3) reached
+        self.client.login(username=j2.username, password='password123')
+        res2 = self.client.post(reverse('cast_juror_vote', args=[dispute.id]), {'vote': 'posted_by'})
+        self.assertRedirects(res2, reverse('dispute_detail', args=[dispute.id]))
+
+        dispute.refresh_from_db()
+        self.task.refresh_from_db()
+
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.verdict, 'posted_by')
+        self.assertEqual(dispute.juror_pool_status, 'completed')
+        self.assertEqual(self.task.status, 'cancelled')
+
+    def test_unauthorized_user_cannot_access_or_vote(self):
+        # Raise dispute
+        self.client.login(username='taker_juror_test', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work disagreement'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+
+        # Create an outsider user not involved, not a friend, and not chosen as juror
+        outsider = User.objects.create_user(username='outsider_user', password='password123')
+        UserProfile.objects.create(user=outsider)
+
+        # Login as outsider
+        self.client.login(username='outsider_user', password='password123')
+
+        # Try viewing dispute
+        res_view = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertRedirects(res_view, reverse('home'))
+
+        # Try voting
+        res_vote = self.client.post(reverse('cast_juror_vote', args=[dispute.id]), {'vote': 'posted_by'})
+        self.assertRedirects(res_vote, reverse('dispute_detail', args=[dispute.id]), fetch_redirect_response=False)
+
+    def test_juror_selection_latency(self):
+        import time
+        from basic.services.juror_selection import ORMFilteredJurorSelectionService
+
+        start_time = time.perf_counter()
+        exclusion_set = ORMFilteredJurorSelectionService.get_exclusion_set(self.task)
+        candidates = list(ORMFilteredJurorSelectionService.get_eligible_candidates(self.task))
+        elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+
+        self.assertLess(elapsed_ms, 15.0)
+
 
