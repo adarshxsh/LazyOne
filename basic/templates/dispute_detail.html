@@ -23,6 +23,33 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if is_assigned_juror %}
+            <div class="bg-gray-800 p-6 rounded-lg border border-cyan-500/30">
+                <h3 class="text-xl font-semibold text-cyan-400 mb-2">Juror Voting Panel</h3>
+                <p class="text-sm text-gray-300 mb-4">You have been selected as a neutral juror on this dispute panel. Staking requirement: <strong>{{ jury_pool.required_stake }} points</strong>.</p>
+                {% if has_voted %}
+                    <p class="text-green-400 font-medium">You have already submitted your vote on this dispute.</p>
+                {% elif dispute.status == 'open' %}
+                    <form method="post" action="{% url 'submit_dispute_vote' dispute.id %}" class="space-y-4">
+                        {% csrf_token %}
+                        <p class="text-gray-200">Cast your vote for the party you believe is in the right:</p>
+                        <div class="flex gap-4">
+                            <button type="submit" name="vote" value="poster" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow">
+                                Vote for Poster ({{ task.posted_by.username }})
+                            </button>
+                            {% if task.taken_by %}
+                            <button type="submit" name="vote" value="taker" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow">
+                                Vote for Taker ({{ task.taken_by.username }})
+                            </button>
+                            {% endif %}
+                        </div>
+                    </form>
+                {% else %}
+                    <p class="text-yellow-400 font-medium">This dispute is closed.</p>
+                {% endif %}
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}
