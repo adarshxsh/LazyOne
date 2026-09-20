@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, JuryPanel, JurorVote, DisputeAppeal, Friendship
 
 
 class DisputeDepositBondTests(TestCase):
@@ -86,7 +86,7 @@ class DisputeDepositBondTests(TestCase):
         dispute = Dispute.objects.get(task=self.task)
         self.assertEqual(dispute.deposit_amount, 60)
         self.assertEqual(dispute.escrow_status, 'held')
-        self.assertEqual(dispute.status, 'open')
+        self.assertIn(dispute.status, ['open', 'peer_review'])
         self.assertEqual(dispute.raised_by, self.taker)
 
         # Check ledger
@@ -181,4 +181,227 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class TwoTierDisputeAppealAndSlashingTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Task poster and taker
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        # Friend of poster
+        self.friend_of_poster = User.objects.create_user(username='friend_poster', password='password123')
+        self.friend_poster_profile = UserProfile.objects.create(user=self.friend_of_poster, rewards=500)
+        Friendship.objects.create(from_user=self.poster_profile, to_user=self.friend_poster_profile)
+
+        # 12 Potential Jurors
+        self.jurors = []
+        for i in range(1, 13):
+            user = User.objects.create_user(username=f'juror{i}', password='password123')
+            UserProfile.objects.create(user=user, rewards=100)
+            self.jurors.append(user)
+
+        self.task = Task.objects.create(
+            title="Disputed Delivery Task",
+            description="Task Description",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=timezone.now() + timedelta(days=1)
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_juror_eligibility_exclusion(self):
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Incomplete instructions'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        tier1_panel = dispute.jury_panels.get(tier=1)
+
+        assigned_jurors = tier1_panel.jurors.all()
+        self.assertEqual(assigned_jurors.count(), 3)
+        self.assertNotIn(self.poster, assigned_jurors)
+        self.assertNotIn(self.taker, assigned_jurors)
+        self.assertNotIn(self.friend_of_poster, assigned_jurors)
+
+    def test_tier1_voting_and_supermajority(self):
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Incomplete instructions'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        panel = dispute.jury_panels.get(tier=1)
+        jurors = list(panel.jurors.all())
+
+        # Juror 1 & Juror 2 vote for taker (2/3 = 66.67% supermajority)
+        self.client.login(username=jurors[0].username, password='password123')
+        self.client.post(
+            reverse('cast_juror_vote', args=[dispute.id]),
+            {'voted_for': self.taker.id, 'justification': 'Worker executed task properly'}
+        )
+
+        self.client.login(username=jurors[1].username, password='password123')
+        self.client.post(
+            reverse('cast_juror_vote', args=[dispute.id]),
+            {'voted_for': self.taker.id, 'justification': 'Agreed'}
+        )
+
+        # Juror 3 votes for poster (dissenting vote)
+        self.client.login(username=jurors[2].username, password='password123')
+        self.client.post(
+            reverse('cast_juror_vote', args=[dispute.id]),
+            {'voted_for': self.poster.id, 'justification': 'Disagreed'}
+        )
+
+        panel.refresh_from_db()
+        dispute.refresh_from_db()
+
+        self.assertEqual(panel.status, 'resolved')
+        self.assertEqual(dispute.status, 'peer_review')
+
+        # Check rewards and slashing for jurors
+        jurors[0].userprofile.refresh_from_db()
+        jurors[1].userprofile.refresh_from_db()
+        jurors[2].userprofile.refresh_from_db()
+
+        self.assertEqual(jurors[0].userprofile.rewards, 120)
+        self.assertEqual(jurors[1].userprofile.rewards, 120)
+        self.assertEqual(jurors[2].userprofile.rewards, 80)
+
+        self.assertTrue(RewardLedger.objects.filter(user=jurors[0], transaction_type='juror_reward').exists())
+        self.assertTrue(RewardLedger.objects.filter(user=jurors[2], transaction_type='juror_slashing').exists())
+
+    def test_appeal_window_and_tier2_escalation(self):
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Incomplete instructions'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        panel = dispute.jury_panels.get(tier=1)
+        jurors = list(panel.jurors.all())
+
+        for j in jurors:
+            self.client.login(username=j.username, password='password123')
+            self.client.post(
+                reverse('cast_juror_vote', args=[dispute.id]),
+                {'voted_for': self.taker.id}
+            )
+
+        dispute.refresh_from_db()
+        self.assertTrue(dispute.can_be_appealed)
+
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('file_dispute_appeal', args=[dispute.id]),
+            {'justification': 'Tier-1 decision was unfair'}
+        )
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'grand_jury_review')
+        self.assertTrue(dispute.appeals.exists())
+
+        appeal = dispute.appeals.first()
+        self.assertEqual(appeal.appellant, self.poster)
+        self.assertEqual(appeal.deposit_amount, self.task.deposit_bond_amount)
+
+        self.assertTrue(RewardLedger.objects.filter(user=self.poster, transaction_type='appeal_deposit').exists())
+
+        tier2_panel = dispute.jury_panels.get(tier=2)
+        self.assertEqual(tier2_panel.quorum_size, 7)
+        self.assertEqual(tier2_panel.jurors.count(), 7)
+
+    def test_expired_appeal_window_rejection(self):
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Incomplete instructions'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        panel = dispute.jury_panels.get(tier=1)
+        jurors = list(panel.jurors.all())
+
+        for j in jurors:
+            self.client.login(username=j.username, password='password123')
+            self.client.post(
+                reverse('cast_juror_vote', args=[dispute.id]),
+                {'voted_for': self.taker.id}
+            )
+
+        panel.refresh_from_db()
+        panel.resolved_at = timezone.now() - timedelta(hours=49)
+        panel.save()
+
+        dispute.refresh_from_db()
+        self.assertFalse(dispute.can_be_appealed)
+
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('file_dispute_appeal', args=[dispute.id]),
+            {'justification': 'Too late appeal'}
+        )
+        dispute.refresh_from_db()
+        self.assertNotEqual(dispute.status, 'grand_jury_review')
+
+    def test_tier2_grand_jury_resolution_and_slashing(self):
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Incomplete instructions'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        tier1_panel = dispute.jury_panels.get(tier=1)
+        for j in tier1_panel.jurors.all():
+            self.client.login(username=j.username, password='password123')
+            self.client.post(
+                reverse('cast_juror_vote', args=[dispute.id]),
+                {'voted_for': self.taker.id}
+            )
+
+        self.client.login(username='poster', password='password123')
+        self.client.post(
+            reverse('file_dispute_appeal', args=[dispute.id]),
+            {'justification': 'Tier-1 decision was erroneous'}
+        )
+
+        tier2_panel = dispute.jury_panels.get(tier=2)
+        tier2_jurors = list(tier2_panel.jurors.all())
+
+        for j in tier2_jurors[:5]:
+            self.client.login(username=j.username, password='password123')
+            self.client.post(
+                reverse('cast_juror_vote', args=[dispute.id]),
+                {'voted_for': self.poster.id}
+            )
+
+        for j in tier2_jurors[5:]:
+            self.client.login(username=j.username, password='password123')
+            self.client.post(
+                reverse('cast_juror_vote', args=[dispute.id]),
+                {'voted_for': self.taker.id}
+            )
+
+        dispute.refresh_from_db()
+        self.task.refresh_from_db()
+
+        self.assertEqual(dispute.status, 'slashed')
+        self.assertEqual(self.task.status, 'cancelled')
+
+        self.assertTrue(RewardLedger.objects.filter(user=self.taker, transaction_type='litigant_slashing').exists())
+
+        honest_juror = tier2_jurors[0]
+        dissenting_juror = tier2_jurors[5]
+
+        self.assertTrue(RewardLedger.objects.filter(user=honest_juror, transaction_type='juror_reward').exists())
+        self.assertTrue(RewardLedger.objects.filter(user=dissenting_juror, transaction_type='juror_slashing').exists())
+
 

@@ -1,28 +1,204 @@
+from datetime import timedelta
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+from ..models import Dispute, Task, Notification, RewardLedger, UserProfile, JuryPanel, JurorVote, DisputeAppeal
+
+def execute_final_dispute_settlement(dispute, winning_party):
+    task = dispute.task
+    slashed_occurred = False
+
+    with transaction.atomic():
+        # 1. Task settlement based on winning party
+        if winning_party == task.taken_by:
+            if task.taken_by:
+                taker_profile, _ = UserProfile.objects.get_or_create(user=task.taken_by)
+                taker_profile.rewards += task.reward
+                taker_profile.save()
+                RewardLedger.objects.create(
+                    user=task.taken_by,
+                    task=task,
+                    amount=task.reward,
+                    transaction_type='task_completion',
+                    description=f"Awarded reward for dispute resolution on task: '{task.title}'"
+                )
+            task.status = 'completed'
+            task.save()
+        else:
+            poster_profile, _ = UserProfile.objects.get_or_create(user=task.posted_by)
+            poster_profile.rewards += task.reward
+            poster_profile.save()
+            RewardLedger.objects.create(
+                user=task.posted_by,
+                task=task,
+                amount=task.reward,
+                transaction_type='task_cancellation',
+                description=f"Refund for dispute resolution on task: '{task.title}'"
+            )
+            task.status = 'cancelled'
+            task.save()
+
+        # 2. Litigant Escrow Bond Settlement
+        if dispute.escrow_status == 'held':
+            if dispute.raised_by == winning_party:
+                dispute.refund_deposit(reason_description=f"Security deposit bond refunded upon favorable dispute ruling for task '{task.title}'")
+            else:
+                slashed_occurred = True
+                dispute.escrow_status = 'forfeited'
+                dispute.save()
+                RewardLedger.objects.create(
+                    user=dispute.raised_by,
+                    task=task,
+                    amount=-dispute.deposit_amount,
+                    transaction_type='litigant_slashing',
+                    description=f"Dishonest litigant deposit bond slashed for task: '{task.title}'"
+                )
+
+        # 3. Appeal Bond Settlement (if any appeal exists)
+        for appeal in dispute.appeals.all():
+            if appeal.appellant == winning_party:
+                appellant_profile, _ = UserProfile.objects.get_or_create(user=appeal.appellant)
+                appellant_profile.rewards += appeal.deposit_amount
+                appellant_profile.save()
+                RewardLedger.objects.create(
+                    user=appeal.appellant,
+                    task=task,
+                    amount=appeal.deposit_amount,
+                    transaction_type='appeal_refund',
+                    description=f"Appeal deposit bond refunded for successful appeal on task '{task.title}'"
+                )
+                appeal.outcome = 'overturned'
+                appeal.save()
+            else:
+                slashed_occurred = True
+                RewardLedger.objects.create(
+                    user=appeal.appellant,
+                    task=task,
+                    amount=-appeal.deposit_amount,
+                    transaction_type='litigant_slashing',
+                    description=f"Dishonest appellant appeal deposit bond slashed for task '{task.title}'"
+                )
+                appeal.outcome = 'upheld'
+                appeal.save()
+
+        # 4. Check if any juror slashing occurred across jury panels
+        for panel in dispute.jury_panels.all():
+            if panel.votes.exclude(voted_for=winning_party).exists():
+                slashed_occurred = True
+
+        if slashed_occurred:
+            dispute.status = 'slashed'
+        else:
+            dispute.status = 'resolved'
+        dispute.save()
+
+        dispute_link = reverse('dispute_detail', args=[dispute.id])
+        for participant in [task.posted_by, task.taken_by]:
+            if participant:
+                Notification.objects.create(
+                    recipient=participant,
+                    message=f"Final dispute ruling issued for task '{task.title}'. Winner: {winning_party.username}.",
+                    link=dispute_link
+                )
+
+def process_panel_settlement(panel, winning_party):
+    dispute = panel.dispute
+    task = dispute.task
+    now = timezone.now()
+
+    with transaction.atomic():
+        panel.status = 'resolved'
+        panel.resolved_at = now
+        panel.save()
+
+        # Handle Juror Rewards and Slashing for this panel
+        for vote in panel.votes.all():
+            juror_profile, _ = UserProfile.objects.get_or_create(user=vote.juror)
+            if vote.voted_for == winning_party:
+                reward_amt = 20
+                juror_profile.rewards += reward_amt
+                juror_profile.save()
+                RewardLedger.objects.create(
+                    user=vote.juror,
+                    task=task,
+                    amount=reward_amt,
+                    transaction_type='juror_reward',
+                    description=f"Juror reward for consensus vote on task '{task.title}'"
+                )
+            else:
+                penalty_amt = 20
+                juror_profile.rewards = max(0, juror_profile.rewards - penalty_amt)
+                juror_profile.save()
+                RewardLedger.objects.create(
+                    user=vote.juror,
+                    task=task,
+                    amount=-penalty_amt,
+                    transaction_type='juror_slashing',
+                    description=f"Juror stake slashed for dissenting vote on task '{task.title}'"
+                )
+
+        if panel.tier == 1:
+            dispute.status = 'peer_review'
+            dispute.save()
+
+            dispute_link = reverse('dispute_detail', args=[dispute.id])
+            for participant in [task.posted_by, task.taken_by]:
+                if participant:
+                    Notification.objects.create(
+                        recipient=participant,
+                        message=f"Tier-1 Jury Panel has ruled in favor of {winning_party.username} for task '{task.title}'. A 48-hour appeal window is now open.",
+                        link=dispute_link
+                    )
+        elif panel.tier == 2:
+            execute_final_dispute_settlement(dispute, winning_party)
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+
+    # Check auto-finalization if 48h appeal window expired without appeal
+    if dispute.status == 'peer_review':
+        tier1_panel = dispute.jury_panels.filter(tier=1, status='resolved').order_by('-resolved_at').first()
+        if tier1_panel and tier1_panel.resolved_at and timezone.now() > tier1_panel.resolved_at + timedelta(hours=48):
+            if not dispute.appeals.exists():
+                winning_party = tier1_panel.evaluate_consensus()
+                if winning_party:
+                    execute_final_dispute_settlement(dispute, winning_party)
+
+    is_juror = JuryPanel.objects.filter(dispute=dispute, jurors=request.user).exists()
+    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff and not is_juror:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+
+    active_panel = dispute.jury_panels.filter(status='active').order_by('-tier', '-created_at').first()
+    user_is_active_juror = False
+    user_has_voted = False
+    if active_panel and request.user in active_panel.jurors.all():
+        user_is_active_juror = True
+        user_has_voted = JurorVote.objects.filter(panel=active_panel, juror=request.user).exists()
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'active_panel': active_panel,
+        'user_is_active_juror': user_is_active_juror,
+        'user_has_voted': user_has_voted,
+        'can_be_appealed': dispute.can_be_appealed,
+        'appeal_bond_amount': task.deposit_bond_amount,
+        'all_panels': dispute.jury_panels.all().order_by('tier'),
+        'appeals': dispute.appeals.all(),
     }
     return render(request, 'dispute_detail.html', context)
 
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
     task = get_object_or_404(Task, id=task_id)
-    if hasattr(task, 'dispute') and task.dispute.status == 'open':
+    if hasattr(task, 'dispute') and task.dispute.status in ['open', 'peer_review', 'appealed', 'grand_jury_review']:
         return redirect('dispute_detail', dispute_id=task.dispute.id)
     if task.taken_by != request.user or task.status != 'in_progress':
         messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
@@ -50,7 +226,7 @@ def raise_dispute(request, task_id):
                 dispute = task.dispute
                 dispute.raised_by = request.user
                 dispute.reason = reason
-                dispute.status = 'open'
+                dispute.status = 'peer_review'
                 dispute.deposit_amount = deposit_amount
                 dispute.escrow_status = 'held'
                 dispute.save()
@@ -59,6 +235,7 @@ def raise_dispute(request, task_id):
                     task=task,
                     raised_by=request.user,
                     reason=reason,
+                    status='peer_review',
                     deposit_amount=deposit_amount,
                     escrow_status='held'
                 )
@@ -74,14 +251,145 @@ def raise_dispute(request, task_id):
             task.status = 'disputed'
             task.save()
 
+            # Create Tier-1 Jury Panel
+            panel = JuryPanel.objects.create(
+                dispute=dispute,
+                tier=1,
+                quorum_size=3,
+                status='active'
+            )
+            panel.assign_eligible_jurors()
+
             Notification.objects.create(
                 recipient=task.posted_by,
                 message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
                 link=reverse('dispute_detail', args=[dispute.id])
             )
-        messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
+        messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond. Tier-1 Peer Jury assigned.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def cast_juror_vote(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    panel = dispute.jury_panels.filter(status='active').order_by('-tier', '-created_at').first()
+    if not panel:
+        messages.error(request, "There is no active jury panel for this dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if request.user not in panel.jurors.all():
+        messages.error(request, "You are not an assigned juror for this panel.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if JurorVote.objects.filter(panel=panel, juror=request.user).exists():
+        messages.error(request, "You have already cast your vote for this panel.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    voted_for_id = request.POST.get('voted_for')
+    justification = request.POST.get('justification', '')
+
+    task = dispute.task
+    if str(voted_for_id) == str(task.posted_by.id):
+        voted_for_user = task.posted_by
+    elif task.taken_by and str(voted_for_id) == str(task.taken_by.id):
+        voted_for_user = task.taken_by
+    else:
+        messages.error(request, "Invalid vote selection.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    with transaction.atomic():
+        JurorVote.objects.create(
+            panel=panel,
+            juror=request.user,
+            voted_for=voted_for_user,
+            justification=justification
+        )
+
+        winning_party = panel.evaluate_consensus()
+        if winning_party:
+            process_panel_settlement(panel, winning_party)
+
+    messages.success(request, "Your juror vote has been recorded successfully.")
+    return redirect('dispute_detail', dispute_id=dispute.id)
+
+@login_required(login_url='/login/')
+@require_POST
+def file_dispute_appeal(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+
+    if request.user != task.posted_by and request.user != task.taken_by:
+        messages.error(request, "Only parties involved in the dispute can file an appeal.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if not dispute.can_be_appealed:
+        messages.error(request, "This dispute is not eligible for appeal or the 48-hour appeal window has expired.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    justification = request.POST.get('justification', '')
+    if not justification:
+        messages.error(request, "Justification is required to file an appeal.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    appeal_bond_amount = task.deposit_bond_amount
+    user_profile, _ = UserProfile.objects.get_or_create(user=request.user)
+
+    if user_profile.rewards < appeal_bond_amount:
+        messages.error(
+            request,
+            f"Insufficient reward points balance. You need at least {appeal_bond_amount} points as a deposit bond to file an appeal."
+        )
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    with transaction.atomic():
+        user_profile.rewards -= appeal_bond_amount
+        user_profile.save()
+
+        RewardLedger.objects.create(
+            user=request.user,
+            task=task,
+            amount=-appeal_bond_amount,
+            transaction_type='appeal_deposit',
+            description=f"Appeal deposit bond held for Tier-2 appeal on task: '{task.title}'"
+        )
+
+        DisputeAppeal.objects.create(
+            dispute=dispute,
+            stage='tier2',
+            appellant=request.user,
+            deposit_amount=appeal_bond_amount,
+            justification=justification,
+            outcome='pending'
+        )
+
+        dispute.status = 'grand_jury_review'
+        dispute.save()
+
+        panel = JuryPanel.objects.create(
+            dispute=dispute,
+            tier=2,
+            quorum_size=7,
+            status='active'
+        )
+        panel.assign_eligible_jurors()
+
+        tier1_panel = dispute.jury_panels.filter(tier=1).first()
+        if tier1_panel:
+            tier1_panel.status = 'escalated'
+            tier1_panel.save()
+
+        dispute_link = reverse('dispute_detail', args=[dispute.id])
+        other_party = task.posted_by if request.user == task.taken_by else task.taken_by
+        if other_party:
+            Notification.objects.create(
+                recipient=other_party,
+                message=f"{request.user.username} has escalated the dispute for task '{task.title}' to a Tier-2 Grand Jury.",
+                link=dispute_link
+            )
+
+    messages.success(request, f"Appeal filed successfully. {appeal_bond_amount} points held as appeal bond. Tier-2 Grand Jury panel assigned.")
+    return redirect('dispute_detail', dispute_id=dispute.id)
 
 @login_required(login_url='/login/')
 @require_POST
@@ -105,3 +413,4 @@ def withdraw_dispute(request, dispute_id):
         )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
+
