@@ -27,12 +27,20 @@ class Command(BaseCommand):
         count = 0
         for dispute in expired_disputes:
             task = dispute.task
-            with transaction.atomic():
-                dispute.status = 'resolved'
-                dispute.save()
+            tally = dispute.get_weighted_tally()
+            w_poster = tally['poster_weight']
+            w_taker = tally['taker_weight']
 
-                if dispute.raised_by == task.posted_by:
-                    # Poster challenged an unresponsive taker: cancel task, refund task reward, forfeit bond
+            with transaction.atomic():
+                if w_poster > w_taker:
+                    # Leading vote for Poster
+                    if dispute.raised_by == task.posted_by:
+                        if dispute.escrow_status == 'held':
+                            dispute.refund_deposit(reason_description=f"Deposit bond refunded on expired dispute for task '{task.title}'")
+                    else:
+                        if dispute.escrow_status == 'held':
+                            dispute.forfeit_deposit(beneficiary=task.posted_by, reason_description=f"Deposit bond forfeited on expired dispute for task '{task.title}'")
+
                     poster_profile = task.posted_by.userprofile
                     poster_profile.rewards += task.reward
                     poster_profile.save()
@@ -48,11 +56,29 @@ class Command(BaseCommand):
                         description=f"Refund for expired dispute on task: '{task.title}'"
                     )
 
-                    # Handle escrow bond refund / forfeiture
-                    if dispute.escrow_status == 'held':
-                        dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
-                else:
-                    # Taker raised dispute: award reward to taker, complete task, and refund bond
+                    # Micro-rewards for poster jurors
+                    winning_votes = dispute.votes.filter(vote_choice='poster')
+                    for vote in winning_votes:
+                        juror_profile = vote.voter.userprofile
+                        juror_profile.rewards += 10
+                        juror_profile.save()
+                        RewardLedger.objects.create(
+                            user=vote.voter,
+                            task=task,
+                            amount=10,
+                            transaction_type='juror_reward',
+                            description=f"Jury voting reward for expired dispute resolution on task: '{task.title}'"
+                        )
+
+                elif w_taker > w_poster:
+                    # Leading vote for Taker
+                    if dispute.raised_by == task.taken_by:
+                        if dispute.escrow_status == 'held':
+                            dispute.refund_deposit(reason_description=f"Deposit bond refunded on expired dispute for task '{task.title}'")
+                    else:
+                        if dispute.escrow_status == 'held':
+                            dispute.forfeit_deposit(beneficiary=task.taken_by, reason_description=f"Deposit bond forfeited on expired dispute for task '{task.title}'")
+
                     if task.taken_by:
                         taker_profile = task.taken_by.userprofile
                         taker_profile.rewards += task.reward
@@ -63,13 +89,67 @@ class Command(BaseCommand):
                             task=task,
                             amount=task.reward,
                             transaction_type='task_completion',
-                            description=f"Awarded reward for auto-resolved expired dispute on task: '{task.title}'"
+                            description=f"Awarded reward for expired dispute on task: '{task.title}'"
                         )
+
                     task.status = 'completed'
                     task.save()
 
-                    if dispute.escrow_status == 'held':
-                        dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
+                    # Micro-rewards for taker jurors
+                    winning_votes = dispute.votes.filter(vote_choice='taker')
+                    for vote in winning_votes:
+                        juror_profile = vote.voter.userprofile
+                        juror_profile.rewards += 10
+                        juror_profile.save()
+                        RewardLedger.objects.create(
+                            user=vote.voter,
+                            task=task,
+                            amount=10,
+                            transaction_type='juror_reward',
+                            description=f"Jury voting reward for expired dispute resolution on task: '{task.title}'"
+                        )
+
+                else:
+                    # Fallback to default resolution
+                    if dispute.raised_by == task.posted_by:
+                        poster_profile = task.posted_by.userprofile
+                        poster_profile.rewards += task.reward
+                        poster_profile.save()
+
+                        task.status = 'cancelled'
+                        task.save()
+
+                        RewardLedger.objects.create(
+                            user=task.posted_by,
+                            task=task,
+                            amount=task.reward,
+                            transaction_type='task_cancellation',
+                            description=f"Refund for expired dispute on task: '{task.title}'"
+                        )
+
+                        if dispute.escrow_status == 'held':
+                            dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
+                    else:
+                        if task.taken_by:
+                            taker_profile = task.taken_by.userprofile
+                            taker_profile.rewards += task.reward
+                            taker_profile.save()
+
+                            RewardLedger.objects.create(
+                                user=task.taken_by,
+                                task=task,
+                                amount=task.reward,
+                                transaction_type='task_completion',
+                                description=f"Awarded reward for auto-resolved expired dispute on task: '{task.title}'"
+                            )
+                        task.status = 'completed'
+                        task.save()
+
+                        if dispute.escrow_status == 'held':
+                            dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
+
+                dispute.status = 'resolved'
+                dispute.save()
 
                 # Notify participants
                 participants = [task.posted_by]

@@ -1,7 +1,10 @@
 import math
+from datetime import timedelta
 from django.db import models
+from django.db.models import Sum
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.urls import reverse
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -68,11 +71,12 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('juror_reward', 'Juror Reward Points Awarded'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -141,6 +145,195 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+    def get_vote_weight(self, user):
+        if not hasattr(user, 'userprofile'):
+            return 1
+        rewards = user.userprofile.rewards
+        if rewards >= 3000:
+            return 5
+        elif rewards >= 1500:
+            return 3
+        elif rewards >= 500:
+            return 2
+        else:
+            return 1
+
+    def can_user_vote(self, user):
+        if not user or not user.is_authenticated:
+            return False
+        if self.status != 'open':
+            return False
+        if user == self.task.posted_by or user == self.task.taken_by:
+            return False
+        if not hasattr(user, 'userprofile'):
+            return False
+        if user.userprofile.rewards < 100:
+            return False
+        if user.date_joined and (timezone.now() - user.date_joined < timedelta(hours=24)):
+            return False
+        if self.votes.filter(voter=user).exists():
+            return False
+        return True
+
+    def get_weighted_tally(self):
+        poster_votes = self.votes.filter(vote_choice='poster')
+        taker_votes = self.votes.filter(vote_choice='taker')
+        w_poster = poster_votes.aggregate(Sum('weight'))['weight__sum'] or 0
+        w_taker = taker_votes.aggregate(Sum('weight'))['weight__sum'] or 0
+        w_total = w_poster + w_taker
+        poster_count = poster_votes.count()
+        taker_count = taker_votes.count()
+        total_voters = self.votes.count()
+        return {
+            'poster_weight': w_poster,
+            'taker_weight': w_taker,
+            'total_weight': w_total,
+            'poster_count': poster_count,
+            'taker_count': taker_count,
+            'total_voters': total_voters,
+        }
+
+    def has_quorum(self):
+        tally = self.get_weighted_tally()
+        return tally['total_weight'] >= 10 and tally['total_voters'] >= 3
+
+    def check_and_execute_consensus(self):
+        if self.status != 'open':
+            return False
+        if not self.has_quorum():
+            return False
+
+        tally = self.get_weighted_tally()
+        w_total = tally['total_weight']
+        if w_total == 0:
+            return False
+
+        w_poster = tally['poster_weight']
+        w_taker = tally['taker_weight']
+
+        poster_ratio = w_poster / w_total
+        taker_ratio = w_taker / w_total
+
+        task = self.task
+
+        if poster_ratio >= 0.60:
+            if self.raised_by == task.posted_by:
+                self.refund_deposit(reason_description=f"Security deposit bond refunded for dispute on task: '{task.title}'")
+            else:
+                self.forfeit_deposit(beneficiary=task.posted_by)
+
+            poster_profile = task.posted_by.userprofile
+            poster_profile.rewards += task.reward
+            poster_profile.save()
+
+            RewardLedger.objects.create(
+                user=task.posted_by,
+                task=task,
+                amount=task.reward,
+                transaction_type='task_cancellation',
+                description=f"Task reward refunded for resolved dispute on task: '{task.title}'"
+            )
+
+            task.status = 'cancelled'
+            task.save()
+            self.status = 'resolved'
+            self.save()
+
+            winning_votes = self.votes.filter(vote_choice='poster')
+            for vote in winning_votes:
+                juror_profile = vote.voter.userprofile
+                juror_profile.rewards += 10
+                juror_profile.save()
+                RewardLedger.objects.create(
+                    user=vote.voter,
+                    task=task,
+                    amount=10,
+                    transaction_type='juror_reward',
+                    description=f"Jury voting reward for dispute resolution on task: '{task.title}'"
+                )
+
+            Notification.objects.create(
+                recipient=task.posted_by,
+                message=f"Dispute for task '{task.title}' was resolved in your favor by community jury voting.",
+                link=reverse('dispute_detail', args=[self.id])
+            )
+            if task.taken_by:
+                Notification.objects.create(
+                    recipient=task.taken_by,
+                    message=f"Dispute for task '{task.title}' was resolved in favor of the poster by community jury voting.",
+                    link=reverse('dispute_detail', args=[self.id])
+                )
+            return True
+
+        elif taker_ratio >= 0.60:
+            if self.raised_by == task.taken_by:
+                self.refund_deposit(reason_description=f"Security deposit bond refunded for dispute on task: '{task.title}'")
+            else:
+                self.forfeit_deposit(beneficiary=task.taken_by)
+
+            if task.taken_by:
+                taker_profile = task.taken_by.userprofile
+                taker_profile.rewards += task.reward
+                taker_profile.save()
+
+                RewardLedger.objects.create(
+                    user=task.taken_by,
+                    task=task,
+                    amount=task.reward,
+                    transaction_type='task_completion',
+                    description=f"Awarded reward for resolved dispute on task: '{task.title}'"
+                )
+
+            task.status = 'completed'
+            task.save()
+            self.status = 'resolved'
+            self.save()
+
+            winning_votes = self.votes.filter(vote_choice='taker')
+            for vote in winning_votes:
+                juror_profile = vote.voter.userprofile
+                juror_profile.rewards += 10
+                juror_profile.save()
+                RewardLedger.objects.create(
+                    user=vote.voter,
+                    task=task,
+                    amount=10,
+                    transaction_type='juror_reward',
+                    description=f"Jury voting reward for dispute resolution on task: '{task.title}'"
+                )
+
+            Notification.objects.create(
+                recipient=task.posted_by,
+                message=f"Dispute for task '{task.title}' was resolved in favor of the taker by community jury voting.",
+                link=reverse('dispute_detail', args=[self.id])
+            )
+            if task.taken_by:
+                Notification.objects.create(
+                    recipient=task.taken_by,
+                    message=f"Dispute for task '{task.title}' was resolved in your favor by community jury voting.",
+                    link=reverse('dispute_detail', args=[self.id])
+                )
+            return True
+
+        return False
+
+class DisputeVote(models.Model):
+    VOTE_CHOICES = (
+        ('poster', 'In Favor of Poster'),
+        ('taker', 'In Favor of Taker'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    vote_choice = models.CharField(max_length=10, choices=VOTE_CHOICES)
+    weight = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'voter')
+
+    def __str__(self):
+        return f"Vote by {self.voter.username} on dispute {self.dispute.id}: {self.vote_choice} (weight: {self.weight})"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)

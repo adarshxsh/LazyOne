@@ -2,7 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, Task, Notification, RewardLedger, DisputeVote
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,14 +10,81 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+    is_participant = (request.user == task.posted_by or request.user == task.taken_by)
+
+    if not is_participant and not request.user.is_staff and dispute.status != 'open':
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+
+    tally = dispute.get_weighted_tally()
+    w_poster = tally['poster_weight']
+    w_taker = tally['taker_weight']
+    w_total = tally['total_weight']
+
+    poster_pct = round((w_poster / w_total * 100), 1) if w_total > 0 else 0
+    taker_pct = round((w_taker / w_total * 100), 1) if w_total > 0 else 0
+    quorum_pct = min(100, round((w_total / 10 * 100), 1))
+    voter_quorum_pct = min(100, round((tally['total_voters'] / 3 * 100), 1))
+
+    has_quorum = dispute.has_quorum()
+    can_vote = dispute.can_user_vote(request.user)
+    user_vote = DisputeVote.objects.filter(dispute=dispute, voter=request.user).first() if request.user.is_authenticated else None
+    user_weight = dispute.get_vote_weight(request.user) if request.user.is_authenticated else 0
+
+    conversation = getattr(task, 'conversation', None) or task.main_chat
+    chat_messages = conversation.messages.all() if conversation else None
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'tally': tally,
+        'poster_pct': poster_pct,
+        'taker_pct': taker_pct,
+        'quorum_pct': quorum_pct,
+        'voter_quorum_pct': voter_quorum_pct,
+        'has_quorum': has_quorum,
+        'can_vote': can_vote,
+        'user_vote': user_vote,
+        'user_weight': user_weight,
+        'conversation': conversation,
+        'chat_messages': chat_messages,
+        'is_participant': is_participant,
     }
     return render(request, 'dispute_detail.html', context)
+
+@login_required(login_url='/login/')
+@require_POST
+def cast_dispute_vote(request, dispute_id):
+    with transaction.atomic():
+        dispute = Dispute.objects.select_for_update().get(id=dispute_id)
+        if dispute.status != 'open':
+            messages.error(request, "This dispute is no longer open for voting.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+        if not dispute.can_user_vote(request.user):
+            messages.error(request, "You are not eligible to vote on this dispute.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+        vote_choice = request.POST.get('vote_choice')
+        if vote_choice not in ['poster', 'taker']:
+            messages.error(request, "Invalid vote choice.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+        weight = dispute.get_vote_weight(request.user)
+        DisputeVote.objects.create(
+            dispute=dispute,
+            voter=request.user,
+            vote_choice=vote_choice,
+            weight=weight
+        )
+
+        resolved = dispute.check_and_execute_consensus()
+        if resolved:
+            messages.success(request, "Your vote has been recorded. Voting quorum and supermajority consensus were reached, and the dispute has been resolved!")
+        else:
+            messages.success(request, f"Your vote (weight: {weight}) has been recorded successfully.")
+
+    return redirect('dispute_detail', dispute_id=dispute.id)
 
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
