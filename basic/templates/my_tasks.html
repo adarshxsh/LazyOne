@@ -139,9 +139,15 @@
             <p><strong>Your Current Reward Balance:</strong> <span id="modal-user-balance">{{ user.userprofile.rewards }}</span> points</p>
             <p id="modal-insufficient-warning" class="text-red-600 font-semibold hidden mt-1">Warning: You do not have enough reward points to post this deposit bond!</p>
         </div>
-        <form id="dispute-form" method="post">
+        <form id="dispute-form" method="post" enctype="multipart/form-data">
             {% csrf_token %}
-            <textarea id="dispute-reason" name="reason" rows="4" required class="w-full px-4 py-3 bg-white border border-gray-300 rounded-lg text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-600"></textarea>
+            <label for="dispute-reason" class="block text-sm font-medium text-gray-700 mb-1">Reason for Dispute</label>
+            <textarea id="dispute-reason" name="reason" rows="4" required class="w-full px-4 py-3 bg-white border border-gray-300 rounded-lg text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-600 mb-4"></textarea>
+
+            <label for="dispute-evidence" class="block text-sm font-medium text-gray-700 mb-1">Attach Evidence (optional)</label>
+            <input type="file" id="dispute-evidence" name="evidence" multiple class="w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-cyan-50 file:text-cyan-700 hover:file:bg-cyan-100 mb-2" />
+            <p class="text-xs text-gray-500 mb-4">Allowed files: PNG, JPG, PDF, TXT, DOC, DOCX, ZIP (Max: 10MB per file)</p>
+
             <div class="mt-6 flex justify-end space-x-4">
                 <button type="button" onclick="closeDisputeModal()" class="px-6 py-2 rounded-lg text-white bg-gray-600 hover:bg-gray-700 transition-colors">Cancel</button>
                 <button id="dispute-submit-btn" type="submit" class="px-6 py-2 rounded-lg text-white font-semibold bg-red-600 hover:bg-red-700 transition-colors">Submit Dispute</button>
