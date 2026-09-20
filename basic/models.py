@@ -68,6 +68,9 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('juror_stake', 'Juror Vote Stake Held'),
+        ('juror_refund', 'Juror Vote Stake Refunded'),
+        ('juror_reward', 'Juror Consensus Reward Awarded'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
@@ -141,6 +144,51 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class JuryPool(models.Model):
+    STATUS_CHOICES = (
+        ('active', 'Active'),
+        ('resolved', 'Resolved'),
+    )
+    dispute = models.OneToOneField(Dispute, on_delete=models.CASCADE, related_name='jury_pool')
+    pool_size = models.PositiveIntegerField(default=5)
+    required_stake = models.PositiveIntegerField(default=20)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"JuryPool for dispute on task: {self.dispute.task.title}"
+
+class JurorAssignment(models.Model):
+    STATUS_CHOICES = (
+        ('assigned', 'Assigned'),
+        ('voted', 'Voted'),
+        ('replaced', 'Replaced'),
+    )
+    jury_pool = models.ForeignKey(JuryPool, on_delete=models.CASCADE, related_name='assignments')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='juror_assignments')
+    assigned_at = models.DateTimeField(default=timezone.now)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='assigned')
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = ('jury_pool', 'user')
+
+    def __str__(self):
+        return f"Juror {self.user.username} in {self.jury_pool}"
+
+class DisputeVote(models.Model):
+    jury_pool = models.ForeignKey(JuryPool, on_delete=models.CASCADE, related_name='votes')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    vote_for = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes_received')
+    stake_amount = models.PositiveIntegerField(default=20)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('jury_pool', 'juror')
+
+    def __str__(self):
+        return f"Vote by {self.juror.username} for {self.vote_for.username}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
