@@ -23,6 +23,48 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Jury Panel & Consensus</h3>
+            {% if jury %}
+                <p><strong>Assigned Jurors:</strong> {{ jury.jurors.count }} neutral peer(s)</p>
+
+                {% if is_juror %}
+                    <div class="mt-4 p-4 bg-gray-800 rounded-lg border border-gray-700">
+                        <h4 class="text-lg font-bold text-cyan-300 mb-2">Juror Action</h4>
+                        {% if dispute.status == 'open' and not has_voted %}
+                            <p class="text-sm mb-4 text-gray-300">Please review the task and dispute reason, then cast your neutral vote:</p>
+                            <form method="POST" action="{% url 'cast_jury_vote' dispute.id %}" class="flex gap-4">
+                                {% csrf_token %}
+                                <button type="submit" name="vote" value="poster_wins" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors text-sm">
+                                    Vote Poster Wins
+                                </button>
+                                <button type="submit" name="vote" value="taker_wins" class="bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors text-sm">
+                                    Vote Taker Wins
+                                </button>
+                            </form>
+                        {% elif has_voted %}
+                            <p class="text-green-400 font-medium">You have cast your vote: <strong>{{ user_vote.get_vote_display }}</strong></p>
+                        {% else %}
+                            <p class="text-gray-400">Voting is closed for this dispute.</p>
+                        {% endif %}
+                    </div>
+                {% endif %}
+
+                <div class="mt-4 p-4 bg-gray-800 rounded-lg border border-gray-700">
+                    <h4 class="text-lg font-bold text-cyan-300 mb-2">Vote Tallies</h4>
+                    {% if show_tallies %}
+                        <p><strong>Poster Wins Votes:</strong> {{ poster_votes }}</p>
+                        <p><strong>Taker Wins Votes:</strong> {{ taker_votes }}</p>
+                        <p><strong>Total Votes Cast:</strong> {{ total_votes }} / {{ jury.jurors.count }}</p>
+                    {% else %}
+                        <p class="text-yellow-400 text-sm">Active vote tallies remain hidden from jurors until you have cast your vote or until the dispute is resolved.</p>
+                    {% endif %}
+                </div>
+            {% else %}
+                <p class="text-gray-400">No jury panel assigned to this dispute.</p>
+            {% endif %}
+        </div>
     </div>
 
 {% endblock %}
