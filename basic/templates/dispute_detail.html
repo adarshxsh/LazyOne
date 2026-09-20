@@ -23,6 +23,37 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if dispute.status == 'open' %}
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Add Evidence</h3>
+            <form action="{% url 'add_evidence' dispute.id %}" method="post" class="space-y-3">
+                {% csrf_token %}
+                <textarea name="evidence" rows="3" required placeholder="Describe additional evidence..." class="w-full p-3 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"></textarea>
+                <button type="submit" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-lg transition-colors">Submit Evidence</button>
+            </form>
+        </div>
+        {% endif %}
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Audit History</h3>
+            <div class="space-y-3">
+                {% for event in dispute.audit_events.all %}
+                <div class="p-3 bg-gray-900/50 rounded-lg border border-gray-800 text-sm">
+                    <div class="flex justify-between text-gray-400 mb-1">
+                        <span class="font-bold text-cyan-300">{{ event.get_event_type_display }}</span>
+                        <span>{{ event.timestamp|date:"N j, Y, g:i a" }}</span>
+                    </div>
+                    <p class="text-gray-300">Actor: <span class="text-white">{% if event.actor %}{{ event.actor.username }}{% else %}System{% endif %}</span></p>
+                    {% if event.metadata %}
+                    <pre class="mt-1 p-2 bg-black/40 rounded text-xs text-gray-400 overflow-x-auto">{{ event.metadata }}</pre>
+                    {% endif %}
+                </div>
+                {% empty %}
+                <p class="text-gray-500 italic">No audit records found.</p>
+                {% endfor %}
+            </div>
+        </div>
     </div>
 
 {% endblock %}

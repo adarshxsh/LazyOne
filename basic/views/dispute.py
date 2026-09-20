@@ -2,7 +2,8 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, Task, RewardLedger
+from ..signals import dispute_state_changed
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -74,10 +75,16 @@ def raise_dispute(request, task_id):
             task.status = 'disputed'
             task.save()
 
-            Notification.objects.create(
-                recipient=task.posted_by,
-                message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
-                link=reverse('dispute_detail', args=[dispute.id])
+            dispute_state_changed.send(
+                sender=Dispute,
+                dispute=dispute,
+                event_type='DISPUTE_RAISED',
+                actor=request.user,
+                metadata={
+                    'reason': reason,
+                    'deposit_amount': deposit_amount,
+                    'message': f"{request.user.username} has raised a dispute for your task: '{task.title}'."
+                }
             )
         messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
         return redirect('dispute_detail', dispute_id=dispute.id)
@@ -98,10 +105,44 @@ def withdraw_dispute(request, dispute_id):
         task.status = 'in_progress'
         task.save()
 
-        Notification.objects.create(
-            recipient=task.posted_by,
-            message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
-            link=reverse('my_tasks')
+        dispute_state_changed.send(
+            sender=Dispute,
+            dispute=dispute,
+            event_type='DISPUTE_WITHDRAWN',
+            actor=request.user,
+            metadata={
+                'action': 'withdrawn',
+                'message': f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
+                'link': reverse('my_tasks')
+            }
         )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def add_evidence(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+        messages.error(request, "You are not authorized to add evidence to this dispute.")
+        return redirect('home')
+
+    evidence_text = request.POST.get('evidence') or request.POST.get('evidence_text') or ''
+    if not evidence_text:
+        messages.error(request, "Evidence description cannot be empty.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    with transaction.atomic():
+        dispute_state_changed.send(
+            sender=Dispute,
+            dispute=dispute,
+            event_type='EVIDENCE_ADDED',
+            actor=request.user,
+            metadata={
+                'evidence': evidence_text,
+                'message': f"{request.user.username} added new evidence for dispute on task: '{task.title}'."
+            }
+        )
+    messages.success(request, "Evidence successfully submitted.")
+    return redirect('dispute_detail', dispute_id=dispute.id)
