@@ -3,7 +3,8 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 from django.db import transaction
 from django.urls import reverse
-from basic.models import Dispute, RewardLedger, Notification
+from basic.models import Dispute, RewardLedger
+from basic.signals import dispute_state_changed
 
 class Command(BaseCommand):
     help = 'Resolves expired open disputes, refunds/forfeits escrowed bonds, and settles task points.'
@@ -71,18 +72,16 @@ class Command(BaseCommand):
                     if dispute.escrow_status == 'held':
                         dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
 
-                # Notify participants
-                participants = [task.posted_by]
-                if task.taken_by and task.taken_by not in participants:
-                    participants.append(task.taken_by)
-
-                dispute_link = reverse('dispute_detail', args=[dispute.id])
-                for participant in participants:
-                    Notification.objects.create(
-                        recipient=participant,
-                        message=f"Dispute for task '{task.title}' has expired ({days}d SLA) and was automatically resolved.",
-                        link=dispute_link
-                    )
+                dispute_state_changed.send(
+                    sender=Dispute,
+                    dispute=dispute,
+                    event_type='DISPUTE_EXPIRED',
+                    actor=None,
+                    metadata={
+                        'days_sla': days,
+                        'message': f"Dispute for task '{task.title}' has expired ({days}d SLA) and was automatically resolved."
+                    }
+                )
 
                 count += 1
 

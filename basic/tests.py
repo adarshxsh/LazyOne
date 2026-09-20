@@ -182,3 +182,161 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+from .models import DisputeAuditEvent, Notification
+from django.core.management import call_command
+from django.db import transaction, DatabaseError
+
+
+class DisputeAuditLoggingAndSignalTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=200)
+
+        self.reviewer = User.objects.create_user(username='reviewer', password='password123')
+        self.reviewer_profile = UserProfile.objects.create(user=self.reviewer, rewards=500)
+
+        self.task = Task.objects.create(
+            title="Audit Test Task",
+            description="Testing Audit Logging",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=timezone.now() + timedelta(days=3)
+        )
+        self.conv = Conversation.objects.create(task=self.task)
+        self.conv.participants.add(self.poster, self.taker, self.reviewer)
+
+    def test_raise_dispute_creates_audit_event_and_notifications(self):
+        self.client.login(username='taker', password='password123')
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse('raise_dispute', args=[self.task.id]),
+                {'reason': 'Incomplete instructions'}
+            )
+        dispute = Dispute.objects.get(task=self.task)
+        audit_event = DisputeAuditEvent.objects.filter(dispute=dispute, event_type='DISPUTE_RAISED').first()
+        self.assertIsNotNone(audit_event)
+        self.assertEqual(audit_event.actor, self.taker)
+        self.assertEqual(audit_event.metadata.get('reason'), 'Incomplete instructions')
+
+        # Multi-party notifications should be dispatched to poster, taker, and reviewer (conversation participant)
+        poster_notifs = Notification.objects.filter(recipient=self.poster)
+        taker_notifs = Notification.objects.filter(recipient=self.taker)
+        reviewer_notifs = Notification.objects.filter(recipient=self.reviewer)
+
+        self.assertTrue(poster_notifs.exists())
+        self.assertTrue(taker_notifs.exists())
+        self.assertTrue(reviewer_notifs.exists())
+
+    def test_add_evidence_creates_audit_event_and_notifications(self):
+        self.client.login(username='taker', password='password123')
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(
+                reverse('raise_dispute', args=[self.task.id]),
+                {'reason': 'Need clarify'}
+            )
+        dispute = Dispute.objects.get(task=self.task)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse('add_evidence', args=[dispute.id]),
+                {'evidence': 'Attached screenshot of finished work.'}
+            )
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+        evidence_event = DisputeAuditEvent.objects.filter(dispute=dispute, event_type='EVIDENCE_ADDED').first()
+        self.assertIsNotNone(evidence_event)
+        self.assertEqual(evidence_event.actor, self.taker)
+        self.assertEqual(evidence_event.metadata.get('evidence'), 'Attached screenshot of finished work.')
+
+    def test_withdraw_dispute_creates_audit_event(self):
+        self.client.login(username='taker', password='password123')
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(
+                reverse('raise_dispute', args=[self.task.id]),
+                {'reason': 'Mistake'}
+            )
+        dispute = Dispute.objects.get(task=self.task)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+
+        withdraw_event = DisputeAuditEvent.objects.filter(dispute=dispute, event_type='DISPUTE_WITHDRAWN').first()
+        self.assertIsNotNone(withdraw_event)
+        self.assertEqual(withdraw_event.actor, self.taker)
+
+    def test_resolve_dispute_via_complete_task_creates_audit_event(self):
+        self.client.login(username='taker', password='password123')
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(
+                reverse('raise_dispute', args=[self.task.id]),
+                {'reason': 'Pending work'}
+            )
+        dispute = Dispute.objects.get(task=self.task)
+
+        self.client.login(username='poster', password='password123')
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.get(reverse('complete_task', args=[self.task.id]))
+
+        resolve_event = DisputeAuditEvent.objects.filter(dispute=dispute, event_type='DISPUTE_RESOLVED').first()
+        self.assertIsNotNone(resolve_event)
+        self.assertEqual(resolve_event.actor, self.poster)
+
+    def test_auto_expiration_creates_expired_audit_event(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Expired dispute test',
+            deposit_amount=50,
+            escrow_status='held',
+            status='open'
+        )
+        # Set created_at to 10 days ago
+        dispute.created_at = timezone.now() - timedelta(days=10)
+        dispute.save()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            call_command('resolve_expired_disputes', days=7)
+
+        expired_event = DisputeAuditEvent.objects.filter(dispute=dispute, event_type='DISPUTE_EXPIRED').first()
+        self.assertIsNotNone(expired_event)
+        self.assertIsNone(expired_event.actor)
+        self.assertEqual(expired_event.metadata.get('days_sla'), 7)
+
+    def test_transaction_rollback_prevents_audit_and_notification(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Rollback test',
+            deposit_amount=50,
+            escrow_status='held',
+            status='open'
+        )
+        initial_event_count = DisputeAuditEvent.objects.count()
+        initial_notif_count = Notification.objects.count()
+
+        try:
+            with transaction.atomic():
+                from .signals import dispute_state_changed
+                dispute_state_changed.send(
+                    sender=Dispute,
+                    dispute=dispute,
+                    event_type='DISPUTE_RESOLVED',
+                    actor=self.poster,
+                    metadata={'test': 'rollback'}
+                )
+                # Force a rollback
+                raise DatabaseError("Forced rollback")
+        except DatabaseError:
+            pass
+
+        # Since transaction was rolled back, on_commit should not fire
+        self.assertEqual(DisputeAuditEvent.objects.count(), initial_event_count)
+        self.assertEqual(Notification.objects.count(), initial_notif_count)
+

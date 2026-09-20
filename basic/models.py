@@ -142,6 +142,28 @@ class Dispute(models.Model):
             self.escrow_status = 'forfeited'
             self.save()
 
+class DisputeAuditEvent(models.Model):
+    EVENT_TYPES = (
+        ('DISPUTE_RAISED', 'Dispute Raised'),
+        ('EVIDENCE_ADDED', 'Evidence Added'),
+        ('DISPUTE_RESOLVED', 'Dispute Resolved'),
+        ('DISPUTE_WITHDRAWN', 'Dispute Withdrawn'),
+        ('DISPUTE_EXPIRED', 'Dispute Expired'),
+    )
+
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='audit_events')
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='dispute_audit_actions')
+    event_type = models.CharField(max_length=50, choices=EVENT_TYPES)
+    metadata = models.JSONField(default=dict, blank=True)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        actor_name = self.actor.username if self.actor else "System"
+        return f"[{self.event_type}] Dispute #{self.dispute_id} by {actor_name} at {self.timestamp}"
+
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
     to_user = models.ForeignKey(User, related_name='to_user', on_delete=models.CASCADE)
