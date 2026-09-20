@@ -1,7 +1,8 @@
 import math
-from django.db import models
+from django.db import models, transaction
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.core.exceptions import ValidationError
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -82,8 +83,20 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('evidence_submission', 'Evidence Submission'),
+        ('voting', 'Voting'),
+        ('appealed', 'Appealed'),
         ('resolved', 'Resolved'),
+        ('closed', 'Closed'),
     )
+    VALID_TRANSITIONS = {
+        'open': {'evidence_submission', 'closed', 'resolved'},
+        'evidence_submission': {'voting', 'closed', 'resolved'},
+        'voting': {'appealed', 'resolved', 'closed'},
+        'appealed': {'resolved', 'closed'},
+        'resolved': {'appealed', 'closed'},
+        'closed': set(),
+    }
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
         ('refunded', 'Refunded'),
@@ -92,13 +105,49 @@ class Dispute(models.Model):
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def transition_to(self, target_state, save=True):
+        if target_state not in dict(self.STATUS_CHOICES):
+            raise ValidationError(f"Invalid target state '{target_state}'.")
+
+        allowed_states = self.VALID_TRANSITIONS.get(self.status, set())
+        if target_state not in allowed_states:
+            raise ValidationError(
+                f"Cannot transition dispute from '{self.status}' to '{target_state}'."
+            )
+
+        with transaction.atomic():
+            self.status = target_state
+            if save:
+                self.save(update_fields=['status'] if self.pk else None)
+        return self
+
+    def submit_evidence(self, save=True):
+        return self.transition_to('evidence_submission', save=save)
+
+    def start_voting(self, save=True):
+        return self.transition_to('voting', save=save)
+
+    def appeal(self, save=True):
+        return self.transition_to('appealed', save=save)
+
+    def resolve(self, save=True):
+        return self.transition_to('resolved', save=save)
+
+    def close(self, save=True):
+        return self.transition_to('closed', save=save)
+
+    def withdraw(self, save=True):
+        if self.status not in ['open', 'evidence_submission']:
+            raise ValidationError(f"Cannot withdraw dispute in '{self.status}' state.")
+        return self.transition_to('closed', save=save)
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
