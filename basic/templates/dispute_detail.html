@@ -23,6 +23,54 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-3">Supporting Evidence</h3>
+            {% if evidence_list or dispute.evidence.all %}
+                <ul class="space-y-3">
+                    {% for item in evidence_list|default:dispute.evidence.all %}
+                        <li class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 flex flex-col md:flex-row md:items-center justify-between gap-2">
+                            <div>
+                                <p class="font-semibold text-white">{{ item.original_filename }}</p>
+                                <p class="text-xs text-gray-400">
+                                    Size: {{ item.file_size|filesizeformat }} | Submitted by {{ item.uploaded_by.username }} on {{ item.created_at|date:"F d, Y H:i" }}
+                                </p>
+                                {% if item.description %}
+                                    <p class="text-sm text-gray-300 mt-1">{{ item.description }}</p>
+                                {% endif %}
+                            </div>
+                            <div>
+                                <a href="{% url 'download_dispute_evidence' item.id %}" class="inline-block bg-cyan-600 hover:bg-cyan-700 text-white text-sm px-3 py-1.5 rounded transition-colors">
+                                    Download
+                                </a>
+                            </div>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="text-gray-400 italic">No evidence files have been submitted yet.</p>
+            {% endif %}
+        </div>
+
+        {% if dispute.status == 'open' and request.user == task.posted_by or request.user == task.taken_by or request.user.is_staff %}
+            <div class="bg-gray-900/40 p-5 rounded-lg border border-gray-700">
+                <h3 class="text-lg font-semibold text-cyan-400 mb-3">Upload Supporting Evidence</h3>
+                <form action="{% url 'upload_dispute_evidence' dispute.id %}" method="post" enctype="multipart/form-data" class="space-y-4">
+                    {% csrf_token %}
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-1">Select File(s) (.png, .jpg, .jpeg, .pdf, .txt, .zip - max 10MB):</label>
+                        <input type="file" name="evidence" multiple required accept=".png,.jpg,.jpeg,.pdf,.txt,.zip" class="w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-cyan-600 file:text-white hover:file:bg-cyan-700 cursor-pointer">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-1">Description (optional):</label>
+                        <textarea name="description" rows="2" placeholder="Provide additional details about this evidence..." class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-200 focus:outline-none focus:border-cyan-500 text-sm"></textarea>
+                    </div>
+                    <button type="submit" class="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-colors">
+                        Upload Evidence
+                    </button>
+                </form>
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}

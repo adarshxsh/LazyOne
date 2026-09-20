@@ -142,6 +142,25 @@ class Dispute(models.Model):
             self.escrow_status = 'forfeited'
             self.save()
 
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidence')
+    uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_evidences')
+    file = models.FileField(upload_to='dispute_evidence/%Y/%m/%d/')
+    file_size = models.PositiveIntegerField(help_text="File size in bytes")
+    original_filename = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"Evidence {self.original_filename} for Dispute #{self.dispute.id}"
+
+    @property
+    def user(self):
+        return self.uploaded_by
+
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
     to_user = models.ForeignKey(User, related_name='to_user', on_delete=models.CASCADE)
