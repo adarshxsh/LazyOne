@@ -24,8 +24,11 @@ def raise_dispute(request, task_id):
     task = get_object_or_404(Task, id=task_id)
     if hasattr(task, 'dispute') and task.dispute.status == 'open':
         return redirect('dispute_detail', dispute_id=task.dispute.id)
-    if task.taken_by != request.user or task.status != 'in_progress':
-        messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
+    if request.user != task.posted_by and request.user != task.taken_by:
+        messages.error(request, "You are not authorized to raise a dispute for this task.")
+        return redirect('my_tasks')
+    if task.status != 'in_progress':
+        messages.error(request, "You can only raise a dispute for a task that is currently in progress.")
         return redirect('my_tasks')
     if request.method == 'POST':
         reason = request.POST.get('reason')
@@ -74,8 +77,9 @@ def raise_dispute(request, task_id):
             task.status = 'disputed'
             task.save()
 
+            counterparty = task.taken_by if request.user == task.posted_by else task.posted_by
             Notification.objects.create(
-                recipient=task.posted_by,
+                recipient=counterparty,
                 message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
                 link=reverse('dispute_detail', args=[dispute.id])
             )
@@ -86,20 +90,28 @@ def raise_dispute(request, task_id):
 @login_required(login_url='/login/')
 @require_POST
 def withdraw_dispute(request, dispute_id):
-    dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user)
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    if dispute.raised_by != request.user and not request.user.is_staff:
+        messages.error(request, "You are not authorized to withdraw this dispute.")
+        return redirect('my_tasks')
+    if dispute.status != 'open':
+        messages.error(request, "This dispute is not open and cannot be withdrawn.")
+        return redirect('my_tasks')
+
     task = dispute.task
     with transaction.atomic():
         dispute.refund_deposit(
             reason_description=f"Security deposit bond refunded for withdrawn dispute on task: '{task.title}'"
         )
-        dispute.status = 'resolved'
+        dispute.status = 'withdrawn'
         dispute.save()
 
         task.status = 'in_progress'
         task.save()
 
+        counterparty = task.taken_by if dispute.raised_by == task.posted_by else task.posted_by
         Notification.objects.create(
-            recipient=task.posted_by,
+            recipient=counterparty,
             message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
             link=reverse('my_tasks')
         )
