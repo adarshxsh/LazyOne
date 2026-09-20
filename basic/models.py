@@ -1,4 +1,6 @@
 import math
+from datetime import timedelta
+from django.conf import settings
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -95,10 +97,34 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    voting_deadline = models.DateTimeField(null=True, blank=True)
+    evidence_deadline = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    @property
+    def is_voting_expired(self):
+        if not self.voting_deadline:
+            return False
+        return timezone.now() >= self.voting_deadline
+
+    @property
+    def is_evidence_expired(self):
+        if not self.evidence_deadline:
+            return False
+        return timezone.now() >= self.evidence_deadline
+
+    def save(self, *args, **kwargs):
+        base_time = self.created_at if self.created_at else timezone.now()
+        if not self.voting_deadline:
+            voting_window = getattr(settings, 'DISPUTE_VOTING_WINDOW_HOURS', 72)
+            self.voting_deadline = base_time + timedelta(hours=voting_window)
+        if not self.evidence_deadline:
+            evidence_window = getattr(settings, 'DISPUTE_EVIDENCE_WINDOW_HOURS', 24)
+            self.evidence_deadline = base_time + timedelta(hours=evidence_window)
+        super().save(*args, **kwargs)
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:

@@ -17,6 +17,24 @@
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            {% if dispute.voting_deadline %}
+            <p><strong>Voting Deadline:</strong> {{ dispute.voting_deadline|date:"F d, Y, g:i a" }}
+                {% if dispute.is_voting_expired %}
+                    <span class="ml-2 px-2 py-0.5 text-xs rounded bg-red-500/20 text-red-300 font-semibold">(Voting Deadline Expired)</span>
+                {% else %}
+                    <span class="ml-2 px-2 py-0.5 text-xs rounded bg-cyan-500/20 text-cyan-300 font-semibold">({{ dispute.voting_deadline|timeuntil }} remaining)</span>
+                {% endif %}
+            </p>
+            {% endif %}
+            {% if dispute.evidence_deadline %}
+            <p><strong>Evidence Deadline:</strong> {{ dispute.evidence_deadline|date:"F d, Y, g:i a" }}
+                {% if dispute.is_evidence_expired %}
+                    <span class="ml-2 px-2 py-0.5 text-xs rounded bg-red-500/20 text-red-300 font-semibold">(Evidence Deadline Expired)</span>
+                {% else %}
+                    <span class="ml-2 px-2 py-0.5 text-xs rounded bg-cyan-500/20 text-cyan-300 font-semibold">({{ dispute.evidence_deadline|timeuntil }} remaining)</span>
+                {% endif %}
+            </p>
+            {% endif %}
         </div>
 
         <div>

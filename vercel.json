@@ -24,5 +24,11 @@
   ],
   "env": {
     "DJANGO_SETTINGS_MODULE": "LazyOne.settings"
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/resolve-expired-disputes/",
+      "schedule": "0 * * * *"
+    }
+  ]
 }

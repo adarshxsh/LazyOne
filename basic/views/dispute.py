@@ -1,7 +1,12 @@
+from datetime import timedelta
+from django.conf import settings
+from django.utils import timezone
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
+from django.core.management import call_command
+from django.http import JsonResponse, HttpResponseForbidden
 from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
@@ -42,6 +47,12 @@ def raise_dispute(request, task_id):
             )
             return redirect('my_tasks')
 
+        now = timezone.now()
+        voting_window = getattr(settings, 'DISPUTE_VOTING_WINDOW_HOURS', 72)
+        evidence_window = getattr(settings, 'DISPUTE_EVIDENCE_WINDOW_HOURS', 24)
+        voting_deadline = now + timedelta(hours=voting_window)
+        evidence_deadline = now + timedelta(hours=evidence_window)
+
         with transaction.atomic():
             user_profile.rewards -= deposit_amount
             user_profile.save()
@@ -53,6 +64,8 @@ def raise_dispute(request, task_id):
                 dispute.status = 'open'
                 dispute.deposit_amount = deposit_amount
                 dispute.escrow_status = 'held'
+                dispute.voting_deadline = voting_deadline
+                dispute.evidence_deadline = evidence_deadline
                 dispute.save()
             else:
                 dispute = Dispute.objects.create(
@@ -60,7 +73,9 @@ def raise_dispute(request, task_id):
                     raised_by=request.user,
                     reason=reason,
                     deposit_amount=deposit_amount,
-                    escrow_status='held'
+                    escrow_status='held',
+                    voting_deadline=voting_deadline,
+                    evidence_deadline=evidence_deadline
                 )
 
             RewardLedger.objects.create(
@@ -105,3 +120,12 @@ def withdraw_dispute(request, dispute_id):
         )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
+
+def cron_resolve_expired_disputes(request):
+    cron_secret = getattr(settings, 'CRON_SECRET', None)
+    if cron_secret:
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header != f"Bearer {cron_secret}":
+            return HttpResponseForbidden("Forbidden")
+    call_command('resolve_expired_disputes')
+    return JsonResponse({'status': 'ok', 'message': 'Expired disputes processed successfully'})

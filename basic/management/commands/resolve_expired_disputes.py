@@ -1,28 +1,33 @@
 from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-from django.db import transaction
+from django.db import transaction, models
 from django.urls import reverse
 from basic.models import Dispute, RewardLedger, Notification
 
 class Command(BaseCommand):
-    help = 'Resolves expired open disputes, refunds/forfeits escrowed bonds, and settles task points.'
+    help = 'Resolves expired open disputes based on voting_deadline, refunds/forfeits escrowed bonds, and settles task points.'
 
     def add_arguments(self, parser):
         parser.add_argument(
             '--days',
             type=int,
             default=7,
-            help='Number of days after dispute creation before considering it expired (default: 7)'
+            help='Legacy fallback: Number of days after dispute creation before considering it expired if voting_deadline is not set (default: 7)'
         )
 
     def handle(self, *args, **options):
         days = options['days']
         now = timezone.now()
-        expiry_threshold = now - timedelta(days=days)
+        fallback_threshold = now - timedelta(days=days)
 
-        # Find open disputes created before the expiration window
-        expired_disputes = Dispute.objects.filter(status='open', created_at__lte=expiry_threshold)
+        # Find open disputes where voting_deadline has passed (or created before legacy threshold)
+        expired_disputes = Dispute.objects.filter(
+            models.Q(status='open') & (
+                models.Q(voting_deadline__isnull=False, voting_deadline__lte=now) |
+                models.Q(voting_deadline__isnull=True, created_at__lte=fallback_threshold)
+            )
+        )
 
         count = 0
         for dispute in expired_disputes:
@@ -32,7 +37,7 @@ class Command(BaseCommand):
                 dispute.save()
 
                 if dispute.raised_by == task.posted_by:
-                    # Poster challenged an unresponsive taker: cancel task, refund task reward, forfeit bond
+                    # Poster challenged an unresponsive taker: cancel task, refund task reward, refund bond
                     poster_profile = task.posted_by.userprofile
                     poster_profile.rewards += task.reward
                     poster_profile.save()
@@ -80,7 +85,7 @@ class Command(BaseCommand):
                 for participant in participants:
                     Notification.objects.create(
                         recipient=participant,
-                        message=f"Dispute for task '{task.title}' has expired ({days}d SLA) and was automatically resolved.",
+                        message=f"Dispute for task '{task.title}' reached voting deadline and was automatically resolved.",
                         link=dispute_link
                     )
 
