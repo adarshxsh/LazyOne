@@ -5,6 +5,12 @@
 {% block content %}
     <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
 
+    {% if user.is_staff and dispute.flagged_for_staff %}
+        <div class="mb-6 p-4 bg-red-900/50 border border-red-500 rounded-lg text-red-200">
+            <strong>Staff Backup Required:</strong> The candidate juror pool fell below the minimum required panel size. Manual intervention is needed.
+        </div>
+    {% endif %}
+
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
@@ -23,6 +29,37 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if is_juror %}
+            <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 mt-6">
+                <h3 class="text-xl font-semibold text-cyan-400 mb-3">Community Juror Panel Vote</h3>
+                {% if dispute.status == 'open' %}
+                    {% if juror_assignment.vote %}
+                        <p class="text-green-400 font-medium">Your vote has been recorded: <span class="capitalize font-bold">{{ juror_assignment.get_vote_display }}</span>.</p>
+                    {% else %}
+                        <p class="mb-4 text-gray-300">As an assigned peer juror, please review the dispute reason and cast your vote:</p>
+                        <form method="POST" action="{% url 'submit_dispute_vote' dispute.id %}" class="space-y-4">
+                            {% csrf_token %}
+                            <div class="flex items-center space-x-6">
+                                <label class="flex items-center space-x-2 cursor-pointer text-white">
+                                    <input type="radio" name="vote" value="poster" required class="form-radio text-cyan-500">
+                                    <span>In Favor of Task Creator ({{ task.posted_by.username }})</span>
+                                </label>
+                                <label class="flex items-center space-x-2 cursor-pointer text-white">
+                                    <input type="radio" name="vote" value="taker" required class="form-radio text-cyan-500">
+                                    <span>In Favor of Task Worker ({{ task.taken_by.username }})</span>
+                                </label>
+                            </div>
+                            <button type="submit" class="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold rounded-lg shadow">
+                                Submit Peer Vote
+                            </button>
+                        </form>
+                    {% endif %}
+                {% else %}
+                    <p class="text-gray-400">Voting is closed for this dispute.</p>
+                {% endif %}
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}

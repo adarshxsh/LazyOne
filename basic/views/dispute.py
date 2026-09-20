@@ -2,7 +2,9 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from django.utils import timezone
+from ..models import Dispute, DisputeJuror, Task, Notification, RewardLedger
+from ..juror_engine import select_and_assign_jurors
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,12 +12,21 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+    is_juror = dispute.jurors.filter(id=request.user.id).exists()
+    is_participant = (request.user == task.posted_by or request.user == task.taken_by)
+
+    if not is_participant and not request.user.is_staff and not is_juror:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+
+    juror_assignment = DisputeJuror.objects.filter(dispute=dispute, user=request.user).first() if is_juror else None
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'is_juror': is_juror,
+        'is_participant': is_participant,
+        'juror_assignment': juror_assignment,
     }
     return render(request, 'dispute_detail.html', context)
 
@@ -74,6 +85,9 @@ def raise_dispute(request, task_id):
             task.status = 'disputed'
             task.save()
 
+            # Execute dynamic juror selection engine
+            select_and_assign_jurors(dispute)
+
             Notification.objects.create(
                 recipient=task.posted_by,
                 message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
@@ -82,6 +96,36 @@ def raise_dispute(request, task_id):
         messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def submit_dispute_vote(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    juror_assignment = DisputeJuror.objects.filter(dispute=dispute, user=request.user).first()
+    
+    if not juror_assignment:
+        messages.error(request, "You are not an assigned juror for this dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if dispute.status != 'open':
+        messages.error(request, "This dispute is no longer open for voting.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if juror_assignment.vote:
+        messages.error(request, "You have already submitted a vote for this dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    vote_choice = request.POST.get('vote')
+    if vote_choice not in ['poster', 'taker']:
+        messages.error(request, "Invalid vote selection.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    juror_assignment.vote = vote_choice
+    juror_assignment.voted_at = timezone.now()
+    juror_assignment.save()
+
+    messages.success(request, "Your peer vote has been recorded successfully.")
+    return redirect('dispute_detail', dispute_id=dispute.id)
 
 @login_required(login_url='/login/')
 @require_POST
