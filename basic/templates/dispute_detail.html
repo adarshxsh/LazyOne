@@ -13,7 +13,7 @@
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% elif dispute.status == 'admin_review' %}bg-red-500/20 text-red-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
@@ -23,6 +23,56 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if is_juror %}
+        <div class="bg-gray-800/80 p-6 rounded-lg border border-cyan-500/30">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-3">Juror Panel Action</h3>
+            {% if dispute.status == 'open' %}
+                {% if has_voted %}
+                    <p class="text-green-400 font-medium">You have submitted your vote for <strong>{{ juror_assignment.voted_for.username }}</strong>.</p>
+                {% else %}
+                    <p class="mb-4 text-sm text-gray-300">As an assigned neutral juror, please review the task context and vote for the party you support:</p>
+                    <form action="{% url 'vote_dispute' dispute.id %}" method="post" class="space-y-4">
+                        {% csrf_token %}
+                        <div class="space-y-2">
+                            <label class="flex items-center space-x-3 cursor-pointer">
+                                <input type="radio" name="voted_for" value="{{ task.posted_by.id }}" required class="text-cyan-500 focus:ring-cyan-500">
+                                <span>Vote in favor of Poster: <strong>{{ task.posted_by.username }}</strong></span>
+                            </label>
+                            {% if task.taken_by %}
+                            <label class="flex items-center space-x-3 cursor-pointer">
+                                <input type="radio" name="voted_for" value="{{ task.taken_by.id }}" required class="text-cyan-500 focus:ring-cyan-500">
+                                <span>Vote in favor of Taker: <strong>{{ task.taken_by.username }}</strong></span>
+                            </label>
+                            {% endif %}
+                        </div>
+                        <button type="submit" class="px-6 py-2 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-lg transition-colors">
+                            Submit Juror Vote
+                        </button>
+                    </form>
+                {% endif %}
+            {% else %}
+                <p class="text-gray-400">Voting is closed for this dispute.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if juror_assignments %}
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Assigned Jurors</h3>
+            <ul class="list-disc list-inside text-gray-300">
+                {% for assignment in juror_assignments %}
+                <li>Juror {{ forloop.counter }}: {{ assignment.juror.username }}
+                    {% if assignment.voted_for %}
+                        <span class="text-xs text-green-400 ml-2">(Voted)</span>
+                    {% else %}
+                        <span class="text-xs text-yellow-400 ml-2">(Pending Vote)</span>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}
