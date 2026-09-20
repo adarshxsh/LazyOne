@@ -22,7 +22,7 @@ def dispute_detail_view(request, dispute_id):
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
     task = get_object_or_404(Task, id=task_id)
-    if hasattr(task, 'dispute') and task.dispute.status == 'open':
+    if hasattr(task, 'dispute') and task.dispute.status in ['open', 'evidence_submission', 'voting', 'appealed']:
         return redirect('dispute_detail', dispute_id=task.dispute.id)
     if task.taken_by != request.user or task.status != 'in_progress':
         messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
@@ -60,8 +60,11 @@ def raise_dispute(request, task_id):
                     raised_by=request.user,
                     reason=reason,
                     deposit_amount=deposit_amount,
-                    escrow_status='held'
+                    escrow_status='held',
+                    status='open'
                 )
+
+            dispute.transition_to('evidence_submission')
 
             RewardLedger.objects.create(
                 user=request.user,
@@ -88,12 +91,15 @@ def raise_dispute(request, task_id):
 def withdraw_dispute(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user)
     task = dispute.task
+    if dispute.status not in ['open', 'evidence_submission']:
+        messages.error(request, "This dispute cannot be withdrawn in its current state.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
     with transaction.atomic():
         dispute.refund_deposit(
             reason_description=f"Security deposit bond refunded for withdrawn dispute on task: '{task.title}'"
         )
-        dispute.status = 'resolved'
-        dispute.save()
+        dispute.transition_to('closed')
 
         task.status = 'in_progress'
         task.save()

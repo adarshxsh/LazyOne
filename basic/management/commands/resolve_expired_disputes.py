@@ -21,15 +21,17 @@ class Command(BaseCommand):
         now = timezone.now()
         expiry_threshold = now - timedelta(days=days)
 
-        # Find open disputes created before the expiration window
-        expired_disputes = Dispute.objects.filter(status='open', created_at__lte=expiry_threshold)
+        # Find active disputes created before the expiration window
+        expired_disputes = Dispute.objects.filter(
+            status__in=['open', 'evidence_submission', 'voting', 'appealed'],
+            created_at__lte=expiry_threshold
+        )
 
         count = 0
         for dispute in expired_disputes:
             task = dispute.task
             with transaction.atomic():
-                dispute.status = 'resolved'
-                dispute.save()
+                dispute.transition_to('resolved')
 
                 if dispute.raised_by == task.posted_by:
                     # Poster challenged an unresponsive taker: cancel task, refund task reward, forfeit bond
