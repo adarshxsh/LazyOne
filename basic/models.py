@@ -68,11 +68,14 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('dispute_escrow_lock', 'Dispute Escrow Lock'),
+        ('dispute_escrow_release', 'Dispute Escrow Release'),
+        ('juror_reward', 'Juror Reward Stipend'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -117,16 +120,47 @@ class Dispute(models.Model):
             self.escrow_status = 'refunded'
             self.save()
 
-    def forfeit_deposit(self, beneficiary=None, reason_description=None):
+    def forfeit_deposit(self, beneficiary=None, reason_description=None, jurors=None, stipend_amount=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
-            if beneficiary:
+            eligible_jurors = []
+            if jurors:
+                task_poster = self.task.posted_by
+                task_taker = self.task.taken_by
+                for j in jurors:
+                    if j != task_poster and j != task_taker and j.id != task_poster.id and (task_taker is None or j.id != task_taker.id):
+                        if j not in eligible_jurors:
+                            eligible_jurors.append(j)
+
+            total_stipends = 0
+            if eligible_jurors:
+                if stipend_amount is not None:
+                    per_juror_stipend = stipend_amount
+                else:
+                    per_juror_stipend = self.deposit_amount // len(eligible_jurors)
+
+                for juror in eligible_jurors:
+                    juror_profile = juror.userprofile
+                    juror_profile.rewards += per_juror_stipend
+                    juror_profile.save()
+                    RewardLedger.objects.create(
+                        user=juror,
+                        task=self.task,
+                        amount=per_juror_stipend,
+                        transaction_type='juror_reward',
+                        description=f"Juror reward stipend for dispute on task: '{self.task.title}'"
+                    )
+                    total_stipends += per_juror_stipend
+
+            remaining_deposit = max(0, self.deposit_amount - total_stipends)
+
+            if beneficiary and remaining_deposit > 0:
                 beneficiary_profile = beneficiary.userprofile
-                beneficiary_profile.rewards += self.deposit_amount
+                beneficiary_profile.rewards += remaining_deposit
                 beneficiary_profile.save()
                 RewardLedger.objects.create(
                     user=beneficiary,
                     task=self.task,
-                    amount=self.deposit_amount,
+                    amount=remaining_deposit,
                     transaction_type='dispute_refund',
                     description=f"Forfeited dispute deposit bond awarded from task: '{self.task.title}'"
                 )
@@ -140,6 +174,26 @@ class Dispute(models.Model):
                 description=desc
             )
             self.escrow_status = 'forfeited'
+            self.save()
+
+    def resolve(self, winner=None, jurors=None, reason_description=None, stipend_amount=None):
+        from django.db import transaction
+        with transaction.atomic():
+            if self.escrow_status == 'held':
+                if winner and winner != self.raised_by:
+                    self.forfeit_deposit(beneficiary=winner, reason_description=reason_description, jurors=jurors, stipend_amount=stipend_amount)
+                else:
+                    self.refund_deposit(reason_description=reason_description)
+
+            RewardLedger.objects.create(
+                user=self.task.posted_by,
+                task=self.task,
+                amount=self.task.reward,
+                transaction_type='dispute_escrow_release',
+                description=f"Task reward points released from dispute escrow for task: '{self.task.title}'"
+            )
+
+            self.status = 'resolved'
             self.save()
 
 class FriendRequest(models.Model):
