@@ -1,0 +1,61 @@
+{% extends 'base.html' %}
+
+{% block title %}Community Disputes - {{ block.super }}{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div class="text-center">
+        <h1 class="text-3xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-4xl">Community Disputes Jury</h1>
+        <p class="mt-2 text-base text-gray-600 dark:text-gray-300">
+            Review open task disputes, evaluate evidence, and cast your vote to help establish fair community consensus.
+            Earn 10 micro-reward points for each valid vote!
+        </p>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {% for dispute in disputes %}
+        <div class="bg-gray-50 dark:bg-gray-900/60 p-6 rounded-xl border border-gray-200 dark:border-gray-700/80 shadow-md flex flex-col justify-between">
+            <div class="space-y-3">
+                <div class="flex justify-between items-start">
+                    <h3 class="text-xl font-bold text-gray-900 dark:text-white line-clamp-1">{{ dispute.task.title }}</h3>
+                    <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-yellow-500/20 text-yellow-700 dark:text-yellow-300 border border-yellow-500/30">
+                        Open
+                    </span>
+                </div>
+
+                <div class="text-sm space-y-1 text-gray-600 dark:text-gray-300">
+                    <p><span class="font-medium text-gray-700 dark:text-gray-200">Task Poster:</span> {{ dispute.task.posted_by.username }}</p>
+                    <p><span class="font-medium text-gray-700 dark:text-gray-200">Task Taker:</span> {{ dispute.task.taken_by.username|default:"N/A" }}</p>
+                    <p><span class="font-medium text-gray-700 dark:text-gray-200">Raised By:</span> {{ dispute.raised_by.username }}</p>
+                    <p><span class="font-medium text-gray-700 dark:text-gray-200">Escrow Deposit:</span> {{ dispute.deposit_amount }} points</p>
+                    <p><span class="font-medium text-gray-700 dark:text-gray-200">Raised On:</span> {{ dispute.created_at|date:"M d, Y" }}</p>
+                </div>
+
+                <div class="bg-gray-100 dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700 text-sm">
+                    <p class="font-semibold text-gray-800 dark:text-gray-200">Dispute Reason:</p>
+                    <p class="text-gray-600 dark:text-gray-400 line-clamp-2 mt-1">{{ dispute.reason }}</p>
+                </div>
+            </div>
+
+            <div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                <div>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">Votes Cast:</span>
+                    <span class="ml-1 font-bold text-cyan-600 dark:text-cyan-400">{{ dispute.votes.count }} / 5 (Quorum)</span>
+                </div>
+                <a href="{% url 'dispute_detail' dispute.id %}" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white font-medium text-sm rounded-lg transition-colors shadow">
+                    Review & Vote
+                </a>
+            </div>
+        </div>
+        {% empty %}
+        <div class="col-span-full text-center py-12 bg-gray-50 dark:bg-gray-900/40 rounded-xl border border-gray-200 dark:border-gray-700">
+            <svg class="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <h3 class="mt-2 text-lg font-medium text-gray-900 dark:text-white">No Open Disputes</h3>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">There are currently no active disputes requiring community jury voting.</p>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
