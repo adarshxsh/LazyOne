@@ -130,4 +130,6 @@ print("MEDIA_FILES: OK")
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 print("DEFAULT_AUTO_FIELD: OK")
 
+DISPUTE_EXPIRATION_HOURS = 72
+
 print("--- settings.py loaded successfully ---")

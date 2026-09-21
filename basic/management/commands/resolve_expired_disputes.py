@@ -2,6 +2,7 @@ from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from django.db import transaction
+from django.db.models import Q
 from django.urls import reverse
 from basic.models import Dispute, RewardLedger, Notification
 
@@ -12,17 +13,21 @@ class Command(BaseCommand):
         parser.add_argument(
             '--days',
             type=int,
-            default=7,
-            help='Number of days after dispute creation before considering it expired (default: 7)'
+            default=None,
+            help='Number of days after dispute creation before considering legacy disputes expired'
         )
 
     def handle(self, *args, **options):
-        days = options['days']
         now = timezone.now()
-        expiry_threshold = now - timedelta(days=days)
+        days = options.get('days')
 
-        # Find open disputes created before the expiration window
-        expired_disputes = Dispute.objects.filter(status='open', created_at__lte=expiry_threshold)
+        # Find open disputes exceeding voting_deadline (or creation age threshold for legacy disputes)
+        query = Q(status='open', voting_deadline__lte=now)
+        if days is not None:
+            expiry_threshold = now - timedelta(days=days)
+            query |= Q(status='open', voting_deadline__isnull=True, created_at__lte=expiry_threshold)
+
+        expired_disputes = Dispute.objects.filter(query)
 
         count = 0
         for dispute in expired_disputes:
@@ -80,7 +85,7 @@ class Command(BaseCommand):
                 for participant in participants:
                     Notification.objects.create(
                         recipient=participant,
-                        message=f"Dispute for task '{task.title}' has expired ({days}d SLA) and was automatically resolved.",
+                        message=f"Dispute for task '{task.title}' reached its voting deadline and was automatically resolved.",
                         link=dispute_link
                     )
 
