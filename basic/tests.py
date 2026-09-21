@@ -3,7 +3,8 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, Notification, DisputeAuditEvent
+from .services.dispute import DisputeService
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +182,61 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+    def test_dispute_audit_events_created_on_raise(self):
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Incomplete guidelines'}
+        )
+
+        dispute = Dispute.objects.get(task=self.task)
+        audit_events = dispute.audit_events.all().order_by('created_at')
+        self.assertTrue(audit_events.filter(event_type='RAISED').exists())
+
+        raised_event = audit_events.get(event_type='RAISED')
+        self.assertEqual(raised_event.actor, self.taker)
+        self.assertEqual(raised_event.new_status, 'open')
+
+        # Check multi-party notifications (poster and taker both notified)
+        poster_notifications = Notification.objects.filter(recipient=self.poster)
+        taker_notifications = Notification.objects.filter(recipient=self.taker)
+        self.assertTrue(poster_notifications.exists())
+        self.assertTrue(taker_notifications.exists())
+
+    def test_dispute_audit_events_created_on_withdraw(self):
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Incomplete guidelines'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+
+        # Withdraw
+        self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+
+        events = dispute.audit_events.all().order_by('created_at')
+        event_types = list(events.values_list('event_type', flat=True))
+        self.assertIn('ESCROW_REFUNDED', event_types)
+        self.assertIn('WITHDRAWN', event_types)
+
+        withdrawn_event = events.get(event_type='WITHDRAWN')
+        self.assertEqual(withdrawn_event.actor, self.taker)
+        self.assertEqual(withdrawn_event.previous_status, 'open')
+        self.assertEqual(withdrawn_event.new_status, 'resolved')
+
+    def test_dispute_detail_view_renders_audit_events(self):
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Dispute description text'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('audit_events', response.context)
+        self.assertContains(response, 'Audit History Timeline')
+        self.assertContains(response, 'Raised')
+
 

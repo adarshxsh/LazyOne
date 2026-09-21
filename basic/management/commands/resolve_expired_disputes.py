@@ -2,8 +2,8 @@ from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from django.db import transaction
-from django.urls import reverse
-from basic.models import Dispute, RewardLedger, Notification
+from basic.models import Dispute, RewardLedger
+from basic.services.dispute import DisputeService
 
 class Command(BaseCommand):
     help = 'Resolves expired open disputes, refunds/forfeits escrowed bonds, and settles task points.'
@@ -28,9 +28,6 @@ class Command(BaseCommand):
         for dispute in expired_disputes:
             task = dispute.task
             with transaction.atomic():
-                dispute.status = 'resolved'
-                dispute.save()
-
                 if dispute.raised_by == task.posted_by:
                     # Poster challenged an unresponsive taker: cancel task, refund task reward, forfeit bond
                     poster_profile = task.posted_by.userprofile
@@ -47,10 +44,6 @@ class Command(BaseCommand):
                         transaction_type='task_cancellation',
                         description=f"Refund for expired dispute on task: '{task.title}'"
                     )
-
-                    # Handle escrow bond refund / forfeiture
-                    if dispute.escrow_status == 'held':
-                        dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
                 else:
                     # Taker raised dispute: award reward to taker, complete task, and refund bond
                     if task.taken_by:
@@ -68,21 +61,11 @@ class Command(BaseCommand):
                     task.status = 'completed'
                     task.save()
 
-                    if dispute.escrow_status == 'held':
-                        dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
-
-                # Notify participants
-                participants = [task.posted_by]
-                if task.taken_by and task.taken_by not in participants:
-                    participants.append(task.taken_by)
-
-                dispute_link = reverse('dispute_detail', args=[dispute.id])
-                for participant in participants:
-                    Notification.objects.create(
-                        recipient=participant,
-                        message=f"Dispute for task '{task.title}' has expired ({days}d SLA) and was automatically resolved.",
-                        link=dispute_link
-                    )
+                DisputeService.resolve_dispute(
+                    dispute=dispute,
+                    actor=None,
+                    description=f"Dispute for task '{task.title}' expired ({days}d SLA) and was automatically resolved."
+                )
 
                 count += 1
 

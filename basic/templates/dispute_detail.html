@@ -23,6 +23,33 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-3">Audit History Timeline</h3>
+            {% if audit_events %}
+                <div class="space-y-3">
+                    {% for event in audit_events %}
+                        <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+                            <div class="flex items-center justify-between mb-1">
+                                <span class="font-semibold text-cyan-300">{{ event.get_event_type_display }}</span>
+                                <span class="text-xs text-gray-400">{{ event.created_at|date:"F d, Y H:i" }}</span>
+                            </div>
+                            <p class="text-sm text-gray-300">
+                                <strong>Actor:</strong> {% if event.actor %}{{ event.actor.username }}{% else %}System{% endif %}
+                                {% if event.previous_status or event.new_status %}
+                                    <span class="ml-2 text-xs text-gray-400">({{ event.previous_status|default:"-" }} &rarr; {{ event.new_status|default:"-" }})</span>
+                                {% endif %}
+                            </p>
+                            {% if event.description %}
+                                <p class="text-sm text-gray-400 mt-1">{{ event.description }}</p>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-gray-400 italic">No audit log entries recorded.</p>
+            {% endif %}
+        </div>
     </div>
 
 {% endblock %}
