@@ -82,7 +82,10 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('evidence_submission', 'Evidence Submission'),
+        ('under_review', 'Under Review'),
         ('resolved', 'Resolved'),
+        ('withdrawn', 'Withdrawn'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
@@ -99,6 +102,21 @@ class Dispute(models.Model):
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def can_submit_evidence(self, user):
+        if not user or not user.is_authenticated:
+            return False
+        return (user == self.task.posted_by or user == self.task.taken_by) and self.status in ['open', 'evidence_submission']
+
+    def can_withdraw(self, user):
+        if not user or not user.is_authenticated:
+            return False
+        return user == self.raised_by and self.status in ['open', 'evidence_submission']
+
+    def can_arbitrate(self, user):
+        if not user or not user.is_authenticated:
+            return False
+        return user.is_staff and self.status == 'under_review'
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -141,6 +159,16 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidences')
+    submitted_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='submitted_dispute_evidences')
+    description = models.TextField()
+    attachment = models.FileField(upload_to='dispute_evidence/', null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Evidence by {self.submitted_by.username} for Dispute {self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)

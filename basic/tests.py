@@ -113,7 +113,7 @@ class DisputeDepositBondTests(TestCase):
 
         dispute.refresh_from_db()
         self.assertEqual(dispute.escrow_status, 'refunded')
-        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.status, 'withdrawn')
 
         # Balance restored: 40 + 60 = 100
         self.taker_profile.refresh_from_db()
@@ -123,6 +123,154 @@ class DisputeDepositBondTests(TestCase):
         ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_refund').first()
         self.assertIsNotNone(ledger)
         self.assertEqual(ledger.amount, 60)
+
+    def test_evidence_submission_and_auto_review_transition(self):
+        # Taker raises dispute
+        self.client.login(username='taker', password='password123')
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Initial dispute'})
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertEqual(dispute.status, 'open')
+
+        # Taker submits evidence -> transitions to evidence_submission
+        response = self.client.post(
+            reverse('submit_evidence', args=[dispute.id]),
+            {'description': 'Taker proof of work'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'evidence_submission')
+        self.assertEqual(dispute.evidences.count(), 1)
+
+        # Poster submits evidence -> since both submitted, auto-transitions to under_review
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('submit_evidence', args=[dispute.id]),
+            {'description': 'Poster counter-proof'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'under_review')
+        self.assertEqual(dispute.evidences.count(), 2)
+
+    def test_evidence_submission_closed_in_review_and_resolved(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Under review dispute',
+            deposit_amount=60,
+            escrow_status='held',
+            status='under_review'
+        )
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(
+            reverse('submit_evidence', args=[dispute.id]),
+            {'description': 'Late evidence'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+        # Evidence should NOT be created
+        self.assertEqual(dispute.evidences.count(), 0)
+
+    def test_withdraw_dispute_blocked_in_review(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Under review dispute',
+            deposit_amount=60,
+            escrow_status='held',
+            status='under_review'
+        )
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'under_review')
+        self.assertEqual(dispute.escrow_status, 'held')
+
+    def test_staff_arbitration_rule_for_taker(self):
+        staff_user = User.objects.create_superuser(username='staffmod', password='password123', email='staff@example.com')
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Arbitration test',
+            deposit_amount=60,
+            escrow_status='held',
+            status='under_review'
+        )
+        self.taker_profile.rewards = 40
+        self.taker_profile.save()
+
+        self.client.login(username='staffmod', password='password123')
+        response = self.client.post(
+            reverse('arbitrate_dispute', args=[dispute.id]),
+            {'decision': 'resolve_taker', 'notes': 'Taker produced clear proof.'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.escrow_status, 'refunded')
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+
+        # Taker rewards: 40 + 300 (reward) + 60 (deposit refund) = 400
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 400)
+
+    def test_staff_arbitration_rule_for_poster(self):
+        staff_user = User.objects.create_superuser(username='staffmod2', password='password123', email='staff2@example.com')
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Arbitration test poster wins',
+            deposit_amount=60,
+            escrow_status='held',
+            status='under_review'
+        )
+        self.taker_profile.rewards = 40
+        self.taker_profile.save()
+        self.poster_profile.rewards = 1000
+        self.poster_profile.save()
+
+        self.client.login(username='staffmod2', password='password123')
+        response = self.client.post(
+            reverse('arbitrate_dispute', args=[dispute.id]),
+            {'decision': 'resolve_poster', 'notes': 'Poster was right.'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.escrow_status, 'forfeited')
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'cancelled')
+
+        # Poster rewards: 1000 + 300 (task reward refund) + 60 (forfeited deposit bond) = 1360
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1360)
+
+    def test_non_staff_cannot_arbitrate(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Arbitration security test',
+            deposit_amount=60,
+            escrow_status='held',
+            status='under_review'
+        )
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(
+            reverse('arbitrate_dispute', args=[dispute.id]),
+            {'decision': 'resolve_taker'}
+        )
+        self.assertRedirects(response, reverse('home'))
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'under_review')
 
     def test_complete_disputed_task_refunds_deposit(self):
         # Taker raises dispute (deposit 60 deducted from 100 -> 40 left)
