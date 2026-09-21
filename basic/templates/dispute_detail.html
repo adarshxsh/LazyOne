@@ -13,7 +13,7 @@
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% elif dispute.status == 'pending_staff_review' %}bg-red-500/20 text-red-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
@@ -23,6 +23,44 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400">Jury Panel</h3>
+            {% if jurors %}
+                <ul class="mt-2 space-y-1">
+                    {% for juror in jurors %}
+                        <li class="bg-gray-800/60 p-2 rounded flex justify-between items-center">
+                            <span>{{ juror.user.username }}</span>
+                            <span class="text-xs text-gray-400">Stake: {{ juror.stake_amount }} pts ({% if juror.is_stake_locked %}Locked{% else %}Unlocked{% endif %})</span>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="text-gray-400 text-sm mt-1">No neutral juror panel assigned. Dispute escalated to staff review.</p>
+            {% endif %}
+        </div>
+
+        {% if is_juror and dispute.status == 'open' %}
+            <div class="bg-cyan-950/40 p-4 rounded-lg border border-cyan-800">
+                <h3 class="text-xl font-semibold text-cyan-300 mb-2">Cast Your Juror Vote</h3>
+                {% if user_juror_record and user_juror_record.vote %}
+                    <p class="text-green-400">You have voted for: <strong>{{ user_juror_record.get_vote_display }}</strong></p>
+                {% else %}
+                    <form method="POST" action="{% url 'vote_dispute' dispute.id %}" class="space-y-4">
+                        {% csrf_token %}
+                        <p class="text-sm text-gray-300">Evaluate the evidence and vote in favor of one party:</p>
+                        <div class="flex space-x-4">
+                            <button type="submit" name="vote" value="posted_by" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded font-medium">
+                                Vote for Task Poster ({{ task.posted_by.username }})
+                            </button>
+                            <button type="submit" name="vote" value="taken_by" class="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded font-medium">
+                                Vote for Task Worker ({{ task.taken_by.username }})
+                            </button>
+                        </div>
+                    </form>
+                {% endif %}
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}

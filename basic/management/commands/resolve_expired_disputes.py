@@ -4,6 +4,7 @@ from django.utils import timezone
 from django.db import transaction
 from django.urls import reverse
 from basic.models import Dispute, RewardLedger, Notification
+from basic.juror_selection import unlock_dispute_juror_stakes
 
 class Command(BaseCommand):
     help = 'Resolves expired open disputes, refunds/forfeits escrowed bonds, and settles task points.'
@@ -21,13 +22,14 @@ class Command(BaseCommand):
         now = timezone.now()
         expiry_threshold = now - timedelta(days=days)
 
-        # Find open disputes created before the expiration window
-        expired_disputes = Dispute.objects.filter(status='open', created_at__lte=expiry_threshold)
+        # Find open or pending staff review disputes created before the expiration window
+        expired_disputes = Dispute.objects.filter(status__in=['open', 'pending_staff_review'], created_at__lte=expiry_threshold)
 
         count = 0
         for dispute in expired_disputes:
             task = dispute.task
             with transaction.atomic():
+                unlock_dispute_juror_stakes(dispute, reason_description=f"Juror stake refunded on auto-resolved expired dispute for task '{task.title}'")
                 dispute.status = 'resolved'
                 dispute.save()
 

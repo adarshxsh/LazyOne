@@ -2,6 +2,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from ..models import Task, Conversation, Notification, RewardLedger
+from ..juror_selection import unlock_dispute_juror_stakes
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
@@ -89,7 +90,8 @@ def complete_task(request, task_id):
         task.status = 'completed'
         task.save()
 
-        if hasattr(task, 'dispute') and task.dispute.status == 'open':
+        if hasattr(task, 'dispute') and task.dispute.status in ['open', 'pending_staff_review']:
+            unlock_dispute_juror_stakes(task.dispute, reason_description=f"Juror stake refunded upon task completion for task: '{task.title}'")
             task.dispute.refund_deposit(
                 reason_description=f"Security deposit bond refunded upon dispute resolution for task: '{task.title}'"
             )
