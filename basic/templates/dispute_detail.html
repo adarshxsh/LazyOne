@@ -8,7 +8,14 @@
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg font-medium text-white">{{ dispute.task.title }}</p>
+            <p class="text-sm text-gray-400 mt-1">{{ dispute.task.description }}</p>
+            <div class="mt-2 text-sm text-gray-300">
+                <span class="mr-4"><strong>Posted By:</strong> {{ task.posted_by.username }}</span>
+                {% if task.taken_by %}
+                <span><strong>Assigned To:</strong> {{ task.taken_by.username }}</span>
+                {% endif %}
+            </div>
         </div>
 
         <div>
@@ -23,6 +30,75 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if jury %}
+        <div class="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Peer Jury Panel</h3>
+            <p><strong>Jury Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if jury.status == 'concluded' %}bg-green-500/20 text-green-300{% else %}bg-blue-500/20 text-blue-300{% endif %}">{{ jury.get_status_display }}</span></p>
+            <p><strong>Voting Deadline:</strong> {{ jury.deadline|date:"F d, Y H:i" }}</p>
+
+            {% if is_juror %}
+                <div class="mt-4 p-4 bg-cyan-900/30 rounded-lg border border-cyan-600/50">
+                    <p class="text-cyan-200 font-semibold mb-2">You are an assigned juror for this dispute.</p>
+
+                    {% if user_vote %}
+                        <p class="text-green-400">✓ You have cast your vote for <strong>{{ user_vote.voted_for.username }}</strong>.</p>
+                    {% elif user_assignment and user_assignment.status == 'assigned' and jury.status == 'voting' %}
+                        <form method="POST" action="{% url 'submit_jury_vote' dispute.id %}" class="mt-3 space-y-4">
+                            {% csrf_token %}
+                            <p class="text-sm text-gray-300">Please review the task details and conversation context below, then cast your vote:</p>
+
+                            <div class="space-y-2">
+                                <label class="flex items-center space-x-3 p-3 bg-gray-900/60 rounded border border-gray-700 hover:border-cyan-500 cursor-pointer">
+                                    <input type="radio" name="voted_for" value="{{ task.posted_by.id }}" required class="text-cyan-500 focus:ring-cyan-400">
+                                    <span>Vote for Task Creator (<strong>{{ task.posted_by.username }}</strong>)</span>
+                                </label>
+
+                                {% if task.taken_by %}
+                                <label class="flex items-center space-x-3 p-3 bg-gray-900/60 rounded border border-gray-700 hover:border-cyan-500 cursor-pointer">
+                                    <input type="radio" name="voted_for" value="{{ task.taken_by.id }}" required class="text-cyan-500 focus:ring-cyan-400">
+                                    <span>Vote for Task Assignee (<strong>{{ task.taken_by.username }}</strong>)</span>
+                                </label>
+                                {% endif %}
+                            </div>
+
+                            <button type="submit" class="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold rounded-lg shadow transition duration-200">
+                                Submit Juror Vote
+                            </button>
+                        </form>
+                    {% elif user_assignment.status == 'expired' %}
+                        <p class="text-yellow-400">Your juror voting window has expired.</p>
+                    {% endif %}
+                </div>
+            {% endif %}
+
+            {% if jury.status == 'concluded' %}
+                <div class="mt-4 p-4 bg-green-900/30 rounded-lg border border-green-600/50">
+                    <p class="text-green-300 font-bold text-lg">Verdict Reached</p>
+                    <p class="text-white mt-1">Winning Party: <strong>{{ jury.winner.username }}</strong></p>
+                </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if conversation %}
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Task Chat Context</h3>
+            <div class="bg-gray-900/70 p-4 rounded-lg border border-gray-700 max-h-80 overflow-y-auto space-y-3">
+                {% if chat_messages %}
+                    {% for msg in chat_messages %}
+                        <div class="p-2 rounded bg-gray-800/80 border border-gray-700">
+                            <span class="font-semibold text-cyan-300">{{ msg.sender.username }}:</span>
+                            <span class="text-gray-200 ml-2">{{ msg.content }}</span>
+                            <span class="text-xs text-gray-400 block mt-1">{{ msg.timestamp|date:"M d, Y H:i" }}</span>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-gray-400 italic">No messages exchanged in task chat.</p>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}
