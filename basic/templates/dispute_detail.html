@@ -23,6 +23,75 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <!-- Pre-Dispute Task Chat History (Read-Only) -->
+        <div class="border-t border-gray-700 pt-6">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-3">Pre-Dispute Task Chat History (Read-Only)</h3>
+            {% if task_conversation and task_messages %}
+                <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-3 max-h-60 overflow-y-auto">
+                    {% for msg in task_messages %}
+                        <div class="bg-gray-800/60 p-3 rounded-lg border border-gray-700/50">
+                            <div class="flex justify-between items-center text-xs text-gray-400 mb-1">
+                                <span class="font-semibold text-cyan-300">{{ msg.sender.username }}</span>
+                                <span>{{ msg.timestamp|date:"M d, Y H:i" }}</span>
+                            </div>
+                            <p class="text-sm text-gray-200">{{ msg.content }}</p>
+                        </div>
+                    {% endfor %}
+                </div>
+                <div class="mt-2">
+                    <a href="{% url 'chat_view' task_conversation.id %}" class="text-sm text-cyan-400 hover:underline inline-flex items-center space-x-1">
+                        <span>Open full chat view</span>
+                        <span>&rarr;</span>
+                    </a>
+                </div>
+            {% else %}
+                <p class="bg-gray-900/30 p-4 rounded-lg border border-gray-800 text-gray-400 italic">No pre-dispute task chat history available.</p>
+            {% endif %}
+        </div>
+
+        <!-- Dedicated Dispute Deliberation Channel -->
+        <div class="border-t border-gray-700 pt-6">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-3">Dispute Deliberation Channel</h3>
+            <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-3 max-h-80 overflow-y-auto mb-4" id="deliberation-board">
+                {% if deliberation_messages %}
+                    {% for msg in deliberation_messages %}
+                        <div class="bg-gray-800/80 p-3 rounded-lg border border-gray-700">
+                            <div class="flex justify-between items-center text-xs text-gray-400 mb-1">
+                                <span class="font-semibold text-cyan-300">
+                                    {{ msg.sender.username }}
+                                    {% if msg.sender == task.posted_by %}
+                                        <span class="ml-1 px-1.5 py-0.5 bg-blue-900/50 text-blue-300 rounded text-[10px]">Poster</span>
+                                    {% elif msg.sender == task.taken_by %}
+                                        <span class="ml-1 px-1.5 py-0.5 bg-purple-900/50 text-purple-300 rounded text-[10px]">Taker</span>
+                                    {% else %}
+                                        <span class="ml-1 px-1.5 py-0.5 bg-yellow-900/50 text-yellow-300 rounded text-[10px]">Juror</span>
+                                    {% endif %}
+                                </span>
+                                <span>{{ msg.timestamp|date:"M d, Y H:i" }}</span>
+                            </div>
+                            <p class="text-sm text-gray-100 whitespace-pre-wrap">{{ msg.content }}</p>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-gray-400 italic">No deliberation messages posted yet.</p>
+                {% endif %}
+            </div>
+
+            {% if can_post %}
+                <form method="POST" action="{% url 'post_dispute_message' dispute.id %}" class="space-y-3">
+                    {% csrf_token %}
+                    <div>
+                        <textarea name="content" rows="3" placeholder="Type a message in the dispute deliberation thread..." required class="w-full p-3 bg-gray-800/90 text-white rounded-lg border border-gray-700 focus:border-cyan-400 focus:outline-none transition-colors placeholder-gray-500"></textarea>
+                    </div>
+                    <button type="submit" class="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold rounded-lg transition-colors shadow-md">
+                        Post Deliberation Message
+                    </button>
+                </form>
+            {% else %}
+                <p class="text-sm text-gray-500 italic">Only assigned dispute jurors and dispute participants are permitted to post in this deliberation channel.</p>
+            {% endif %}
+        </div>
     </div>
 
 {% endblock %}
