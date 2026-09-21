@@ -91,6 +91,7 @@ class Dispute(models.Model):
     )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
+    jurors = models.ManyToManyField(User, related_name='assigned_disputes', blank=True)
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
@@ -99,6 +100,15 @@ class Dispute(models.Model):
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    @property
+    def dispute_messages(self):
+        return self.messages.all()
+
+    def is_assigned_juror(self, user):
+        if not user or not user.is_authenticated:
+            return False
+        return self.jurors.filter(id=user.id).exists()
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -192,3 +202,31 @@ class Notification(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+class DisputeMessage(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='messages')
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_messages')
+    content = models.TextField()
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['timestamp']
+
+    def __str__(self):
+        return f"DisputeMessage from {self.sender.username} in {self.dispute}"
+
+    @property
+    def user(self):
+        return self.sender
+
+    @property
+    def message(self):
+        return self.content
+
+    @property
+    def text(self):
+        return self.content
+
+    @property
+    def created_at(self):
+        return self.timestamp

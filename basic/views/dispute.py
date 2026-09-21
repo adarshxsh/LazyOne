@@ -2,22 +2,131 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from django.http import HttpResponseForbidden, JsonResponse
+from ..models import Dispute, Task, Notification, RewardLedger, DisputeMessage
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
+def is_assigned_juror(user, dispute):
+    if not user or not user.is_authenticated:
+        return False
+    if hasattr(dispute, 'is_assigned_juror'):
+        try:
+            if dispute.is_assigned_juror(user):
+                return True
+        except Exception:
+            pass
+    if hasattr(dispute, 'jurors'):
+        try:
+            if dispute.jurors.filter(id=user.id).exists():
+                return True
+        except Exception:
+            pass
+    if hasattr(dispute, 'assigned_jurors'):
+        try:
+            if dispute.assigned_jurors.filter(id=user.id).exists():
+                return True
+        except Exception:
+            pass
+    try:
+        from ..models import JuryAssignment
+        if JuryAssignment.objects.filter(dispute=dispute, juror=user).exists():
+            return True
+    except Exception:
+        pass
+    try:
+        from ..models import Jury
+        if Jury.objects.filter(dispute=dispute, juror=user).exists():
+            return True
+    except Exception:
+        pass
+    return False
+
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
-    dispute = get_object_or_404(Dispute, id=dispute_id)
+    dispute = get_object_or_404(
+        Dispute.objects.select_related(
+            'task', 'task__posted_by', 'task__taken_by', 'raised_by'
+        ).prefetch_related(
+            'jurors',
+            'messages',
+            'messages__sender',
+            'task__conversation',
+            'task__conversation__messages',
+            'task__conversation__messages__sender'
+        ),
+        id=dispute_id
+    )
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+    is_participant = request.user in [task.posted_by, task.taken_by]
+    is_juror = is_assigned_juror(request.user, dispute)
+    is_staff = request.user.is_staff
+
+    if not is_participant and not is_juror and not is_staff:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+
+    task_conversation = getattr(task, 'conversation', None)
+    task_messages = []
+    if task_conversation:
+        task_messages = task_conversation.messages.select_related('sender').all()
+
+    deliberation_messages = dispute.messages.select_related('sender').all()
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'task_conversation': task_conversation,
+        'task_messages': task_messages,
+        'deliberation_messages': deliberation_messages,
+        'is_juror': is_juror,
+        'is_participant': is_participant,
+        'can_post': is_participant or is_juror or is_staff,
     }
     return render(request, 'dispute_detail.html', context)
+
+@login_required(login_url='/login/')
+@require_POST
+def post_dispute_message(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+    is_participant = request.user in [task.posted_by, task.taken_by]
+    is_juror = is_assigned_juror(request.user, dispute)
+    is_staff = request.user.is_staff
+
+    if not is_participant and not is_juror and not is_staff:
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return HttpResponseForbidden("You are not authorized to post in this dispute deliberation channel.")
+        messages.error(request, "You are not authorized to post in this dispute deliberation channel.")
+        return HttpResponseForbidden("You are not authorized to post in this dispute deliberation channel.")
+
+    content = request.POST.get('content') or request.POST.get('message')
+    if not content and request.content_type == 'application/json':
+        import json
+        try:
+            data = json.loads(request.body)
+            content = data.get('content') or data.get('message')
+        except Exception:
+            pass
+
+    if content and content.strip():
+        DisputeMessage.objects.create(
+            dispute=dispute,
+            sender=request.user,
+            content=content.strip()
+        )
+
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'status': 'success'})
+
+        messages.success(request, "Deliberation message posted.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+        return JsonResponse({'status': 'error', 'message': 'Message content cannot be empty'}, status=400)
+
+    messages.error(request, "Message content cannot be empty.")
+    return redirect('dispute_detail', dispute_id=dispute.id)
 
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
