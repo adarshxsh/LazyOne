@@ -1,4 +1,5 @@
 import math
+from datetime import timedelta
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -36,6 +37,7 @@ class Task(models.Model):
         ('completed', 'Completed'),
         ('disputed', 'Disputed'),
         ('cancelled', 'Cancelled'),
+        ('under_appeal', 'Under Appeal'),
     )
 
     title = models.CharField(max_length=200)
@@ -68,6 +70,11 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('appeal_deposit', 'Appeal Deposit Bond Held'),
+        ('appeal_refund', 'Appeal Deposit Bond Refunded'),
+        ('appeal_slash', 'Litigant Deposit Bond Slashed'),
+        ('juror_reward', 'Honest Juror Reward Payout'),
+        ('juror_slash', 'Dishonest Juror Points Slashed'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
@@ -83,6 +90,7 @@ class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
         ('resolved', 'Resolved'),
+        ('under_appeal', 'Under Appeal'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
@@ -96,9 +104,21 @@ class Dispute(models.Model):
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    @property
+    def is_appealable(self):
+        if self.status != 'resolved':
+            return False
+        if self.appeals.filter(status='pending').exists():
+            return False
+        resolved_time = self.resolved_at or self.created_at
+        if timezone.now() > resolved_time + timedelta(hours=72):
+            return False
+        return True
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -141,6 +161,51 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class Appeal(models.Model):
+    STATUS_CHOICES = (
+        ('pending', 'Pending Juror Votes'),
+        ('resolved', 'Resolved'),
+        ('expired', 'Expired'),
+    )
+    RULING_CHOICES = (
+        ('pending', 'Pending'),
+        ('upheld', 'Upheld (Appellant Won)'),
+        ('overturned', 'Overturned (Appellant Lost)'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='appeals')
+    appellant = models.ForeignKey(User, on_delete=models.CASCADE, related_name='filed_appeals')
+    appeal_deposit = models.PositiveIntegerField(default=0)
+    round_number = models.PositiveIntegerField(default=1)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    ruling = models.CharField(max_length=20, choices=RULING_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    consensus_threshold = models.FloatField(default=0.66)
+    quorum = models.PositiveIntegerField(default=3)
+
+    def __str__(self):
+        return f"Appeal Round {self.round_number} for Dispute {self.dispute.id} by {self.appellant.username}"
+
+class AppealJuror(models.Model):
+    VOTE_CHOICES = (
+        ('pending', 'Pending'),
+        ('poster', 'In favor of Poster'),
+        ('taker', 'In favor of Taker'),
+    )
+    appeal = models.ForeignKey(Appeal, on_delete=models.CASCADE, related_name='juror_assignments')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='juror_assignments')
+    vote = models.CharField(max_length=20, choices=VOTE_CHOICES, default='pending')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    voted_at = models.DateTimeField(null=True, blank=True)
+    is_slashed = models.BooleanField(default=False)
+    is_rewarded = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = ('appeal', 'juror')
+
+    def __str__(self):
+        return f"Juror {self.juror.username} for Appeal {self.appeal.id} - Vote: {self.vote}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
