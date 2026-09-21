@@ -13,8 +13,10 @@
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
+            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' or dispute.status == 'voting' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Worker Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
+            <p><strong>Poster Security Deposit Bond:</strong> {{ dispute.poster_deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_poster_deposit_status_display }}</span>)</p>
+            <p><strong>Total Juror Stake Committed:</strong> {{ dispute.total_juror_stake }} points</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
         </div>
@@ -22,6 +24,45 @@
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+        </div>
+
+        {% if not is_participant and not user.is_staff %}
+            <div class="bg-gray-900/60 p-6 rounded-lg border border-gray-700">
+                <h3 class="text-xl font-semibold text-cyan-400 mb-3">Community Juror Voting</h3>
+                {% if user_vote %}
+                    <p class="text-green-400">You have already voted on this dispute: <strong class="capitalize">{{ user_vote.get_voted_option_display }}</strong> (Stake: {{ user_vote.staked_amount }} points).</p>
+                {% elif dispute.status == 'open' or dispute.status == 'voting' %}
+                    <p class="text-sm text-gray-400 mb-4">Cast your vote to earn reward dividends from losing collateral & slashed minority stakes. Minimum required stake is 50 points.</p>
+                    <form method="POST" action="{% url 'vote_dispute' dispute.id %}" class="space-y-4">
+                        {% csrf_token %}
+                        <div class="flex gap-4">
+                            <label class="flex items-center gap-2 cursor-pointer bg-gray-800 p-3 rounded-lg border border-gray-600 hover:border-cyan-500">
+                                <input type="radio" name="voted_option" value="poster" required class="text-cyan-500 focus:ring-cyan-500">
+                                <span>Vote for Poster ({{ dispute.task.posted_by.username }})</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer bg-gray-800 p-3 rounded-lg border border-gray-600 hover:border-cyan-500">
+                                <input type="radio" name="voted_option" value="taker" required class="text-cyan-500 focus:ring-cyan-500">
+                                <span>Vote for Taker ({% if dispute.task.taken_by %}{{ dispute.task.taken_by.username }}{% else %}Taker{% endif %})</span>
+                            </label>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <label for="staked_amount" class="text-sm font-medium">Point Stake:</label>
+                            <input type="number" id="staked_amount" name="staked_amount" value="50" min="50" required class="bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white w-28 focus:outline-none focus:border-cyan-500">
+                        </div>
+                        <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-2 px-6 rounded-lg transition">
+                            Submit Staked Vote
+                        </button>
+                    </form>
+                {% else %}
+                    <p class="text-gray-400">Voting is closed for this dispute.</p>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        <div class="bg-gray-900/60 p-6 rounded-lg border border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Vote Tallies</h3>
+            <p><strong>Total Votes:</strong> {{ total_votes }}</p>
+            <p><strong>Poster Votes:</strong> {{ poster_votes }} | <strong>Taker Votes:</strong> {{ taker_votes }}</p>
         </div>
     </div>
 

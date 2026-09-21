@@ -1,3 +1,4 @@
+import math
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -24,9 +25,11 @@ def add_task(request):
                 default_deadline = (timezone.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
                 return render(request, 'add_task.html', {'default_deadline': default_deadline})
 
+            bond_amount = max(50, math.ceil(reward * 0.20))
+            total_required = reward + bond_amount
             user_profile = request.user.userprofile
-            if user_profile.rewards < reward:
-                messages.error(request, f"You only have {user_profile.rewards} points, not enough to offer this reward.")
+            if user_profile.rewards < total_required:
+                messages.error(request, f"You only have {user_profile.rewards} points, not enough to offer this reward ({reward}) and deposit bond ({bond_amount}). Total required: {total_required}.")
                 default_deadline = (timezone.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
                 return render(request, 'add_task.html', {'default_deadline': default_deadline})
 
@@ -37,7 +40,7 @@ def add_task(request):
                 return render(request, 'add_task.html', {'default_deadline': default_deadline})
 
             with transaction.atomic():
-                user_profile.rewards -= reward
+                user_profile.rewards -= total_required
                 user_profile.save()
                 new_task = Task.objects.create(
                     title=title, description=description, reward=reward,
@@ -47,7 +50,11 @@ def add_task(request):
                     user=request.user, task=new_task, amount=-reward,
                     transaction_type='task_creation', description=f"Reserved for task: '{title}'"
                 )
-            messages.success(request, f'Task added successfully! {reward} points have been reserved.')
+                RewardLedger.objects.create(
+                    user=request.user, task=new_task, amount=-bond_amount,
+                    transaction_type='poster_dispute_deposit', description=f"Poster deposit bond held for task: '{title}'"
+                )
+            messages.success(request, f'Task added successfully! {reward} points and {bond_amount} deposit bond points have been reserved.')
             return redirect('home')
         except (ValueError, TypeError):
             messages.error(request, 'Invalid reward amount or deadline format.')
@@ -89,7 +96,15 @@ def complete_task(request, task_id):
         task.status = 'completed'
         task.save()
 
-        if hasattr(task, 'dispute') and task.dispute.status == 'open':
+        if not hasattr(task, 'dispute'):
+            poster_profile = task.posted_by.userprofile
+            poster_profile.rewards += task.deposit_bond_amount
+            poster_profile.save()
+            RewardLedger.objects.create(
+                user=task.posted_by, task=task, amount=task.deposit_bond_amount,
+                transaction_type='dispute_refund', description=f"Security deposit bond refunded upon task completion: '{task.title}'"
+            )
+        elif task.dispute.status in ['open', 'voting']:
             task.dispute.refund_deposit(
                 reason_description=f"Security deposit bond refunded upon dispute resolution for task: '{task.title}'"
             )
@@ -110,11 +125,16 @@ def cancel_task(request, task_id):
         task.status = 'cancelled'
         task.save()
         user_profile = request.user.userprofile
-        user_profile.rewards += task.reward
+        bond_amount = task.deposit_bond_amount
+        user_profile.rewards += (task.reward + bond_amount)
         user_profile.save()
         RewardLedger.objects.create(
             user=request.user, task=task, amount=task.reward,
-            transaction_type='task_cancellation', description=f"Refund for cancelled task: "
+            transaction_type='task_cancellation', description=f"Refund for cancelled task: '{task.title}'"
+        )
+        RewardLedger.objects.create(
+            user=request.user, task=task, amount=bond_amount,
+            transaction_type='dispute_refund', description=f"Poster deposit bond refunded for cancelled task: '{task.title}'"
         )
         messages.success(request, "You have cancelled the task and your points have been refunded.")
     return redirect('my_tasks')
@@ -137,11 +157,16 @@ def accept_cancellation(request, task_id):
     task = get_object_or_404(Task, id=task_id, taken_by=request.user, cancellation_requested=True)
     with transaction.atomic():
         poster_profile = task.posted_by.userprofile
-        poster_profile.rewards += task.reward
+        bond_amount = task.deposit_bond_amount
+        poster_profile.rewards += (task.reward + bond_amount)
         poster_profile.save()
         RewardLedger.objects.create(
             user=task.posted_by, task=task, amount=task.reward,
             transaction_type='task_cancellation', description=f"Refund for cancelled task: '{task.title}'"
+        )
+        RewardLedger.objects.create(
+            user=task.posted_by, task=task, amount=bond_amount,
+            transaction_type='dispute_refund', description=f"Poster deposit bond refunded for cancelled task: '{task.title}'"
         )
         task.status = 'available'
         task.taken_by = None
