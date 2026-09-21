@@ -1,7 +1,21 @@
 import math
+import os
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.core.exceptions import ValidationError
+
+MAX_EVIDENCE_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+ALLOWED_EVIDENCE_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'txt'}
+
+def validate_file_size(value):
+    if value.size > MAX_EVIDENCE_FILE_SIZE:
+        raise ValidationError("File size exceeds maximum allowed limit of 10MB.")
+
+def validate_file_extension(value):
+    ext = os.path.splitext(value.name)[1].lower().lstrip('.')
+    if ext not in ALLOWED_EVIDENCE_EXTENSIONS:
+        raise ValidationError(f"File extension '.{ext}' is not permitted. Allowed extensions: PDF, PNG, JPG, JPEG, TXT.")
 
 # Create your models here.
 class UserProfile(models.Model):
@@ -141,6 +155,33 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidence_entries')
+    uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_evidences')
+    file = models.FileField(upload_to='dispute_evidence/', validators=[validate_file_size, validate_file_extension])
+    original_filename = models.CharField(max_length=255, blank=True)
+    caption = models.TextField(blank=True, default='')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+
+    @property
+    def created_at(self):
+        return self.uploaded_at
+
+    @property
+    def description(self):
+        return self.caption
+
+    def save(self, *args, **kwargs):
+        if not self.original_filename and self.file:
+            self.original_filename = os.path.basename(self.file.name)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Evidence for Dispute #{self.dispute_id} by {self.uploaded_by.username}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
