@@ -33,11 +33,14 @@
                 {% for transaction in all_transactions %}
                 <li class="p-4 flex justify-between items-center hover:bg-gray-700/40 transition-colors">
                     <div>
-                        <p class="font-semibold text-white">{{ transaction.description }}</p>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs px-2 py-0.5 rounded-full bg-gray-600 text-cyan-300 font-medium">{{ transaction.get_transaction_type_display }}</span>
+                        </div>
+                        <p class="font-semibold text-white mt-1">{{ transaction.description }}</p>
                         <p class="text-sm text-gray-400">{{ transaction.created_at|date:"F j, Y, g:i a" }}</p>
                     </div>
                     <div>
-                        <span class="font-bold text-lg {% if transaction.amount > 0 %}text-green-400{% else %}text-red-400{% endif %}">
+                        <span class="font-bold text-lg {% if transaction.amount > 0 %}text-green-400{% elif transaction.amount < 0 %}text-red-400{% else %}text-yellow-400{% endif %}">
                             {% if transaction.amount > 0 %}+{% endif %}{{ transaction.amount }}
                         </span>
                     </div>

@@ -3,26 +3,87 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
+    <h2 class="text-3xl font-bold text-white mb-4">Dispute & Appeal Details</h2>
 
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
             <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-sm text-gray-400">Poster: {{ task.posted_by.username }} | Taker: {{ task.taken_by.username|default:"Unassigned" }}</p>
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% elif dispute.status == 'under_appeal' %}bg-purple-500/20 text-purple-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            {% if dispute.resolved_at %}
+                <p><strong>Date Resolved:</strong> {{ dispute.resolved_at|date:"F d, Y, g:i a" }}</p>
+            {% endif %}
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <!-- Appeal Escalation Form for Litigants -->
+        {% if is_appealable %}
+            <div class="bg-gray-800/80 p-6 rounded-xl border border-purple-500/30">
+                <h3 class="text-xl font-semibold text-purple-400 mb-2">Escalate Decision to Peer Juror Appeal</h3>
+                <p class="text-sm text-gray-300 mb-4">
+                    Contesting this dispute ruling? You can escalate to an impartial panel of peer jurors by posting an appeal deposit bond of <strong>{{ task.deposit_bond_amount }} points</strong> within the 72-hour SLA window.
+                </p>
+                <form action="{% url 'file_appeal' dispute.id %}" method="POST">
+                    {% csrf_token %}
+                    <button type="submit" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-6 rounded-lg transition-colors">
+                        File Appeal (Deposit {{ task.deposit_bond_amount }} Points)
+                    </button>
+                </form>
+            </div>
+        {% endif %}
+
+        <!-- Active or Resolved Appeal Details -->
+        {% if active_appeal %}
+            <div class="bg-gray-800/90 p-6 rounded-xl border border-cyan-500/30 space-y-4">
+                <h3 class="text-2xl font-bold text-cyan-300">
+                    Peer Juror Appeal - Round {{ active_appeal.round_number }}
+                </h3>
+                <p><strong>Appellant:</strong> {{ active_appeal.appellant.username }}</p>
+                <p><strong>Appeal Deposit Bond:</strong> {{ active_appeal.appeal_deposit }} points</p>
+                <p><strong>Appeal Status:</strong> 
+                    <span class="px-2 py-1 text-sm rounded-full {% if active_appeal.status == 'pending' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">
+                        {{ active_appeal.get_status_display }}
+                    </span>
+                </p>
+                {% if active_appeal.status == 'resolved' %}
+                    <p><strong>Ruling Verdict:</strong> <span class="font-bold text-cyan-400">{{ active_appeal.get_ruling_display }}</span></p>
+                    <p><strong>Resolved At:</strong> {{ active_appeal.resolved_at|date:"F d, Y, g:i a" }}</p>
+                {% endif %}
+
+                <!-- Juror Voting Panel for Assigned Jurors -->
+                {% if active_appeal.status == 'pending' and juror_assignment %}
+                    <div class="mt-6 bg-gray-900/80 p-4 rounded-lg border border-yellow-500/40">
+                        <h4 class="text-lg font-semibold text-yellow-400 mb-2">Peer Juror Voting Panel</h4>
+                        {% if juror_assignment.vote == 'pending' %}
+                            <p class="text-sm text-gray-300 mb-4">You have been selected as a peer juror. Review the dispute details above and submit your binding verdict vote.</p>
+                            <form action="{% url 'cast_juror_vote' active_appeal.id %}" method="POST" class="flex gap-4">
+                                {% csrf_token %}
+                                <button type="submit" name="vote" value="poster" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg">
+                                    Vote in favor of Poster ({{ task.posted_by.username }})
+                                </button>
+                                <button type="submit" name="vote" value="taker" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg">
+                                    Vote in favor of Taker ({{ task.taken_by.username }})
+                                </button>
+                            </form>
+                        {% else %}
+                            <p class="text-green-400 font-medium">You have cast your verdict vote: <strong>{{ juror_assignment.get_vote_display }}</strong>. Awaiting final consensus threshold evaluation.</p>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}

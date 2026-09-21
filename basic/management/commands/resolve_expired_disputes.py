@@ -29,6 +29,7 @@ class Command(BaseCommand):
             task = dispute.task
             with transaction.atomic():
                 dispute.status = 'resolved'
+                dispute.resolved_at = timezone.now()
                 dispute.save()
 
                 if dispute.raised_by == task.posted_by:
