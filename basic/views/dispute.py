@@ -2,7 +2,8 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, Task, Notification, RewardLedger, JurorAssignment
+from ..utils import select_juror_pool
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,12 +11,14 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+    is_juror = JurorAssignment.objects.filter(dispute=dispute, juror=request.user).exists()
+    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff and not is_juror:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'is_juror': is_juror,
     }
     return render(request, 'dispute_detail.html', context)
 
@@ -74,14 +77,20 @@ def raise_dispute(request, task_id):
             task.status = 'disputed'
             task.save()
 
-            Notification.objects.create(
-                recipient=task.posted_by,
-                message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
-                link=reverse('dispute_detail', args=[dispute.id])
-            )
+            # Select juror pool
+            select_juror_pool(dispute, num_jurors=3)
+
+            counterparty = task.taken_by if request.user == task.posted_by else task.posted_by
+            if counterparty:
+                Notification.objects.create(
+                    recipient=counterparty,
+                    message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
+                    link=reverse('dispute_detail', args=[dispute.id])
+                )
         messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
+
 
 @login_required(login_url='/login/')
 @require_POST
