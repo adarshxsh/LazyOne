@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, JurorCommitment, JurorVote
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +181,148 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class CommitRevealVotingTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        self.juror1 = User.objects.create_user(username='juror1', password='password123')
+        self.juror1_profile = UserProfile.objects.create(user=self.juror1, rewards=1500)
+
+        self.juror2 = User.objects.create_user(username='juror2', password='password123')
+        self.juror2_profile = UserProfile.objects.create(user=self.juror2, rewards=1500)
+
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="Disputed Service Task",
+            description="Task description",
+            reward=500,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed',
+            deadline=self.deadline
+        )
+        Conversation.objects.create(task=self.task)
+
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Service specification disagreement",
+            deposit_amount=100,
+            status='open',
+            phase='commit'
+        )
+
+    def test_juror_commitment_model_and_hash_computation(self):
+        choice = 'poster'
+        salt = 'super_secret_salt_12345'
+        expected_hash = JurorCommitment.compute_hash(choice, salt, self.juror1.id)
+
+        commitment = JurorCommitment.objects.create(
+            dispute=self.dispute,
+            juror=self.juror1,
+            commitment_hash=expected_hash
+        )
+
+        self.assertEqual(commitment.commitment_hash, expected_hash)
+        self.assertTrue(commitment.verify_commitment(choice, salt))
+        self.assertFalse(commitment.verify_commitment('taker', salt))
+
+    def test_commit_phase_endpoint_salt_entropy_and_privacy(self):
+        self.client.login(username='juror1', password='password123')
+
+        # Attempt commit with short salt (< 16 chars)
+        response = self.client.post(
+            reverse('submit_commitment', args=[self.dispute.id]),
+            {'choice': 'poster', 'salt': 'short_salt'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertFalse(JurorCommitment.objects.filter(dispute=self.dispute, juror=self.juror1).exists())
+
+        # Valid commit with >= 16 char salt
+        valid_salt = 'valid_long_secret_salt_98765'
+        response = self.client.post(
+            reverse('submit_commitment', args=[self.dispute.id]),
+            {'choice': 'poster', 'salt': valid_salt}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+
+        commitment = JurorCommitment.objects.get(dispute=self.dispute, juror=self.juror1)
+        expected_hash = JurorCommitment.compute_hash('poster', valid_salt, self.juror1.id)
+        self.assertEqual(commitment.commitment_hash, expected_hash)
+
+        # Check detail view during commit phase does not expose vote tallies
+        detail_response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertNotIn('poster_votes', detail_response.context)
+        self.assertNotIn('taker_votes', detail_response.context)
+
+    def test_reveal_vote_endpoint_verification_and_consensus(self):
+        salt1 = 'juror1_secret_salt_12345678'
+        salt2 = 'juror2_secret_salt_87654321'
+
+        # Juror 1 commits 'poster'
+        hash1 = JurorCommitment.compute_hash('poster', salt1, self.juror1.id)
+        JurorCommitment.objects.create(dispute=self.dispute, juror=self.juror1, commitment_hash=hash1)
+
+        # Juror 2 commits 'poster'
+        hash2 = JurorCommitment.compute_hash('poster', salt2, self.juror2.id)
+        JurorCommitment.objects.create(dispute=self.dispute, juror=self.juror2, commitment_hash=hash2)
+
+        # Transition to reveal phase
+        self.client.login(username='poster', password='password123')
+        self.client.post(reverse('transition_phase', args=[self.dispute.id]))
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.phase, 'reveal')
+
+        # Juror 1 attempts reveal with wrong salt
+        self.client.login(username='juror1', password='password123')
+        res_fail = self.client.post(
+            reverse('reveal_vote', args=[self.dispute.id]),
+            {'choice': 'poster', 'salt': 'wrong_salt_1234567890'}
+        )
+        self.assertRedirects(res_fail, reverse('dispute_detail', args=[self.dispute.id]))
+        vote_fail = JurorVote.objects.get(dispute=self.dispute, juror=self.juror1)
+        self.assertFalse(vote_fail.is_verified)
+
+        # Check penalization ledger
+        slash = RewardLedger.objects.filter(user=self.juror1, transaction_type='juror_slash').first()
+        self.assertIsNotNone(slash)
+
+        # Reset vote for valid reveal test
+        vote_fail.delete()
+
+        # Juror 1 reveals correctly
+        res_ok1 = self.client.post(
+            reverse('reveal_vote', args=[self.dispute.id]),
+            {'choice': 'poster', 'salt': salt1}
+        )
+        self.assertRedirects(res_ok1, reverse('dispute_detail', args=[self.dispute.id]))
+        v1 = JurorVote.objects.get(dispute=self.dispute, juror=self.juror1)
+        self.assertTrue(v1.is_verified)
+
+        # Juror 2 reveals correctly -> triggers consensus calculation
+        self.client.login(username='juror2', password='password123')
+        res_ok2 = self.client.post(
+            reverse('reveal_vote', args=[self.dispute.id]),
+            {'choice': 'poster', 'salt': salt2}
+        )
+        self.assertRedirects(res_ok2, reverse('dispute_detail', args=[self.dispute.id]))
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.phase, 'concluded')
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.dispute.winning_choice, 'poster')
+
+        # Detail view now displays concluded stats
+        final_detail = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(final_detail.context['poster_votes'], 2)
+        self.assertEqual(final_detail.context['total_votes'], 2)
+
 

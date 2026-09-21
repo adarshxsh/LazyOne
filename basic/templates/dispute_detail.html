@@ -14,6 +14,7 @@
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
             <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Voting Phase:</strong> <span class="px-2 py-1 text-sm rounded-full bg-cyan-500/20 text-cyan-300">{{ dispute.get_phase_display }}</span></p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
@@ -22,6 +23,72 @@
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+        </div>
+
+        <!-- Two-Phase Commit-Reveal Voting Section -->
+        <div class="bg-gray-800/80 p-6 rounded-lg border border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Juror Voting & Deliberation</h3>
+
+            {% if dispute.phase == 'commit' %}
+                <p class="text-yellow-400 mb-4">Phase: <strong>Commit Phase</strong>. Cast your cryptographic vote commitment using a secure salt (min 16 chars). Votes remain secret during deliberation.</p>
+                {% if has_committed %}
+                    <div class="p-4 bg-green-900/30 border border-green-600/40 rounded text-green-300">
+                        Your cryptographic vote commitment has been successfully recorded for this dispute.
+                    </div>
+                {% else %}
+                    <form method="POST" action="{% url 'submit_commitment' dispute.id %}" class="space-y-4">
+                        {% csrf_token %}
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Vote Choice</label>
+                            <select name="choice" required class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white">
+                                <option value="poster">In Favor of Task Poster</option>
+                                <option value="taker">In Favor of Task Taker</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Secret Salt (At least 16 characters)</label>
+                            <input type="text" name="salt" required minlength="16" placeholder="Enter a random secure salt string..." class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white">
+                        </div>
+                        <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-2 px-4 rounded">
+                            Submit Vote Commitment
+                        </button>
+                    </form>
+                {% endif %}
+
+            {% elif dispute.phase == 'reveal' %}
+                <p class="text-yellow-400 mb-4">Phase: <strong>Reveal Phase</strong>. Reveal your vote selection and secret salt to have your vote counted and verified.</p>
+                {% if has_revealed %}
+                    <div class="p-4 bg-green-900/30 border border-green-600/40 rounded text-green-300">
+                        Your vote choice and salt have been revealed and cryptographically verified.
+                    </div>
+                {% else %}
+                    <form method="POST" action="{% url 'reveal_vote' dispute.id %}" class="space-y-4">
+                        {% csrf_token %}
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Vote Choice</label>
+                            <select name="choice" required class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white">
+                                <option value="poster">In Favor of Task Poster</option>
+                                <option value="taker">In Favor of Task Taker</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Secret Salt (Must match salt used in commitment)</label>
+                            <input type="text" name="salt" required minlength="16" placeholder="Enter your secret salt..." class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white">
+                        </div>
+                        <button type="submit" class="bg-green-600 hover:bg-green-500 text-white font-semibold py-2 px-4 rounded">
+                            Reveal Vote
+                        </button>
+                    </form>
+                {% endif %}
+
+            {% elif dispute.phase == 'concluded' or dispute.status == 'resolved' %}
+                <p class="text-green-400 mb-2">Voting Concluded. Dispute consensus has been finalized.</p>
+                <div class="bg-gray-900/60 p-4 rounded border border-gray-700 space-y-2">
+                    <p><strong>Winning Decision:</strong> <span class="capitalize font-bold text-cyan-300">{{ dispute.winning_choice|default:dispute.get_status_display }}</span></p>
+                    <p><strong>Total Verified Votes:</strong> {{ total_votes|default:0 }}</p>
+                    <p><strong>Poster Votes:</strong> {{ poster_votes|default:0 }} | <strong>Taker Votes:</strong> {{ taker_votes|default:0 }}</p>
+                </div>
+            {% endif %}
         </div>
     </div>
 
