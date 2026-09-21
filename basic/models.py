@@ -100,7 +100,7 @@ class Dispute(models.Model):
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
 
-    def refund_deposit(self, reason_description=None):
+    def refund_deposit(self, reason_description=None, actor=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
             user_profile = self.raised_by.userprofile
             user_profile.rewards += self.deposit_amount
@@ -114,10 +114,20 @@ class Dispute(models.Model):
                 transaction_type='dispute_refund',
                 description=desc
             )
+            prev_escrow = self.escrow_status
             self.escrow_status = 'refunded'
             self.save()
 
-    def forfeit_deposit(self, beneficiary=None, reason_description=None):
+            DisputeAuditEvent.objects.create(
+                dispute=self,
+                actor=actor,
+                event_type='ESCROW_REFUNDED',
+                previous_status=prev_escrow,
+                new_status='refunded',
+                description=desc
+            )
+
+    def forfeit_deposit(self, beneficiary=None, reason_description=None, actor=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
             if beneficiary:
                 beneficiary_profile = beneficiary.userprofile
@@ -139,8 +149,42 @@ class Dispute(models.Model):
                 transaction_type='dispute_forfeit',
                 description=desc
             )
+            prev_escrow = self.escrow_status
             self.escrow_status = 'forfeited'
             self.save()
+
+            DisputeAuditEvent.objects.create(
+                dispute=self,
+                actor=actor,
+                event_type='ESCROW_FORFEITED',
+                previous_status=prev_escrow,
+                new_status='forfeited',
+                description=desc
+            )
+
+class DisputeAuditEvent(models.Model):
+    EVENT_TYPE_CHOICES = (
+        ('RAISED', 'Raised'),
+        ('WITHDRAWN', 'Withdrawn'),
+        ('RESOLVED', 'Resolved'),
+        ('ESCROW_REFUNDED', 'Escrow Refunded'),
+        ('ESCROW_FORFEITED', 'Escrow Forfeited'),
+    )
+
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='audit_events')
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='dispute_audit_events')
+    event_type = models.CharField(max_length=30, choices=EVENT_TYPE_CHOICES)
+    previous_status = models.CharField(max_length=50, blank=True, default='')
+    new_status = models.CharField(max_length=50, blank=True, default='')
+    description = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        actor_str = self.actor.username if self.actor else 'System'
+        return f"Dispute #{self.dispute_id} - {self.event_type} by {actor_str}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
