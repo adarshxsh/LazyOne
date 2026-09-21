@@ -1,7 +1,10 @@
+from datetime import timedelta
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
+from django.utils import timezone
+from django.conf import settings
 from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
@@ -46,6 +49,8 @@ def raise_dispute(request, task_id):
             user_profile.rewards -= deposit_amount
             user_profile.save()
 
+            voting_deadline = timezone.now() + timedelta(hours=getattr(settings, 'DISPUTE_EXPIRATION_HOURS', 72))
+
             if hasattr(task, 'dispute'):
                 dispute = task.dispute
                 dispute.raised_by = request.user
@@ -53,6 +58,7 @@ def raise_dispute(request, task_id):
                 dispute.status = 'open'
                 dispute.deposit_amount = deposit_amount
                 dispute.escrow_status = 'held'
+                dispute.voting_deadline = voting_deadline
                 dispute.save()
             else:
                 dispute = Dispute.objects.create(
@@ -60,7 +66,8 @@ def raise_dispute(request, task_id):
                     raised_by=request.user,
                     reason=reason,
                     deposit_amount=deposit_amount,
-                    escrow_status='held'
+                    escrow_status='held',
+                    voting_deadline=voting_deadline
                 )
 
             RewardLedger.objects.create(
