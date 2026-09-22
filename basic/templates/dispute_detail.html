@@ -3,26 +3,143 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
-
-    <div class="space-y-6 text-gray-300">
+<div class="max-w-4xl mx-auto space-y-6 text-gray-300">
+    <div class="flex items-center justify-between border-b border-gray-700 pb-4">
         <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <h2 class="text-3xl font-bold text-white">Dispute Details</h2>
+            <p class="text-sm text-gray-400 mt-1">Dispute #{{ dispute.id }} for task: <strong class="text-cyan-400">{{ dispute.task.title }}</strong></p>
         </div>
-
         <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
-            <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
-        </div>
-
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
-            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+            <span class="px-3 py-1 rounded-full text-sm font-semibold {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300 border border-yellow-500/30{% else %}bg-green-500/20 text-green-300 border border-green-500/30{% endif %}">
+                {{ dispute.get_status_display }}
+            </span>
         </div>
     </div>
 
+    <!-- Task & Dispute Metadata -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-900/60 p-6 rounded-xl border border-gray-800">
+        <div>
+            <h3 class="text-lg font-semibold text-cyan-400 mb-3">Task Overview</h3>
+            <p class="mb-1"><strong>Reward:</strong> <span class="text-yellow-400 font-bold">{{ task.reward }} points</span></p>
+            <p class="mb-1"><strong>Posted By:</strong> {{ task.posted_by.username }}</p>
+            <p class="mb-1"><strong>Taken By:</strong> {{ task.taken_by.username|default:"Unassigned" }}</p>
+            {% if task.conversation %}
+                <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block mt-3 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium">
+                    View Task Chat / Evidence
+                </a>
+            {% endif %}
+        </div>
+
+        <div>
+            <h3 class="text-lg font-semibold text-cyan-400 mb-3">Escrow & Litigants</h3>
+            <p class="mb-1"><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
+            <p class="mb-1"><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
+            <p class="mb-1"><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y H:i" }}</p>
+        </div>
+    </div>
+
+    <!-- Dispute Evidence & Reason -->
+    <div class="bg-gray-900/60 p-6 rounded-xl border border-gray-800">
+        <h3 class="text-xl font-semibold text-cyan-400 mb-3">Dispute Reason & Evidence</h3>
+        <div class="p-4 bg-gray-950/80 rounded-lg border border-gray-800 text-gray-200 text-base leading-relaxed">
+            {{ dispute.reason|linebreaksbr }}
+        </div>
+    </div>
+
+    <!-- Community Jury Panel Section -->
+    {% if jury_panel %}
+    <div class="bg-gray-900/80 p-6 rounded-xl border border-indigo-500/30 shadow-lg space-y-6">
+        <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+            <h3 class="text-xl font-bold text-indigo-300 flex items-center gap-2">
+                <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3"></path>
+                </svg>
+                Community Jury Arbitration Panel
+            </h3>
+            <span class="text-xs px-2.5 py-1 rounded-full bg-indigo-900/50 text-indigo-200 border border-indigo-700/50">
+                {{ jury_panel.jurors.count }} Neutral Jurors Assigned
+            </span>
+        </div>
+
+        {% if is_juror %}
+            <!-- Juror Voting Section -->
+            <div class="p-4 bg-indigo-950/40 rounded-lg border border-indigo-800/40">
+                <h4 class="text-lg font-semibold text-indigo-200 mb-2">Juror Duty Action</h4>
+                {% if not has_voted and dispute.status == 'open' %}
+                    <p class="text-sm text-gray-300 mb-4">
+                        You have been selected as an impartial peer juror for this dispute. Please review the dispute details and chat evidence above, then cast your vote below.
+                        <span class="block mt-1 text-xs text-yellow-400">Note: Active vote tallies are hidden until your vote is submitted to ensure unbiased arbitration.</span>
+                    </p>
+                    <form method="POST" action="{% url 'cast_juror_vote' dispute.id %}" class="space-y-4">
+                        {% csrf_token %}
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <label class="flex items-center gap-3 p-3 rounded-lg border border-gray-700 bg-gray-900/80 cursor-pointer hover:border-indigo-500 transition-colors">
+                                <input type="radio" name="vote" value="poster" required class="text-indigo-600 focus:ring-indigo-500">
+                                <div>
+                                    <span class="block font-semibold text-white">In Favor of Poster</span>
+                                    <span class="block text-xs text-gray-400">({{ task.posted_by.username }})</span>
+                                </div>
+                            </label>
+                            <label class="flex items-center gap-3 p-3 rounded-lg border border-gray-700 bg-gray-900/80 cursor-pointer hover:border-indigo-500 transition-colors">
+                                <input type="radio" name="vote" value="taker" required class="text-indigo-600 focus:ring-indigo-500">
+                                <div>
+                                    <span class="block font-semibold text-white">In Favor of Taker</span>
+                                    <span class="block text-xs text-gray-400">({{ task.taken_by.username }})</span>
+                                </div>
+                            </label>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-400 mb-1">Optional Comments / Reasoning:</label>
+                            <textarea name="comments" rows="2" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-sm text-gray-200 focus:ring-indigo-500 focus:border-indigo-500" placeholder="State reason for your decision..."></textarea>
+                        </div>
+                        <button type="submit" class="w-full sm:w-auto px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow transition-colors">
+                            Submit Juror Vote
+                        </button>
+                    </form>
+                {% else %}
+                    <div class="p-3 bg-green-900/30 border border-green-700/40 rounded-lg text-green-300 text-sm flex items-center gap-2">
+                        <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                        You have submitted your vote: <strong>{{ user_vote.get_vote_display }}</strong>. Thank you for serving on the jury!
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        <!-- Vote Tallies & Consensus Output -->
+        <div>
+            <h4 class="text-md font-semibold text-gray-300 mb-2">Jury Panel Consensus Status</h4>
+            {% if show_vote_counts %}
+                <div class="grid grid-cols-2 sm:grid-cols-2 gap-4">
+                    <div class="p-4 bg-gray-950/70 rounded-lg border border-gray-800 text-center">
+                        <span class="block text-xs text-gray-400">Votes for Poster ({{ task.posted_by.username }})</span>
+                        <span class="text-2xl font-bold text-indigo-400">{{ poster_votes }}</span>
+                    </div>
+                    <div class="p-4 bg-gray-950/70 rounded-lg border border-gray-800 text-center">
+                        <span class="block text-xs text-gray-400">Votes for Taker ({{ task.taken_by.username }})</span>
+                        <span class="text-2xl font-bold text-indigo-400">{{ taker_votes }}</span>
+                    </div>
+                </div>
+            {% else %}
+                <div class="p-4 bg-gray-950/70 rounded-lg border border-gray-800 text-sm text-gray-400 italic">
+                    Live vote tallies are hidden for active jurors prior to vote submission.
+                </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Litigant Withdraw Action -->
+    {% if dispute.raised_by == request.user and dispute.status == 'open' %}
+        <div class="pt-4 border-t border-gray-800 flex justify-end">
+            <form method="POST" action="{% url 'withdraw_dispute' dispute.id %}">
+                {% csrf_token %}
+                <button type="submit" class="px-5 py-2.5 bg-gray-700 hover:bg-gray-600 text-white font-medium rounded-lg transition-colors text-sm">
+                    Withdraw Dispute & Refund Bond
+                </button>
+            </form>
+        </div>
+    {% endif %}
+</div>
 {% endblock %}

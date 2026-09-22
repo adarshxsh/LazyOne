@@ -27,6 +27,11 @@ class Command(BaseCommand):
         count = 0
         for dispute in expired_disputes:
             task = dispute.task
+            if hasattr(dispute, 'jury_panel') and dispute.jury_panel.status == 'voting':
+                dispute.jury_panel.tally_and_settle()
+                count += 1
+                continue
+
             with transaction.atomic():
                 dispute.status = 'resolved'
                 dispute.save()
