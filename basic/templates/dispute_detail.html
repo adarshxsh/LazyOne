@@ -17,6 +17,15 @@
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            {% if dispute.voting_deadline %}
+            <p><strong>Voting Deadline:</strong> {{ dispute.voting_deadline|date:"F d, Y, g:i a" }}</p>
+            {% endif %}
+            {% if dispute.evidence_deadline %}
+            <p><strong>Evidence Deadline:</strong> {{ dispute.evidence_deadline|date:"F d, Y, g:i a" }}</p>
+            {% endif %}
+            {% if dispute.juror_timeout %}
+            <p><strong>Juror Activity Timeout:</strong> {{ dispute.juror_timeout|date:"F d, Y, g:i a" }}</p>
+            {% endif %}
         </div>
 
         <div>
