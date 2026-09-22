@@ -1,4 +1,5 @@
 import math
+from datetime import timedelta
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -68,11 +69,16 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('appeal_deposit', 'Appeal Deposit Bond Held'),
+        ('appeal_refund', 'Appeal Deposit Bond Refunded'),
+        ('dispute_slash', 'Dispute Juror Stake Slashed'),
+        ('juror_reward', 'Juror Reward Distribution'),
+        ('litigant_slashing', 'Dishonest Litigant Slashing Penalty'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=30, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -82,7 +88,10 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('peer_review', 'Peer Review'),
+        ('appeal_period', 'Appeal Period'),
         ('resolved', 'Resolved'),
+        ('slashed', 'Slashed'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
@@ -92,13 +101,25 @@ class Dispute(models.Model):
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    @property
+    def can_be_appealed(self):
+        if self.status in ['resolved', 'slashed']:
+            return False
+        if self.appeals.exists():
+            return False
+        tier1_panel = self.jury_panels.filter(tier=1, status='resolved').order_by('-resolved_at').first()
+        if not tier1_panel or not tier1_panel.resolved_at:
+            return False
+        expiry = tier1_panel.resolved_at + timedelta(hours=48)
+        return timezone.now() <= expiry
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -141,6 +162,97 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class DisputeAppeal(models.Model):
+    STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('upheld', 'Upheld'),
+        ('overturned', 'Overturned'),
+        ('dismissed', 'Dismissed'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='appeals')
+    appellant = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_appeals')
+    appeal_bond_amount = models.PositiveIntegerField(default=0)
+    justification = models.TextField(blank=True, default='')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Appeal for dispute {self.dispute.id} by {self.appellant.username}"
+
+class JuryPanel(models.Model):
+    STATUS_CHOICES = (
+        ('active', 'Active'),
+        ('resolved', 'Resolved'),
+        ('escalated', 'Escalated'),
+        ('expired', 'Expired'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='jury_panels')
+    tier = models.PositiveIntegerField(default=1)
+    quorum_size = models.PositiveIntegerField(default=3)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    jurors = models.ManyToManyField(User, related_name='jury_panels')
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Tier-{self.tier} JuryPanel for Dispute {self.dispute.id} ({self.status})"
+
+    def assign_eligible_jurors(self):
+        task = self.dispute.task
+        excluded_ids = {task.posted_by.id}
+        if task.taken_by:
+            excluded_ids.add(task.taken_by.id)
+
+        parties_profiles = []
+        if hasattr(task.posted_by, 'userprofile'):
+            parties_profiles.append(task.posted_by.userprofile)
+        if task.taken_by and hasattr(task.taken_by, 'userprofile'):
+            parties_profiles.append(task.taken_by.userprofile)
+
+        for profile in parties_profiles:
+            friendships = Friendship.objects.filter(
+                models.Q(from_user=profile) | models.Q(to_user=profile)
+            )
+            for f in friendships:
+                excluded_ids.add(f.from_user.user.id)
+                excluded_ids.add(f.to_user.user.id)
+
+        existing_juror_ids = User.objects.filter(jury_panels__dispute=self.dispute).values_list('id', flat=True)
+        excluded_ids.update(existing_juror_ids)
+
+        eligible_users = User.objects.filter(is_active=True).exclude(id__in=excluded_ids).order_by('?')
+        selected = list(eligible_users[:self.quorum_size])
+        self.jurors.set(selected)
+        return selected
+
+    def evaluate_consensus(self):
+        votes = self.votes.all()
+        if votes.count() < self.quorum_size:
+            return None
+
+        counts = {}
+        for v in votes:
+            counts[v.voted_for] = counts.get(v.voted_for, 0) + 1
+
+        if not counts:
+            return None
+
+        top_party = max(counts, key=counts.get)
+        return top_party
+
+class JurorVote(models.Model):
+    panel = models.ForeignKey(JuryPanel, on_delete=models.CASCADE, related_name='votes')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='juror_votes')
+    voted_for = models.ForeignKey(User, on_delete=models.CASCADE, related_name='juror_votes_received')
+    justification = models.TextField(blank=True, default='')
+    voted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('panel', 'juror')
+
+    def __str__(self):
+        return f"Vote by {self.juror.username} on Panel {self.panel.id} for {self.voted_for.username}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)

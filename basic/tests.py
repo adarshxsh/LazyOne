@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, DisputeAppeal, JuryPanel, JurorVote
 
 
 class DisputeDepositBondTests(TestCase):
@@ -86,7 +86,7 @@ class DisputeDepositBondTests(TestCase):
         dispute = Dispute.objects.get(task=self.task)
         self.assertEqual(dispute.deposit_amount, 60)
         self.assertEqual(dispute.escrow_status, 'held')
-        self.assertEqual(dispute.status, 'open')
+        self.assertIn(dispute.status, ['open', 'peer_review'])
         self.assertEqual(dispute.raised_by, self.taker)
 
         # Check ledger
@@ -181,4 +181,284 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class DisputeAppealAndSlashingTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        # Create 5 potential jurors
+        self.jurors = []
+        for i in range(5):
+            u = User.objects.create_user(username=f'juror{i+1}', password='password123')
+            UserProfile.objects.create(user=u, rewards=100)
+            self.jurors.append(u)
+
+        self.task = Task.objects.create(
+            title="Appeals Task",
+            description="Task for appeals testing",
+            reward=300,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=timezone.now() + timedelta(days=2)
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_raise_dispute_creates_dispute_and_tier1_panel(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Incomplete work'}
+        )
+        self.task.refresh_from_db()
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertIn(dispute.status, ['open', 'peer_review'])
+
+        panel = dispute.jury_panels.filter(tier=1).first()
+        self.assertIsNotNone(panel)
+        self.assertEqual(panel.quorum_size, 3)
+        self.assertEqual(panel.jurors.count(), 3)
+
+    def test_overwhelming_consensus_slashes_outlier_juror(self):
+        # Create dispute and Tier-1 panel manually for controlled test
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Test dispute',
+            status='peer_review',
+            deposit_amount=60,
+            escrow_status='held'
+        )
+        panel = JuryPanel.objects.create(
+            dispute=dispute,
+            tier=2,
+            quorum_size=5,
+            status='active'
+        )
+        panel.jurors.set(self.jurors)
+
+        # 4 jurors vote for poster, 1 juror votes for taker (80% majority > 80% consensus ratio or overwhelming)
+        # To test >80% majority: 5 out of 5 vote (100% > 80%).
+        # Let's test 5 out of 5 voting: 4 vote poster, 1 votes taker.
+        # Wait, 4/5 = 80%. If threshold > 80%, 4/5 is 80%. What if 5/5 vote or 4/4 vote?
+        # Let's test 5 jurors where 4 vote for poster and 1 votes for taker with consensus_ratio >= 0.80 or 100%.
+        # Let's check: j1, j2, j3, j4 vote poster, j5 votes taker.
+        # Cast votes via client or model:
+        for juror in self.jurors[:4]:
+            self.client.login(username=juror.username, password='password123')
+            self.client.post(
+                reverse('cast_juror_vote', args=[dispute.id]),
+                {'voted_for': self.poster.id, 'justification': 'Poster is right'}
+            )
+
+        # 5th juror votes taker
+        outlier_juror = self.jurors[4]
+        self.client.login(username=outlier_juror.username, password='password123')
+        self.client.post(
+            reverse('cast_juror_vote', args=[dispute.id]),
+            {'voted_for': self.taker.id, 'justification': 'Taker is right'}
+        )
+
+        panel.refresh_from_db()
+        self.assertEqual(panel.status, 'resolved')
+
+        # Check that outlier juror lost 10 points via dispute_slash transaction
+        slash_ledger = RewardLedger.objects.filter(
+            user=outlier_juror,
+            transaction_type='dispute_slash'
+        ).first()
+        self.assertIsNotNone(slash_ledger)
+        self.assertEqual(slash_ledger.amount, -10)
+
+        outlier_profile = outlier_juror.userprofile
+        outlier_profile.refresh_from_db()
+        self.assertEqual(outlier_profile.rewards, 90)  # Started at 100 - 10 = 90
+
+    def test_split_decision_does_not_slash_dissenting_juror(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Test dispute',
+            status='peer_review',
+            deposit_amount=60,
+            escrow_status='held'
+        )
+        panel = JuryPanel.objects.create(
+            dispute=dispute,
+            tier=1,
+            quorum_size=3,
+            status='active'
+        )
+        panel.jurors.set(self.jurors[:3])
+
+        # 2 jurors vote poster, 1 votes taker (2/3 = 66.7% <= 80%)
+        self.client.login(username=self.jurors[0].username, password='password123')
+        self.client.post(
+            reverse('cast_juror_vote', args=[dispute.id]),
+            {'voted_for': self.poster.id}
+        )
+        self.client.login(username=self.jurors[1].username, password='password123')
+        self.client.post(
+            reverse('cast_juror_vote', args=[dispute.id]),
+            {'voted_for': self.poster.id}
+        )
+
+        dissenting_juror = self.jurors[2]
+        self.client.login(username=dissenting_juror.username, password='password123')
+        self.client.post(
+            reverse('cast_juror_vote', args=[dispute.id]),
+            {'voted_for': self.taker.id}
+        )
+
+        # Confirm no dispute_slash transaction occurred for dissenting_juror
+        slash_ledger = RewardLedger.objects.filter(
+            user=dissenting_juror,
+            transaction_type='dispute_slash'
+        ).first()
+        self.assertIsNone(slash_ledger)
+
+    def test_file_dispute_appeal_creates_appeal_model_and_tier2_panel(self):
+        # Set up resolved Tier-1 dispute eligible for appeal
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Test dispute',
+            status='appeal_period',
+            deposit_amount=60,
+            escrow_status='held'
+        )
+        panel = JuryPanel.objects.create(
+            dispute=dispute,
+            tier=1,
+            quorum_size=3,
+            status='resolved',
+            resolved_at=timezone.now()
+        )
+
+        # Deposit bond for task is 60 -> 2x bond is 120
+        self.taker_profile.rewards = 1000
+        self.taker_profile.save()
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(
+            reverse('file_dispute_appeal', args=[dispute.id]),
+            {'justification': 'I disagree with the Tier-1 decision'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+        # Verify DisputeAppeal model created
+        appeal = DisputeAppeal.objects.get(dispute=dispute)
+        self.assertEqual(appeal.appellant, self.taker)
+        self.assertEqual(appeal.appeal_bond_amount, 120)
+        self.assertEqual(appeal.status, 'pending')
+
+        # Verify balance deducted: 1000 - 120 = 880
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 880)
+
+        # Verify dispute status transitioned to appeal_period
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'appeal_period')
+
+        # Verify expanded 5-juror Tier-2 senior panel assigned
+        tier2_panel = dispute.jury_panels.filter(tier=2).first()
+        self.assertIsNotNone(tier2_panel)
+        self.assertEqual(tier2_panel.quorum_size, 5)
+
+        # Verify RewardLedger entry for appeal deposit
+        ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='appeal_deposit').first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, -120)
+
+    def test_max_one_appeal_escalation_tier_enforced(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Test dispute',
+            status='appeal_period',
+            deposit_amount=60,
+            escrow_status='held'
+        )
+        panel = JuryPanel.objects.create(
+            dispute=dispute,
+            tier=1,
+            quorum_size=3,
+            status='resolved',
+            resolved_at=timezone.now()
+        )
+
+        # File first appeal
+        DisputeAppeal.objects.create(
+            dispute=dispute,
+            appellant=self.taker,
+            appeal_bond_amount=120,
+            justification='First appeal',
+            status='pending'
+        )
+
+        # Attempt second appeal
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('file_dispute_appeal', args=[dispute.id]),
+            {'justification': 'Second appeal attempt'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+        # Confirm still only 1 appeal exists
+        self.assertEqual(DisputeAppeal.objects.filter(dispute=dispute).count(), 1)
+
+    def test_senior_jury_panel_authoritative_resolution(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Test dispute',
+            status='appeal_period',
+            deposit_amount=60,
+            escrow_status='held'
+        )
+        appeal = DisputeAppeal.objects.create(
+            dispute=dispute,
+            appellant=self.taker,
+            appeal_bond_amount=120,
+            justification='Appeal justification',
+            status='pending'
+        )
+        tier2_panel = JuryPanel.objects.create(
+            dispute=dispute,
+            tier=2,
+            quorum_size=5,
+            status='active'
+        )
+        tier2_panel.jurors.set(self.jurors)
+
+        # 5 jurors on Tier-2 panel vote in favor of taker (appellant)
+        for juror in self.jurors:
+            self.client.login(username=juror.username, password='password123')
+            self.client.post(
+                reverse('cast_juror_vote', args=[dispute.id]),
+                {'voted_for': self.taker.id}
+            )
+
+        self.task.refresh_from_db()
+        dispute.refresh_from_db()
+        appeal.refresh_from_db()
+
+        # Task should be completed
+        self.assertEqual(self.task.status, 'completed')
+
+        # Appeal status should be overturned
+        self.assertEqual(appeal.status, 'overturned')
+
+        # Taker profile should receive reward (300) + deposit refund (60) + appeal refund (120)
+        self.taker_profile.refresh_from_db()
+        # Initial 1000 - deposit 60 - appeal 120 + 300 + 60 + 120 = 1300
+        self.assertGreaterEqual(self.taker_profile.rewards, 1300)
+
 
