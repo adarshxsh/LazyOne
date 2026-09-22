@@ -3,7 +3,159 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, JuryPanel, JurorVote, Friendship
+
+
+class JuryPanelTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Litigants
+        self.poster = User.objects.create_user(username='poster_user', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker_user', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        # Friend of poster
+        self.friend = User.objects.create_user(username='friend_user', password='password123')
+        self.friend_profile = UserProfile.objects.create(user=self.friend, rewards=500)
+        self.poster_profile.friends.add(self.friend_profile)
+
+        # Neutral potential jurors
+        self.juror1 = User.objects.create_user(username='juror1', password='password123')
+        self.juror1_profile = UserProfile.objects.create(user=self.juror1, rewards=500)
+
+        self.juror2 = User.objects.create_user(username='juror2', password='password123')
+        self.juror2_profile = UserProfile.objects.create(user=self.juror2, rewards=500)
+
+        self.juror3 = User.objects.create_user(username='juror3', password='password123')
+        self.juror3_profile = UserProfile.objects.create(user=self.juror3, rewards=500)
+
+        # Task
+        self.task = Task.objects.create(
+            title="Disputed Jury Task",
+            description="Details",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=timezone.now() + timedelta(days=2)
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_jury_panel_auto_creation_and_exclusion(self):
+        self.client.login(username='taker_user', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Incomplete work claimed'}
+        )
+
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertTrue(hasattr(dispute, 'jury_panel'))
+        panel = dispute.jury_panel
+
+        self.assertEqual(panel.status, 'voting')
+        assigned_jurors = panel.jurors.all()
+        self.assertEqual(assigned_jurors.count(), 3)
+
+        # Ensure counterparties and friends are excluded
+        self.assertNotIn(self.poster, assigned_jurors)
+        self.assertNotIn(self.taker, assigned_jurors)
+        self.assertNotIn(self.friend, assigned_jurors)
+
+        # Ensure neutral jurors were assigned
+        self.assertIn(self.juror1, assigned_jurors)
+        self.assertIn(self.juror2, assigned_jurors)
+        self.assertIn(self.juror3, assigned_jurors)
+
+    def test_hidden_active_vote_counts_before_voting(self):
+        # Raise dispute
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Evidence details',
+            deposit_amount=50,
+            escrow_status='held'
+        )
+        panel = JuryPanel.objects.create(dispute=dispute, status='voting')
+        panel.jurors.set([self.juror1, self.juror2, self.juror3])
+
+        # Assigned juror before voting -> show_vote_counts is False
+        self.client.login(username='juror1', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context['show_vote_counts'])
+
+        # Cast vote as juror1
+        self.client.post(reverse('cast_juror_vote', args=[dispute.id]), {'vote': 'taker'})
+
+        # Assigned juror after voting -> show_vote_counts is True
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertTrue(response.context['show_vote_counts'])
+
+    def test_majority_voting_consensus_settlement(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Taker completed work',
+            deposit_amount=50,
+            escrow_status='held'
+        )
+        self.taker_profile.rewards = 450  # 500 - 50 deposit bond
+        self.taker_profile.save()
+
+        panel = JuryPanel.objects.create(dispute=dispute, status='voting')
+        panel.jurors.set([self.juror1, self.juror2, self.juror3])
+
+        # Juror 1 votes for taker
+        self.client.login(username='juror1', password='password123')
+        self.client.post(reverse('cast_juror_vote', args=[dispute.id]), {'vote': 'taker'})
+
+        # Juror 2 votes for poster
+        self.client.login(username='juror2', password='password123')
+        self.client.post(reverse('cast_juror_vote', args=[dispute.id]), {'vote': 'poster'})
+
+        # Juror 3 votes for taker -> majority reached (2 taker vs 1 poster)
+        self.client.login(username='juror3', password='password123')
+        self.client.post(reverse('cast_juror_vote', args=[dispute.id]), {'vote': 'taker'})
+
+        panel.refresh_from_db()
+        dispute.refresh_from_db()
+        self.task.refresh_from_db()
+
+        self.assertEqual(panel.status, 'resolved')
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(self.task.status, 'completed')
+
+        # Taker profile: 450 + 200 (task reward) + 50 (deposit bond refund) = 700
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 700)
+
+        # Participating jurors receive 10 reward points
+        self.juror1_profile.refresh_from_db()
+        self.assertEqual(self.juror1_profile.rewards, 510)
+        self.juror2_profile.refresh_from_db()
+        self.assertEqual(self.juror2_profile.rewards, 510)
+        self.juror3_profile.refresh_from_db()
+        self.assertEqual(self.juror3_profile.rewards, 510)
+
+    def test_unauthorized_user_access_restricted(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Private dispute',
+            deposit_amount=50
+        )
+        panel = JuryPanel.objects.create(dispute=dispute)
+        panel.jurors.set([self.juror1, self.juror2])
+
+        unauthorized_user = User.objects.create_user(username='stranger', password='password123')
+        self.client.login(username='stranger', password='password123')
+
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertRedirects(response, reverse('home'))
+
 
 
 class DisputeDepositBondTests(TestCase):
