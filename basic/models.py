@@ -95,10 +95,47 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    jurors = models.ManyToManyField(User, related_name='assigned_disputes', blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    @property
+    def panel_jurors(self):
+        return self.jurors.all()
+
+    def notify_participants(self, message):
+        from django.urls import reverse
+        recipients = set()
+        if self.task.posted_by:
+            recipients.add(self.task.posted_by)
+        if self.task.taken_by:
+            recipients.add(self.task.taken_by)
+        for juror in self.jurors.all():
+            recipients.add(juror)
+
+        dispute_link = reverse('dispute_detail', args=[self.id])
+        notifications = [
+            Notification(
+                recipient=recipient,
+                message=message,
+                link=dispute_link
+            )
+            for recipient in recipients
+        ]
+        if notifications:
+            Notification.objects.bulk_create(notifications)
+
+    def log_audit_event(self, actor, event_type, details_json=None):
+        if details_json is None:
+            details_json = {}
+        return DisputeAuditEvent.objects.create(
+            dispute=self,
+            actor=actor,
+            event_type=event_type,
+            details_json=details_json
+        )
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -141,6 +178,53 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class DisputeAuditEvent(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='audit_events')
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='dispute_audit_events')
+    event_type = models.CharField(max_length=50)
+    details_json = models.JSONField(default=dict, blank=True)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['timestamp']
+
+    def __str__(self):
+        actor_str = self.actor.username if self.actor else 'System'
+        return f"[{self.timestamp}] {self.event_type} by {actor_str} on Dispute {self.dispute_id}"
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValueError("DisputeAuditEvent records are immutable and cannot be updated.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("DisputeAuditEvent records are immutable and cannot be deleted.")
+
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidence_list')
+    submitted_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='submitted_evidence')
+    description = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"Evidence by {self.submitted_by.username} for Dispute {self.dispute_id}"
+
+class DisputeVote(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    voted_for = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes_received', null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'voter')
+
+    def __str__(self):
+        voted_str = self.voted_for.username if self.voted_for else 'None'
+        return f"Vote by {self.voter.username} for {voted_str} on Dispute {self.dispute_id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)

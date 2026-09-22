@@ -1,7 +1,7 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from ..models import Task, Conversation, Notification, RewardLedger
+from ..models import Task, Conversation, Notification, RewardLedger, DisputeAuditEvent
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
@@ -95,6 +95,19 @@ def complete_task(request, task_id):
             )
             task.dispute.status = 'resolved'
             task.dispute.save()
+
+            DisputeAuditEvent.objects.create(
+                dispute=task.dispute,
+                actor=request.user,
+                event_type='dispute_resolved',
+                details_json={
+                    'action': 'completed_by_poster',
+                    'status': 'resolved'
+                }
+            )
+            task.dispute.notify_participants(
+                message=f"Dispute for task '{task.title}' has been resolved as completed by {request.user.username}."
+            )
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,
