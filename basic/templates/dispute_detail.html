@@ -11,9 +11,56 @@
             <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
         </div>
 
+        <!-- Active Lifecycle Phase & Progress Bar -->
+        <div id="dispute-lifecycle-progress" class="bg-gray-800/60 p-6 rounded-lg border border-gray-700 space-y-4">
+            <div class="flex items-center justify-between">
+                <h3 class="text-xl font-semibold text-cyan-400">Active Lifecycle Phase</h3>
+                <span class="text-sm font-medium text-gray-300">
+                    Phase: <strong class="text-cyan-300">{{ dispute.get_status_display }}</strong>
+                </span>
+            </div>
+
+            <!-- Progress Bar -->
+            <div class="w-full bg-gray-700 rounded-full h-3 overflow-hidden" id="progress-bar-container">
+                {% if dispute.status == 'evidence_submission' %}
+                    <div class="bg-blue-500 h-3 rounded-full transition-all duration-500" style="width: 25%"></div>
+                {% elif dispute.status == 'voting_period' %}
+                    <div class="bg-purple-500 h-3 rounded-full transition-all duration-500" style="width: 50%"></div>
+                {% elif dispute.status == 'appeal_period' %}
+                    <div class="bg-amber-500 h-3 rounded-full transition-all duration-500" style="width: 75%"></div>
+                {% elif dispute.status == 'resolved' %}
+                    <div class="bg-green-500 h-3 rounded-full transition-all duration-500" style="width: 100%"></div>
+                {% elif dispute.status == 'cancelled' %}
+                    <div class="bg-red-500 h-3 rounded-full transition-all duration-500" style="width: 100%"></div>
+                {% else %}
+                    <div class="bg-gray-500 h-3 rounded-full transition-all duration-500" style="width: 0%"></div>
+                {% endif %}
+            </div>
+
+            <!-- Step Indicators -->
+            <div class="grid grid-cols-4 text-xs text-center font-medium">
+                <div class="{% if dispute.status == 'evidence_submission' %}text-blue-400 font-bold{% else %}text-gray-400{% endif %}">
+                    1. Evidence Submission
+                </div>
+                <div class="{% if dispute.status == 'voting_period' %}text-purple-400 font-bold{% else %}text-gray-400{% endif %}">
+                    2. Voting Period
+                </div>
+                <div class="{% if dispute.status == 'appeal_period' %}text-amber-400 font-bold{% else %}text-gray-400{% endif %}">
+                    3. Appeal Period
+                </div>
+                <div class="{% if dispute.status == 'resolved' %}text-green-400 font-bold{% elif dispute.status == 'cancelled' %}text-red-400 font-bold{% else %}text-gray-400{% endif %}">
+                    4. {% if dispute.status == 'cancelled' %}Cancelled{% else %}Resolved{% endif %}
+                </div>
+            </div>
+        </div>
+
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Status:</strong> 
+                <span class="px-2.5 py-1 text-sm font-semibold rounded-full border {% if dispute.status == 'evidence_submission' %}bg-blue-500/20 text-blue-300 border-blue-500/30{% elif dispute.status == 'voting_period' %}bg-purple-500/20 text-purple-300 border-purple-500/30{% elif dispute.status == 'appeal_period' %}bg-amber-500/20 text-amber-300 border-amber-500/30{% elif dispute.status == 'resolved' %}bg-green-500/20 text-green-300 border-green-500/30{% elif dispute.status == 'cancelled' %}bg-red-500/20 text-red-300 border-red-500/30{% else %}bg-gray-500/20 text-gray-300 border-gray-500/30{% endif %}">
+                    {{ dispute.get_status_display }}
+                </span>
+            </p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
