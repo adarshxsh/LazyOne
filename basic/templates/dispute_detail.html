@@ -23,6 +23,88 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <!-- Evidence Section -->
+        <div class="mt-6">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Evidence Submissions</h3>
+            {% if evidence_list %}
+                <div class="space-y-3 mb-4">
+                {% for item in evidence_list %}
+                    <div class="bg-gray-900/50 p-3 rounded-lg border border-gray-700">
+                        <div class="text-sm text-cyan-300 font-medium mb-1">{{ item.submitted_by.username }} - {{ item.created_at|date:"F d, Y H:i" }}</div>
+                        <p class="text-gray-200">{{ item.description|linebreaksbr }}</p>
+                    </div>
+                {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-gray-400 mb-4">No evidence submitted yet.</p>
+            {% endif %}
+
+            {% if dispute.status == 'open' %}
+            <form action="{% url 'submit_evidence' dispute.id %}" method="POST" class="space-y-3">
+                {% csrf_token %}
+                <textarea name="evidence" rows="3" class="w-full bg-gray-900 text-white rounded p-3 border border-gray-700" placeholder="Submit additional evidence..."></textarea>
+                <button type="submit" class="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold px-4 py-2 rounded">Submit Evidence</button>
+            </form>
+            {% endif %}
+        </div>
+
+        <!-- Voting Section -->
+        <div class="mt-6">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Votes Cast</h3>
+            {% if votes %}
+                <div class="space-y-2 mb-4">
+                {% for v in votes %}
+                    <div class="bg-gray-900/50 p-2 rounded border border-gray-700 text-sm">
+                        <span class="text-cyan-300 font-medium">{{ v.voter.username }}</span> voted for: <span class="text-white">{% if v.voted_for %}{{ v.voted_for.username }}{% else %}None{% endif %}</span>
+                    </div>
+                {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-gray-400 mb-4">No votes cast yet.</p>
+            {% endif %}
+
+            {% if dispute.status == 'open' %}
+            <form action="{% url 'cast_vote' dispute.id %}" method="POST" class="flex items-center space-x-3">
+                {% csrf_token %}
+                <select name="voted_for" class="bg-gray-900 text-white rounded p-2 border border-gray-700">
+                    <option value="">-- Select Winner --</option>
+                    <option value="{{ dispute.task.posted_by.id }}">Poster: {{ dispute.task.posted_by.username }}</option>
+                    {% if dispute.task.taken_by %}
+                    <option value="{{ dispute.task.taken_by.id }}">Taker: {{ dispute.task.taken_by.username }}</option>
+                    {% endif %}
+                </select>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-2 rounded">Cast Vote</button>
+            </form>
+            {% endif %}
+        </div>
+
+        <!-- Chronological Audit Activity History -->
+        <div class="mt-8 border-t border-gray-700 pt-6">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-4">Audit Trail & Activity History</h3>
+            {% if audit_events %}
+                <div class="space-y-4" id="audit-trail">
+                {% for event in audit_events %}
+                    <div class="bg-gray-900/70 p-4 rounded-lg border border-gray-700">
+                        <div class="flex justify-between items-center text-sm text-gray-400 mb-1">
+                            <span class="font-semibold text-cyan-300 uppercase tracking-wider">{{ event.event_type }}</span>
+                            <span>{{ event.timestamp|date:"F d, Y H:i:s" }}</span>
+                        </div>
+                        <p class="text-gray-200">
+                            <strong>Actor:</strong> {% if event.actor %}{{ event.actor.username }}{% else %}System{% endif %}
+                        </p>
+                        {% if event.details_json %}
+                        <div class="mt-2 text-xs text-gray-300 bg-gray-950 p-2 rounded font-mono">
+                            {{ event.details_json }}
+                        </div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-gray-400">No audit activity recorded yet.</p>
+            {% endif %}
+        </div>
     </div>
 
 {% endblock %}
