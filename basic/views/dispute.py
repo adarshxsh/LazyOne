@@ -105,3 +105,66 @@ def withdraw_dispute(request, dispute_id):
         )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def resolve_dispute(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id, status='open')
+    task = dispute.task
+    winner = request.POST.get('winner')
+
+    with transaction.atomic():
+        if winner == 'poster':
+            poster_profile = task.posted_by.userprofile
+            poster_profile.rewards += task.reward
+            poster_profile.save()
+            RewardLedger.objects.create(
+                user=task.posted_by,
+                task=task,
+                amount=task.reward,
+                transaction_type='task_cancellation',
+                description=f"Refund for resolved dispute on task: '{task.title}'"
+            )
+            task.status = 'cancelled'
+            task.save()
+            dispute.forfeit_deposit(
+                reason_description=f"Deposit bond forfeited upon dispute resolution for task: '{task.title}'"
+            )
+            dispute.status = 'resolved'
+            dispute.save()
+        elif winner == 'taker':
+            taker_profile = task.taken_by.userprofile
+            taker_profile.rewards += task.reward
+            taker_profile.save()
+            RewardLedger.objects.create(
+                user=task.taken_by,
+                task=task,
+                amount=task.reward,
+                transaction_type='task_completion',
+                description=f"Completed task via dispute resolution: '{task.title}'"
+            )
+            task.status = 'completed'
+            task.save()
+            dispute.refund_deposit(
+                reason_description=f"Deposit bond refunded upon winning dispute for task: '{task.title}'"
+            )
+            dispute.status = 'resolved'
+            dispute.save()
+        else:
+            messages.error(request, "Invalid dispute resolution winner specified.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+        Notification.objects.create(
+            recipient=task.posted_by,
+            message=f"Dispute for task '{task.title}' has been resolved.",
+            link=reverse('my_tasks')
+        )
+        if task.taken_by:
+            Notification.objects.create(
+                recipient=task.taken_by,
+                message=f"Dispute for task '{task.title}' has been resolved.",
+                link=reverse('my_tasks')
+            )
+
+    messages.success(request, "Dispute resolved successfully.")
+    return redirect('my_tasks')

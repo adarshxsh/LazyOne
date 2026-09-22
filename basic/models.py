@@ -68,6 +68,7 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('juror_reward', 'Juror Arbitration Reward'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
@@ -96,6 +97,7 @@ class Dispute(models.Model):
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
+    jurors = models.ManyToManyField(User, related_name='juror_disputes', blank=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
@@ -117,9 +119,25 @@ class Dispute(models.Model):
             self.escrow_status = 'refunded'
             self.save()
 
-    def forfeit_deposit(self, beneficiary=None, reason_description=None):
+    def forfeit_deposit(self, beneficiary=None, reason_description=None, jurors=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
-            if beneficiary:
+            active_jurors = jurors if jurors is not None else list(self.jurors.all())
+            if active_jurors:
+                num_jurors = len(active_jurors)
+                share = self.deposit_amount // num_jurors
+                for juror in active_jurors:
+                    if share > 0:
+                        juror_profile = juror.userprofile
+                        juror_profile.rewards += share
+                        juror_profile.save()
+                        RewardLedger.objects.create(
+                            user=juror,
+                            task=self.task,
+                            amount=share,
+                            transaction_type='juror_reward',
+                            description=f"Juror arbitration reward for dispute on task: '{self.task.title}'"
+                        )
+            elif beneficiary:
                 beneficiary_profile = beneficiary.userprofile
                 beneficiary_profile.rewards += self.deposit_amount
                 beneficiary_profile.save()
