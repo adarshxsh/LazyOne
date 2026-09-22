@@ -3,10 +3,11 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 from django.db import transaction
 from django.urls import reverse
+from django.db.models import Q
 from basic.models import Dispute, RewardLedger, Notification
 
 class Command(BaseCommand):
-    help = 'Resolves expired open disputes, refunds/forfeits escrowed bonds, and settles task points.'
+    help = 'Resolves expired voting windows and open disputes, refunds/forfeits escrowed bonds, and settles task points.'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -21,8 +22,38 @@ class Command(BaseCommand):
         now = timezone.now()
         expiry_threshold = now - timedelta(days=days)
 
-        # Find open disputes created before the expiration window
-        expired_disputes = Dispute.objects.filter(status='open', created_at__lte=expiry_threshold)
+        # Handle juror timeouts for active voting disputes where voting_deadline is not yet expired
+        stalled_juror_disputes = Dispute.objects.filter(
+            status='voting',
+            juror_timeout__lte=now
+        ).filter(
+            Q(voting_deadline__gt=now) | Q(voting_deadline__isnull=True)
+        )
+
+        for dispute in stalled_juror_disputes:
+            with transaction.atomic():
+                # Re-draw backfill jurors or reset juror_timeout if voting time remains
+                dispute.juror_timeout = now + timedelta(hours=24)
+                dispute.save()
+                # Log notification to participants about juror timeout / panel refresh
+                task = dispute.task
+                participants = [task.posted_by]
+                if task.taken_by and task.taken_by not in participants:
+                    participants.append(task.taken_by)
+                dispute_link = reverse('dispute_detail', args=[dispute.id])
+                for participant in participants:
+                    Notification.objects.create(
+                        recipient=participant,
+                        message=f"Inactive jurors timed out for dispute on task '{task.title}'. Juror panel has been refreshed.",
+                        link=dispute_link
+                    )
+
+        # Find voting or open disputes that have reached voting_deadline or creation threshold
+        expired_disputes = Dispute.objects.filter(
+            status__in=['open', 'voting']
+        ).filter(
+            Q(voting_deadline__lte=now) | Q(created_at__lte=expiry_threshold)
+        )
 
         count = 0
         for dispute in expired_disputes:
@@ -32,7 +63,7 @@ class Command(BaseCommand):
                 dispute.save()
 
                 if dispute.raised_by == task.posted_by:
-                    # Poster challenged an unresponsive taker: cancel task, refund task reward, forfeit bond
+                    # Poster challenged an unresponsive taker: cancel task, refund task reward, refund bond
                     poster_profile = task.posted_by.userprofile
                     poster_profile.rewards += task.reward
                     poster_profile.save()
@@ -71,7 +102,7 @@ class Command(BaseCommand):
                     if dispute.escrow_status == 'held':
                         dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
 
-                # Notify participants
+                # Notify participants upon SLA timeout resolution
                 participants = [task.posted_by]
                 if task.taken_by and task.taken_by not in participants:
                     participants.append(task.taken_by)
@@ -87,3 +118,4 @@ class Command(BaseCommand):
                 count += 1
 
         self.stdout.write(self.style.SUCCESS(f"Successfully processed {count} expired dispute(s)."))
+

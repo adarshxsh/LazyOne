@@ -86,7 +86,10 @@ class DisputeDepositBondTests(TestCase):
         dispute = Dispute.objects.get(task=self.task)
         self.assertEqual(dispute.deposit_amount, 60)
         self.assertEqual(dispute.escrow_status, 'held')
-        self.assertEqual(dispute.status, 'open')
+        self.assertEqual(dispute.status, 'voting')
+        self.assertIsNotNone(dispute.voting_deadline)
+        self.assertIsNotNone(dispute.evidence_deadline)
+        self.assertIsNotNone(dispute.juror_timeout)
         self.assertEqual(dispute.raised_by, self.taker)
 
         # Check ledger
@@ -181,4 +184,99 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class DisputeDeadlineAndTimeoutTests(TestCase):
+    def setUp(self):
+        self.poster = User.objects.create_user(username='poster2', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker2', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        self.task = Task.objects.create(
+            title="Dispute Deadline Task",
+            description="Testing SLA timeouts",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=timezone.now() + timedelta(days=2)
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_voting_deadline_set_on_entering_voting_status(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Unfair requirements",
+            deposit_amount=50,
+            escrow_status='held',
+            status='voting'
+        )
+        self.assertIsNotNone(dispute.voting_deadline)
+        self.assertIsNotNone(dispute.evidence_deadline)
+        self.assertIsNotNone(dispute.juror_timeout)
+        self.assertGreaterEqual(dispute.voting_deadline, timezone.now() + timedelta(hours=23, minutes=59))
+
+    def test_resolve_expired_disputes_command_auto_resolves_expired_voting_window(self):
+        now = timezone.now()
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Stalled voting window",
+            deposit_amount=50,
+            escrow_status='held',
+            status='voting',
+            voting_deadline=now - timedelta(minutes=10),
+            evidence_deadline=now - timedelta(minutes=10),
+            juror_timeout=now - timedelta(minutes=10)
+        )
+        self.task.status = 'disputed'
+        self.task.save()
+
+        from django.core.management import call_command
+        from .models import Notification
+
+        call_command('resolve_expired_disputes')
+
+        dispute.refresh_from_db()
+        self.task.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.escrow_status, 'refunded')
+        self.assertEqual(self.task.status, 'completed')
+
+        poster_notif = Notification.objects.filter(recipient=self.poster).first()
+        taker_notif = Notification.objects.filter(recipient=self.taker).first()
+        self.assertIsNotNone(poster_notif)
+        self.assertIsNotNone(taker_notif)
+        self.assertIn("expired", poster_notif.message)
+        self.assertIn("automatically resolved", poster_notif.message)
+
+    def test_juror_inactivity_timeout_refreshes_panel(self):
+        now = timezone.now()
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Juror timeout test",
+            deposit_amount=50,
+            escrow_status='held',
+            status='voting',
+            voting_deadline=now + timedelta(hours=12),
+            juror_timeout=now - timedelta(minutes=10)
+        )
+
+        from django.core.management import call_command
+        from .models import Notification
+
+        call_command('resolve_expired_disputes')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'voting')
+        self.assertGreater(dispute.juror_timeout, now)
+
+        poster_notif = Notification.objects.filter(recipient=self.poster).first()
+        self.assertIsNotNone(poster_notif)
+        self.assertIn("Inactive jurors timed out", poster_notif.message)
+
 

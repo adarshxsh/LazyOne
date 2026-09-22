@@ -1,4 +1,5 @@
 import math
+from datetime import timedelta
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -82,6 +83,7 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('voting', 'Voting'),
         ('resolved', 'Resolved'),
     )
     ESCROW_STATUS_CHOICES = (
@@ -95,10 +97,33 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    voting_deadline = models.DateTimeField(null=True, blank=True)
+    evidence_deadline = models.DateTimeField(null=True, blank=True)
+    juror_timeout = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def set_voting_deadlines(self, hours=24):
+        hours = max(24, hours)
+        now = timezone.now()
+        self.voting_deadline = now + timedelta(hours=hours)
+        self.evidence_deadline = now + timedelta(hours=hours)
+        self.juror_timeout = now + timedelta(hours=hours)
+        self.status = 'voting'
+        self.save()
+
+    def save(self, *args, **kwargs):
+        if self.status == 'voting':
+            now = timezone.now()
+            if not self.voting_deadline:
+                self.voting_deadline = now + timedelta(hours=24)
+            if not self.evidence_deadline:
+                self.evidence_deadline = now + timedelta(hours=24)
+            if not self.juror_timeout:
+                self.juror_timeout = now + timedelta(hours=24)
+        super().save(*args, **kwargs)
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
