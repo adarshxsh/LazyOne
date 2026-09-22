@@ -3,7 +3,8 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, Friendship, JurorAssignment
+from .juror_service import get_eligible_juror_candidates, assign_jurors_to_dispute, submit_juror_vote
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +182,158 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class NeutralJurorPoolTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Litigants
+        self.poster = User.objects.create_user(username='poster_user', password='password123', last_login=timezone.now())
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker_user', password='password123', last_login=timezone.now())
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        # Poster's friend (via ManyToMany)
+        self.poster_friend_m2m = User.objects.create_user(username='poster_friend_m2m', password='password123', last_login=timezone.now())
+        self.poster_friend_m2m_profile = UserProfile.objects.create(user=self.poster_friend_m2m, rewards=100)
+        self.poster_profile.friends.add(self.poster_friend_m2m_profile)
+
+        # Taker's friend (via Friendship model)
+        self.taker_friend_fs = User.objects.create_user(username='taker_friend_fs', password='password123', last_login=timezone.now())
+        self.taker_friend_fs_profile = UserProfile.objects.create(user=self.taker_friend_fs, rewards=100)
+        Friendship.objects.create(from_user=self.taker_profile, to_user=self.taker_friend_fs_profile)
+
+        # Inactive user (logged in 40 days ago)
+        self.stale_user = User.objects.create_user(
+            username='stale_user',
+            password='password123',
+            last_login=timezone.now() - timedelta(days=40)
+        )
+        UserProfile.objects.create(user=self.stale_user, rewards=100)
+
+        # Low rewards balance user (< 50)
+        self.low_rewards_user = User.objects.create_user(username='low_rewards_user', password='password123', last_login=timezone.now())
+        UserProfile.objects.create(user=self.low_rewards_user, rewards=30)
+
+        # Neutral eligible candidates
+        self.neutral1 = User.objects.create_user(username='neutral1', password='password123', last_login=timezone.now())
+        UserProfile.objects.create(user=self.neutral1, rewards=100)
+
+        self.neutral2 = User.objects.create_user(username='neutral2', password='password123', last_login=timezone.now())
+        UserProfile.objects.create(user=self.neutral2, rewards=100)
+
+        self.neutral3 = User.objects.create_user(username='neutral3', password='password123', last_login=timezone.now())
+        UserProfile.objects.create(user=self.neutral3, rewards=100)
+
+        # Task and Dispute
+        self.task = Task.objects.create(
+            title="Juror Test Task",
+            description="Task Description",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=timezone.now() + timedelta(days=1)
+        )
+        Conversation.objects.create(task=self.task)
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Work incomplete",
+            deposit_amount=50,
+            escrow_status='held'
+        )
+
+    def test_eligible_juror_candidate_filtering(self):
+        eligible_candidates = get_eligible_juror_candidates(self.dispute)
+        eligible_usernames = set(eligible_candidates.values_list('username', flat=True))
+
+        # Check litigants excluded
+        self.assertNotIn('poster_user', eligible_usernames)
+        self.assertNotIn('taker_user', eligible_usernames)
+
+        # Check friends of poster and taker excluded
+        self.assertNotIn('poster_friend_m2m', eligible_usernames)
+        self.assertNotIn('taker_friend_fs', eligible_usernames)
+
+        # Check inactive/stale user (> 30 days) excluded
+        self.assertNotIn('stale_user', eligible_usernames)
+
+        # Check low rewards balance (< 50) user excluded
+        self.assertNotIn('low_rewards_user', eligible_usernames)
+
+        # Check neutrals are present
+        self.assertIn('neutral1', eligible_usernames)
+        self.assertIn('neutral2', eligible_usernames)
+        self.assertIn('neutral3', eligible_usernames)
+
+    def test_juror_stake_lock_on_panel_assignment(self):
+        assignments = assign_jurors_to_dispute(self.dispute, panel_size=3, stake_amount=10)
+        self.assertEqual(len(assignments), 3)
+
+        assigned_jurors = [a.juror for a in assignments]
+        for juror in assigned_jurors:
+            # Rewards balance deducted by 10 (100 - 10 = 90)
+            juror.userprofile.refresh_from_db()
+            self.assertEqual(juror.userprofile.rewards, 90)
+
+            # RewardLedger recorded
+            ledger = RewardLedger.objects.filter(user=juror, transaction_type='juror_stake').first()
+            self.assertIsNotNone(ledger)
+            self.assertEqual(ledger.amount, -10)
+
+            # Assignment held
+            assignment = JurorAssignment.objects.get(dispute=self.dispute, juror=juror)
+            self.assertEqual(assignment.stake_status, 'held')
+            self.assertFalse(assignment.voted)
+
+    def test_juror_vote_submission_and_stake_refund(self):
+        assignments = assign_jurors_to_dispute(self.dispute, panel_size=1, stake_amount=10)
+        assignment = assignments[0]
+        juror = assignment.juror
+
+        # Initial rewards after assignment stake lock
+        juror.userprofile.refresh_from_db()
+        self.assertEqual(juror.userprofile.rewards, 90)
+
+        # Submit vote for poster
+        updated_assignment = submit_juror_vote(assignment, voted_for=self.poster)
+
+        # Vote recorded
+        self.assertTrue(updated_assignment.voted)
+        self.assertEqual(updated_assignment.voted_for, self.poster)
+        self.assertEqual(updated_assignment.stake_status, 'refunded')
+
+        # Reward refunded (90 + 10 = 100)
+        juror.userprofile.refresh_from_db()
+        self.assertEqual(juror.userprofile.rewards, 100)
+
+        # RewardLedger entry created
+        ledger = RewardLedger.objects.filter(user=juror, transaction_type='juror_stake_refund').first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, 10)
+
+    def test_vote_submission_via_endpoint(self):
+        # Assign juror
+        assignments = assign_jurors_to_dispute(self.dispute, panel_size=1, stake_amount=10)
+        assignment = assignments[0]
+        juror = assignment.juror
+
+        self.client.login(username=juror.username, password='password123')
+        response = self.client.post(
+            reverse('submit_dispute_vote', args=[self.dispute.id]),
+            {'voted_for': self.poster.id}
+        )
+
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+
+        assignment.refresh_from_db()
+        self.assertTrue(assignment.voted)
+        self.assertEqual(assignment.voted_for, self.poster)
+        self.assertEqual(assignment.stake_status, 'refunded')
+
+        juror.userprofile.refresh_from_db()
+        self.assertEqual(juror.userprofile.rewards, 100)
 

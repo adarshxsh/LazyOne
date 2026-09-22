@@ -68,6 +68,8 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('juror_stake', 'Juror Stake Held'),
+        ('juror_stake_refund', 'Juror Stake Refunded'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
@@ -141,6 +143,27 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class JurorAssignment(models.Model):
+    STAKE_STATUS_CHOICES = (
+        ('held', 'Held in Escrow'),
+        ('refunded', 'Refunded'),
+        ('forfeited', 'Forfeited'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='juror_assignments')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='juror_assignments')
+    stake_amount = models.PositiveIntegerField(default=10)
+    stake_status = models.CharField(max_length=20, choices=STAKE_STATUS_CHOICES, default='held')
+    voted = models.BooleanField(default=False)
+    voted_for = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='juror_votes_received')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    voted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Juror {self.juror.username} for dispute {self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
