@@ -124,7 +124,7 @@ class DisputeDepositBondTests(TestCase):
         self.assertIsNotNone(ledger)
         self.assertEqual(ledger.amount, 60)
 
-    def test_complete_disputed_task_refunds_deposit(self):
+    def test_complete_disputed_task_blocked(self):
         # Taker raises dispute (deposit 60 deducted from 100 -> 40 left)
         self.client.login(username='taker', password='password123')
         self.client.post(
@@ -132,28 +132,67 @@ class DisputeDepositBondTests(TestCase):
             {'reason': 'Dispute reason'}
         )
 
-        # Poster marks task as completed
+        # Poster attempts to mark task as completed during active dispute
         self.client.login(username='poster', password='password123')
-        response = self.client.get(reverse('complete_task', args=[self.task.id]))
+        response = self.client.get(reverse('complete_task', args=[self.task.id]), follow=True)
         self.assertRedirects(response, reverse('my_tasks'))
 
+        # Check task remains in 'disputed' status and dispute remains open
         self.task.refresh_from_db()
-        self.assertEqual(self.task.status, 'completed')
+        self.assertEqual(self.task.status, 'disputed')
 
         dispute = Dispute.objects.get(task=self.task)
-        self.assertEqual(dispute.escrow_status, 'refunded')
-        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.escrow_status, 'held')
+        self.assertEqual(dispute.status, 'open')
 
-        # Taker balance: 40 + 300 (task reward) + 60 (deposit refund) = 400
+        # Taker balance should remain 40 (reward not released)
         self.taker_profile.refresh_from_db()
-        self.assertEqual(self.taker_profile.rewards, 400)
+        self.assertEqual(self.taker_profile.rewards, 40)
 
-        # Check ledger entries for taker
-        refund_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_refund').first()
-        self.assertIsNotNone(refund_ledger)
-        self.assertEqual(refund_ledger.amount, 60)
+        # Check error message presented to user
+        messages_list = list(response.context['messages'])
+        self.assertTrue(any("Cannot complete task while a dispute is open" in str(m) for m in messages_list))
 
-    def test_forfeit_deposit_method(self):
+    def test_juror_reward_transaction_type_choice(self):
+        types_dict = dict(RewardLedger.TRANSACTION_TYPES)
+        self.assertIn('juror_reward', types_dict)
+
+    def test_juror_reward_payout_on_dispute_forfeiture(self):
+        juror1 = User.objects.create_user(username='juror1', password='password123')
+        juror1_profile = UserProfile.objects.create(user=juror1, rewards=500)
+        juror2 = User.objects.create_user(username='juror2', password='password123')
+        juror2_profile = UserProfile.objects.create(user=juror2, rewards=500)
+
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='False dispute',
+            deposit_amount=60,
+            escrow_status='held'
+        )
+        dispute.jurors.add(juror1, juror2)
+
+        # Forfeit deposit bond to participating jurors
+        dispute.forfeit_deposit()
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.escrow_status, 'forfeited')
+
+        # Each juror gets 60 / 2 = 30 points
+        juror1_profile.refresh_from_db()
+        juror2_profile.refresh_from_db()
+        self.assertEqual(juror1_profile.rewards, 530)
+        self.assertEqual(juror2_profile.rewards, 530)
+
+        ledger1 = RewardLedger.objects.filter(user=juror1, transaction_type='juror_reward').first()
+        self.assertIsNotNone(ledger1)
+        self.assertEqual(ledger1.amount, 30)
+
+        ledger2 = RewardLedger.objects.filter(user=juror2, transaction_type='juror_reward').first()
+        self.assertIsNotNone(ledger2)
+        self.assertEqual(ledger2.amount, 30)
+
+    def test_forfeit_deposit_fallback_to_beneficiary(self):
         dispute = Dispute.objects.create(
             task=self.task,
             raised_by=self.taker,
@@ -164,21 +203,42 @@ class DisputeDepositBondTests(TestCase):
         self.taker_profile.rewards = 40
         self.taker_profile.save()
 
-        # Forfeit deposit bond to poster
+        # Forfeit deposit bond to poster when no jurors exist
         dispute.forfeit_deposit(beneficiary=self.poster)
 
         dispute.refresh_from_db()
         self.assertEqual(dispute.escrow_status, 'forfeited')
 
-        # Taker rewards remain 40 (already deducted when raised)
-        self.taker_profile.refresh_from_db()
-        self.assertEqual(self.taker_profile.rewards, 40)
-
         # Poster gets 1000 + 60 = 1060
         self.poster_profile.refresh_from_db()
         self.assertEqual(self.poster_profile.rewards, 1060)
 
-        # Check forfeit ledger
-        forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
-        self.assertIsNotNone(forfeit_ledger)
+    def test_resolve_dispute_view_payouts_jurors(self):
+        juror1 = User.objects.create_user(username='juror1_view', password='password123')
+        UserProfile.objects.create(user=juror1, rewards=100)
+
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Unfair requirement'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        dispute.jurors.add(juror1)
+
+        # Poster wins dispute resolution
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(reverse('resolve_dispute', args=[dispute.id]), {'winner': 'poster'})
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'cancelled')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.escrow_status, 'forfeited')
+
+        # Juror received the full 60 deposit bond as juror_reward
+        juror1.userprofile.refresh_from_db()
+        self.assertEqual(juror1.userprofile.rewards, 160)
+        self.assertTrue(RewardLedger.objects.filter(user=juror1, transaction_type='juror_reward', amount=60).exists())
 
