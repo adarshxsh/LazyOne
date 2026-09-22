@@ -1,3 +1,4 @@
+import os
 import math
 from django.db import models
 from django.contrib.auth.models import User
@@ -141,6 +142,29 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidence_entries')
+    uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='uploaded_evidence')
+    file = models.FileField(upload_to='dispute_evidence/')
+    description = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Evidence for Dispute #{self.dispute.id} by {self.uploaded_by.username}"
+
+    @property
+    def filename(self):
+        if self.file:
+            return os.path.basename(self.file.name)
+        return ""
+
+    @property
+    def is_image(self):
+        if not self.file:
+            return False
+        ext = os.path.splitext(self.file.name)[1].lower()
+        return ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
