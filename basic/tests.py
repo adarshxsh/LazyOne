@@ -182,3 +182,111 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+    def test_poster_raise_dispute_success(self):
+        from .models import Notification
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Incomplete work submitted'}
+        )
+
+        # Deposit bond is 60. Poster balance was 1000 -> now 940
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 940)
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertEqual(dispute.deposit_amount, 60)
+        self.assertEqual(dispute.escrow_status, 'held')
+        self.assertEqual(dispute.status, 'open')
+        self.assertEqual(dispute.raised_by, self.poster)
+
+        # Check ledger
+        ledger = RewardLedger.objects.filter(user=self.poster, transaction_type='dispute_deposit').first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, -60)
+
+        # Check notification sent to taker
+        notification = Notification.objects.filter(recipient=self.taker).first()
+        self.assertIsNotNone(notification)
+        self.assertIn('poster has raised a dispute', notification.message)
+
+    def test_poster_raise_dispute_insufficient_rewards(self):
+        self.poster_profile.rewards = 30
+        self.poster_profile.save()
+
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Incomplete work submitted'}
+        )
+
+        self.assertRedirects(response, reverse('my_tasks'))
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+        self.assertFalse(Dispute.objects.filter(task=self.task).exists())
+
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 30)
+
+    def test_unauthorized_user_cannot_raise_dispute(self):
+        other_user = User.objects.create_user(username='other', password='password123')
+        UserProfile.objects.create(user=other_user, rewards=500)
+
+        self.client.login(username='other', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Random dispute'}
+        )
+
+        self.assertRedirects(response, reverse('my_tasks'))
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+        self.assertFalse(Dispute.objects.filter(task=self.task).exists())
+
+    def test_cannot_raise_dispute_when_not_in_progress(self):
+        self.task.status = 'available'
+        self.task.save()
+
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Not in progress task dispute'}
+        )
+
+        self.assertRedirects(response, reverse('my_tasks'))
+        self.assertFalse(Dispute.objects.filter(task=self.task).exists())
+
+    def test_poster_withdraw_dispute_success(self):
+        from .models import Notification
+        self.client.login(username='poster', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Poster dispute'}
+        )
+
+        dispute = Dispute.objects.get(task=self.task)
+
+        # Withdraw dispute
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.escrow_status, 'refunded')
+        self.assertEqual(dispute.status, 'resolved')
+
+        # Poster balance restored: 940 + 60 = 1000
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1000)
+
+        # Check notification sent to taker upon withdrawal
+        notification = Notification.objects.filter(recipient=self.taker).order_by('-created_at').first()
+        self.assertIsNotNone(notification)
+        self.assertIn('poster has withdrawn the dispute', notification.message)
+
+
