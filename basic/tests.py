@@ -2,6 +2,7 @@ from django.test import TestCase, Client
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
+from django.core.exceptions import ValidationError
 from datetime import timedelta
 from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
 
@@ -86,7 +87,7 @@ class DisputeDepositBondTests(TestCase):
         dispute = Dispute.objects.get(task=self.task)
         self.assertEqual(dispute.deposit_amount, 60)
         self.assertEqual(dispute.escrow_status, 'held')
-        self.assertEqual(dispute.status, 'open')
+        self.assertEqual(dispute.status, 'evidence_submission')
         self.assertEqual(dispute.raised_by, self.taker)
 
         # Check ledger
@@ -113,7 +114,7 @@ class DisputeDepositBondTests(TestCase):
 
         dispute.refresh_from_db()
         self.assertEqual(dispute.escrow_status, 'refunded')
-        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.status, 'cancelled')
 
         # Balance restored: 40 + 60 = 100
         self.taker_profile.refresh_from_db()
@@ -181,4 +182,101 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class DisputeStateMachineTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.poster = User.objects.create_user(username='poster2', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+        self.taker = User.objects.create_user(username='taker2', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        self.task = Task.objects.create(
+            title="State Machine Task",
+            description="Description",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress'
+        )
+        Conversation.objects.create(task=self.task)
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Testing state machine transitions",
+            deposit_amount=50,
+            escrow_status='held',
+            status='evidence_submission'
+        )
+
+    def test_status_choices(self):
+        statuses = [choice[0] for choice in Dispute.STATUS_CHOICES]
+        expected_statuses = ['evidence_submission', 'voting_period', 'appeal_period', 'resolved', 'cancelled']
+        self.assertEqual(statuses, expected_statuses)
+
+    def test_valid_transitions(self):
+        # evidence_submission -> voting_period
+        self.dispute.advance_to_voting_period()
+        self.assertEqual(self.dispute.status, 'voting_period')
+
+        # voting_period -> appeal_period
+        self.dispute.advance_to_appeal_period()
+        self.assertEqual(self.dispute.status, 'appeal_period')
+
+        # appeal_period -> resolved
+        self.dispute.resolve_dispute()
+        self.assertEqual(self.dispute.status, 'resolved')
+
+    def test_withdrawal_transition(self):
+        # Direct jump evidence_submission -> cancelled (withdrawn)
+        self.dispute.cancel_dispute(is_withdrawal=True)
+        self.assertEqual(self.dispute.status, 'cancelled')
+
+    def test_withdrawal_to_resolved_transition(self):
+        # Direct jump evidence_submission -> resolved with is_withdrawal=True
+        self.dispute.resolve_dispute(is_withdrawal=True)
+        self.assertEqual(self.dispute.status, 'resolved')
+
+    def test_invalid_transition_raises_validation_error(self):
+        # Direct jump evidence_submission -> resolved without is_withdrawal
+        with self.assertRaises(ValidationError):
+            self.dispute.transition_to('resolved', is_withdrawal=False)
+
+        # Direct jump evidence_submission -> appeal_period
+        with self.assertRaises(ValidationError):
+            self.dispute.transition_to('appeal_period')
+
+        # Transitioning from terminal state resolved -> voting_period
+        self.dispute.resolve_dispute(is_withdrawal=True)
+        with self.assertRaises(ValidationError):
+            self.dispute.transition_to('voting_period')
+
+    def test_auto_transition_after_24_hours(self):
+        # Initially in evidence_submission
+        self.assertEqual(self.dispute.status, 'evidence_submission')
+        self.assertFalse(self.dispute.check_auto_transition())
+
+        # Set created_at to 25 hours ago
+        self.dispute.created_at = timezone.now() - timedelta(hours=25)
+        self.dispute.save()
+
+        # check_auto_transition should advance to voting_period
+        result = self.dispute.check_auto_transition()
+        self.assertTrue(result)
+        self.assertEqual(self.dispute.status, 'voting_period')
+
+    def test_dispute_detail_view_renders_lifecycle_and_progress_bar(self):
+        self.client.login(username='taker2', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(response.status_code, 200)
+
+        # Verify badge color class and progress bar elements in response
+        self.assertContains(response, 'bg-blue-500/20 text-blue-300')
+        self.assertContains(response, 'Active Lifecycle Phase')
+        self.assertContains(response, '1. Evidence Submission')
+        self.assertContains(response, '2. Voting Period')
+        self.assertContains(response, '3. Appeal Period')
+        self.assertContains(response, '4. Resolved')
+
 

@@ -1,5 +1,7 @@
 import math
-from django.db import models
+from datetime import timedelta
+from django.db import models, transaction
+from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
 from django.utils import timezone
 
@@ -81,24 +83,71 @@ class RewardLedger(models.Model):
 
 class Dispute(models.Model):
     STATUS_CHOICES = (
-        ('open', 'Open'),
+        ('evidence_submission', 'Evidence Submission'),
+        ('voting_period', 'Voting Period'),
+        ('appeal_period', 'Appeal Period'),
         ('resolved', 'Resolved'),
+        ('cancelled', 'Cancelled'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
         ('refunded', 'Refunded'),
         ('forfeited', 'Forfeited'),
     )
+
+    VALID_TRANSITIONS = {
+        'evidence_submission': {'voting_period', 'cancelled'},
+        'voting_period': {'appeal_period', 'resolved', 'cancelled'},
+        'appeal_period': {'resolved', 'cancelled'},
+        'resolved': set(),
+        'cancelled': set(),
+    }
+
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='evidence_submission')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def can_transition_to(self, new_status, is_withdrawal=False):
+        if self.status == new_status:
+            return True
+        if is_withdrawal and self.status == 'evidence_submission' and new_status in ['resolved', 'cancelled']:
+            return True
+        allowed = self.VALID_TRANSITIONS.get(self.status, set())
+        return new_status in allowed
+
+    def transition_to(self, new_status, is_withdrawal=False, save=True):
+        if not self.can_transition_to(new_status, is_withdrawal=is_withdrawal):
+            raise ValidationError(f"Invalid dispute state transition from '{self.status}' to '{new_status}'.")
+        with transaction.atomic():
+            self.status = new_status
+            if save:
+                self.save()
+
+    def advance_to_voting_period(self):
+        self.transition_to('voting_period')
+
+    def advance_to_appeal_period(self):
+        self.transition_to('appeal_period')
+
+    def resolve_dispute(self, is_withdrawal=False):
+        self.transition_to('resolved', is_withdrawal=is_withdrawal)
+
+    def cancel_dispute(self, is_withdrawal=True):
+        self.transition_to('cancelled', is_withdrawal=is_withdrawal)
+
+    def check_auto_transition(self):
+        if self.status == 'evidence_submission' and self.created_at:
+            if timezone.now() >= self.created_at + timedelta(hours=24):
+                self.advance_to_voting_period()
+                return True
+        return False
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:

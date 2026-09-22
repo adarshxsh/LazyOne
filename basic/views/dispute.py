@@ -2,6 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
+from django.utils import timezone
 from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
@@ -9,6 +10,7 @@ from django.urls import reverse
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
+    dispute.check_auto_transition()
     task = dispute.task
     if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
         messages.error(request, "You are not authorized to view this dispute.")
@@ -22,7 +24,7 @@ def dispute_detail_view(request, dispute_id):
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
     task = get_object_or_404(Task, id=task_id)
-    if hasattr(task, 'dispute') and task.dispute.status == 'open':
+    if hasattr(task, 'dispute') and task.dispute.status not in ['resolved', 'cancelled']:
         return redirect('dispute_detail', dispute_id=task.dispute.id)
     if task.taken_by != request.user or task.status != 'in_progress':
         messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
@@ -50,9 +52,10 @@ def raise_dispute(request, task_id):
                 dispute = task.dispute
                 dispute.raised_by = request.user
                 dispute.reason = reason
-                dispute.status = 'open'
+                dispute.status = 'evidence_submission'
                 dispute.deposit_amount = deposit_amount
                 dispute.escrow_status = 'held'
+                dispute.created_at = timezone.now()
                 dispute.save()
             else:
                 dispute = Dispute.objects.create(
@@ -60,7 +63,8 @@ def raise_dispute(request, task_id):
                     raised_by=request.user,
                     reason=reason,
                     deposit_amount=deposit_amount,
-                    escrow_status='held'
+                    escrow_status='held',
+                    status='evidence_submission'
                 )
 
             RewardLedger.objects.create(
@@ -92,8 +96,7 @@ def withdraw_dispute(request, dispute_id):
         dispute.refund_deposit(
             reason_description=f"Security deposit bond refunded for withdrawn dispute on task: '{task.title}'"
         )
-        dispute.status = 'resolved'
-        dispute.save()
+        dispute.transition_to('cancelled', is_withdrawal=True)
 
         task.status = 'in_progress'
         task.save()
