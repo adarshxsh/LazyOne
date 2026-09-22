@@ -1,8 +1,9 @@
+import os
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, Task, Notification, RewardLedger, DisputeEvidence
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -105,3 +106,41 @@ def withdraw_dispute(request, dispute_id):
         )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def upload_evidence(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+
+    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+        messages.error(request, "You are not authorized to upload evidence for this dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    uploaded_file = request.FILES.get('file') or request.FILES.get('evidence_file') or request.FILES.get('evidence')
+    if not uploaded_file:
+        messages.error(request, "Please select a file to upload.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    max_size = 10 * 1024 * 1024  # 10 MB limit
+    if uploaded_file.size > max_size:
+        messages.error(request, "File size exceeds maximum limit of 10 MB.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    allowed_extensions = ['.png', '.jpg', '.jpeg', '.pdf', '.txt', '.zip']
+    ext = os.path.splitext(uploaded_file.name)[1].lower()
+    if ext not in allowed_extensions:
+        messages.error(request, f"File format '{ext}' is not allowed. Allowed formats: PNG, JPG, PDF, TXT, ZIP.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    description = request.POST.get('description', '').strip()
+
+    DisputeEvidence.objects.create(
+        dispute=dispute,
+        uploaded_by=request.user,
+        file=uploaded_file,
+        description=description
+    )
+
+    messages.success(request, "Evidence uploaded successfully.")
+    return redirect('dispute_detail', dispute_id=dispute.id)

@@ -1,9 +1,11 @@
-from django.test import TestCase, Client
+import tempfile
+from django.test import TestCase, Client, override_settings
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, DisputeEvidence, RewardLedger, Conversation
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +183,109 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class DisputeEvidenceTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        self.unrelated_user = User.objects.create_user(username='otheruser', password='password123')
+        UserProfile.objects.create(user=self.unrelated_user, rewards=1000)
+
+        self.task = Task.objects.create(
+            title="Task with Evidence",
+            description="Task Description",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed',
+            deadline=timezone.now() + timedelta(days=2)
+        )
+        Conversation.objects.create(task=self.task)
+
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Work completed but unpaid",
+            deposit_amount=50,
+            escrow_status='held'
+        )
+
+    def test_model_creation_and_properties(self):
+        file_data = SimpleUploadedFile("proof.png", b"file_content_here", content_type="image/png")
+        evidence = DisputeEvidence.objects.create(
+            dispute=self.dispute,
+            uploaded_by=self.taker,
+            file=file_data,
+            description="Screenshot of completed work"
+        )
+        self.assertTrue(evidence.filename.startswith("proof"))
+        self.assertTrue(evidence.filename.endswith(".png"))
+        self.assertTrue(evidence.is_image)
+        self.assertIn("Evidence for Dispute", str(evidence))
+
+    def test_upload_evidence_success(self):
+        self.client.login(username='taker', password='password123')
+        png_file = SimpleUploadedFile("screenshot.png", b"fake_png_binary_data", content_type="image/png")
+
+        response = self.client.post(
+            reverse('upload_evidence', args=[self.dispute.id]),
+            {'file': png_file, 'description': 'Work completion proof'},
+            follow=True
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(DisputeEvidence.objects.filter(dispute=self.dispute).count(), 1)
+
+        evidence = DisputeEvidence.objects.get(dispute=self.dispute)
+        self.assertEqual(evidence.uploaded_by, self.taker)
+        self.assertEqual(evidence.description, 'Work completion proof')
+        self.assertIn('screenshot', evidence.filename.lower())
+        self.assertContains(response, 'Evidence uploaded successfully.')
+        self.assertContains(response, 'screenshot')
+
+    def test_upload_evidence_disallowed_extension(self):
+        self.client.login(username='taker', password='password123')
+        exe_file = SimpleUploadedFile("script.exe", b"binary_data", content_type="application/octet-stream")
+
+        response = self.client.post(
+            reverse('upload_evidence', args=[self.dispute.id]),
+            {'file': exe_file, 'description': 'Executable file'},
+            follow=True
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(DisputeEvidence.objects.filter(dispute=self.dispute).count(), 0)
+        self.assertContains(response, "is not allowed")
+
+    def test_upload_evidence_file_size_limit(self):
+        self.client.login(username='taker', password='password123')
+        large_content = b"x" * (10 * 1024 * 1024 + 1)
+        large_file = SimpleUploadedFile("large_doc.pdf", large_content, content_type="application/pdf")
+
+        response = self.client.post(
+            reverse('upload_evidence', args=[self.dispute.id]),
+            {'file': large_file, 'description': 'Too large'},
+            follow=True
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(DisputeEvidence.objects.filter(dispute=self.dispute).count(), 0)
+        self.assertContains(response, "exceeds maximum limit")
+
+    def test_upload_evidence_unauthorized_user(self):
+        self.client.login(username='otheruser', password='password123')
+        txt_file = SimpleUploadedFile("notes.txt", b"some text", content_type="text/plain")
+
+        response = self.client.post(
+            reverse('upload_evidence', args=[self.dispute.id]),
+            {'file': txt_file, 'description': 'Unauthorized upload'},
+            follow=True
+        )
+        self.assertEqual(DisputeEvidence.objects.filter(dispute=self.dispute).count(), 0)
+        self.assertContains(response, "not authorized")
+
 
