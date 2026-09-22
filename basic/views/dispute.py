@@ -1,23 +1,149 @@
+import json
+import hashlib
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+from django.http import JsonResponse
+from django.utils import timezone
+from ..models import Dispute, Task, Notification, RewardLedger, JurorVote
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
-        messages.error(request, "You are not authorized to view this dispute.")
-        return redirect('home')
+    user_vote = JurorVote.objects.filter(dispute=dispute, juror=request.user).first()
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'user_vote': user_vote,
+        'is_voting_period': dispute.is_voting_period,
+        'is_reveal_period': dispute.is_reveal_period,
+        'is_reveal_completed': dispute.is_reveal_completed,
+        'vote_tally': dispute.get_vote_tally() if dispute.is_reveal_completed else None
     }
     return render(request, 'dispute_detail.html', context)
+
+def _get_request_data(request):
+    if request.content_type == 'application/json':
+        try:
+            return json.loads(request.body)
+        except Exception:
+            return {}
+    return request.POST
+
+@login_required(login_url='/login/')
+@require_POST
+def submit_commitment(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    data = _get_request_data(request)
+    commitment_hash = data.get('vote_commitment_hash') or data.get('commitment_hash') or data.get('hash')
+
+    is_json = request.content_type == 'application/json' or request.headers.get('x-requested-with') == 'XMLHttpRequest'
+
+    if not commitment_hash or len(str(commitment_hash).strip()) != 64:
+        msg = "Invalid or missing SHA-256 vote commitment hash."
+        if is_json:
+            return JsonResponse({'error': msg}, status=400)
+        messages.error(request, msg)
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if not dispute.is_voting_period:
+        msg = "Dispute is not currently in the voting period."
+        if is_json:
+            return JsonResponse({'error': msg}, status=400)
+        messages.error(request, msg)
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    juror_vote, created = JurorVote.objects.get_or_create(
+        dispute=dispute,
+        juror=request.user,
+        defaults={
+            'vote_commitment_hash': str(commitment_hash).strip(),
+            'is_revealed': False,
+            'revealed_vote': None
+        }
+    )
+    if not created:
+        if juror_vote.is_revealed:
+            msg = "Vote has already been revealed and cannot be changed."
+            if is_json:
+                return JsonResponse({'error': msg}, status=400)
+            messages.error(request, msg)
+            return redirect('dispute_detail', dispute_id=dispute.id)
+        juror_vote.vote_commitment_hash = str(commitment_hash).strip()
+        juror_vote.save()
+
+    msg = "Vote commitment successfully stored."
+    if is_json:
+        return JsonResponse({'message': msg, 'status': 'success', 'vote_commitment_hash': juror_vote.vote_commitment_hash})
+    messages.success(request, msg)
+    return redirect('dispute_detail', dispute_id=dispute.id)
+
+@login_required(login_url='/login/')
+@require_POST
+def reveal_vote(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    data = _get_request_data(request)
+
+    vote_choice = data.get('vote') or data.get('vote_choice') or data.get('choice')
+    salt = data.get('salt')
+
+    is_json = request.content_type == 'application/json' or request.headers.get('x-requested-with') == 'XMLHttpRequest'
+
+    if not salt or len(str(salt)) < 8:
+        msg = "Salt string must be at least 8 characters long."
+        if is_json:
+            return JsonResponse({'error': msg}, status=400)
+        messages.error(request, msg)
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if not vote_choice:
+        msg = "Vote choice is required."
+        if is_json:
+            return JsonResponse({'error': msg}, status=400)
+        messages.error(request, msg)
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if not dispute.is_reveal_period:
+        msg = "Dispute is not currently in the reveal period."
+        if is_json:
+            return JsonResponse({'error': msg}, status=400)
+        messages.error(request, msg)
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    juror_vote = JurorVote.objects.filter(dispute=dispute, juror=request.user).first()
+    if not juror_vote or not juror_vote.vote_commitment_hash:
+        msg = "No vote commitment found for this dispute."
+        if is_json:
+            return JsonResponse({'error': msg}, status=400)
+        messages.error(request, msg)
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    # Verify SHA256(choice + salt) == vote_commitment_hash
+    combined = f"{vote_choice}{salt}"
+    calculated_hash = hashlib.sha256(combined.encode('utf-8')).hexdigest()
+
+    if calculated_hash.lower() != juror_vote.vote_commitment_hash.strip().lower():
+        msg = "SHA-256 hash mismatch: vote choice and salt do not match commitment."
+        if is_json:
+            return JsonResponse({'error': msg}, status=400)
+        messages.error(request, msg)
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    juror_vote.revealed_vote = str(vote_choice)
+    juror_vote.is_revealed = True
+    juror_vote.revealed_at = timezone.now()
+    juror_vote.save()
+
+    msg = "Vote successfully revealed and verified."
+    if is_json:
+        return JsonResponse({'message': msg, 'status': 'success', 'revealed_vote': juror_vote.revealed_vote})
+    messages.success(request, msg)
+    return redirect('dispute_detail', dispute_id=dispute.id)
 
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):

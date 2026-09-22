@@ -3,7 +3,8 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, JurorVote
+import hashlib
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +182,207 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class CommitRevealVotingTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        self.juror1 = User.objects.create_user(username='juror1', password='password123')
+        UserProfile.objects.create(user=self.juror1, rewards=1000)
+
+        self.juror2 = User.objects.create_user(username='juror2', password='password123')
+        UserProfile.objects.create(user=self.juror2, rewards=1000)
+
+        self.task = Task.objects.create(
+            title="Disputed Task",
+            description="Task Description",
+            reward=300,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed'
+        )
+
+        now = timezone.now()
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Task dispute',
+            deposit_amount=60,
+            escrow_status='held',
+            voting_end_at=now + timedelta(days=2),
+            reveal_end_at=now + timedelta(days=4)
+        )
+
+    def test_submit_vote_commitment_success(self):
+        self.client.login(username='juror1', password='password123')
+        vote_choice = 'poster'
+        salt = 'secret_salt_123'
+        combined = f"{vote_choice}{salt}"
+        commitment_hash = hashlib.sha256(combined.encode('utf-8')).hexdigest()
+
+        response = self.client.post(
+            reverse('submit_commitment', args=[self.dispute.id]),
+            {'vote_commitment_hash': commitment_hash}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+
+        vote = JurorVote.objects.get(dispute=self.dispute, juror=self.juror1)
+        self.assertEqual(vote.vote_commitment_hash, commitment_hash)
+        self.assertFalse(vote.is_revealed)
+        self.assertIsNone(vote.revealed_vote)
+
+    def test_submit_commitment_rejected_outside_voting_period(self):
+        # Move dispute voting_end_at to past
+        self.dispute.voting_end_at = timezone.now() - timedelta(hours=1)
+        self.dispute.save()
+
+        self.client.login(username='juror1', password='password123')
+        hash_val = hashlib.sha256(b"postersecret_salt_123").hexdigest()
+
+        response = self.client.post(
+            reverse('submit_commitment', args=[self.dispute.id]),
+            {'vote_commitment_hash': hash_val}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertFalse(JurorVote.objects.filter(dispute=self.dispute, juror=self.juror1).exists())
+
+    def test_reveal_vote_success(self):
+        # First commit vote
+        vote_choice = 'poster'
+        salt = 'secret_salt_123'
+        commitment_hash = hashlib.sha256(f"{vote_choice}{salt}".encode('utf-8')).hexdigest()
+        JurorVote.objects.create(
+            dispute=self.dispute,
+            juror=self.juror1,
+            vote_commitment_hash=commitment_hash
+        )
+
+        # Move dispute to reveal period
+        now = timezone.now()
+        self.dispute.voting_end_at = now - timedelta(hours=1)
+        self.dispute.reveal_end_at = now + timedelta(days=1)
+        self.dispute.save()
+
+        self.client.login(username='juror1', password='password123')
+        response = self.client.post(
+            reverse('reveal_vote', args=[self.dispute.id]),
+            {'vote': vote_choice, 'salt': salt}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+
+        vote = JurorVote.objects.get(dispute=self.dispute, juror=self.juror1)
+        self.assertTrue(vote.is_revealed)
+        self.assertEqual(vote.revealed_vote, vote_choice)
+
+    def test_reveal_vote_rejected_short_salt(self):
+        # Commit vote
+        vote_choice = 'poster'
+        salt = 'short'  # less than 8 characters
+        commitment_hash = hashlib.sha256(f"{vote_choice}{salt}".encode('utf-8')).hexdigest()
+        JurorVote.objects.create(
+            dispute=self.dispute,
+            juror=self.juror1,
+            vote_commitment_hash=commitment_hash
+        )
+
+        # Move to reveal period
+        now = timezone.now()
+        self.dispute.voting_end_at = now - timedelta(hours=1)
+        self.dispute.reveal_end_at = now + timedelta(days=1)
+        self.dispute.save()
+
+        self.client.login(username='juror1', password='password123')
+        response = self.client.post(
+            reverse('reveal_vote', args=[self.dispute.id]),
+            {'vote': vote_choice, 'salt': salt}
+        )
+        vote = JurorVote.objects.get(dispute=self.dispute, juror=self.juror1)
+        self.assertFalse(vote.is_revealed)
+
+    def test_reveal_vote_rejected_hash_mismatch(self):
+        # Commit vote
+        vote_choice = 'poster'
+        salt = 'secret_salt_123'
+        commitment_hash = hashlib.sha256(f"{vote_choice}{salt}".encode('utf-8')).hexdigest()
+        JurorVote.objects.create(
+            dispute=self.dispute,
+            juror=self.juror1,
+            vote_commitment_hash=commitment_hash
+        )
+
+        # Move to reveal period
+        now = timezone.now()
+        self.dispute.voting_end_at = now - timedelta(hours=1)
+        self.dispute.reveal_end_at = now + timedelta(days=1)
+        self.dispute.save()
+
+        self.client.login(username='juror1', password='password123')
+        # Try revealing with wrong choice or salt
+        response = self.client.post(
+            reverse('reveal_vote', args=[self.dispute.id]),
+            {'vote': 'taker', 'salt': salt}
+        )
+        vote = JurorVote.objects.get(dispute=self.dispute, juror=self.juror1)
+        self.assertFalse(vote.is_revealed)
+
+    def test_live_tally_hidden_during_voting_and_reveal_periods(self):
+        # During voting period
+        self.assertTrue(self.dispute.is_voting_period)
+        self.assertFalse(self.dispute.is_reveal_completed)
+        self.assertIsNone(self.dispute.get_vote_tally())
+
+        self.client.login(username='juror1', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertContains(response, "Live vote tally is hidden")
+
+        # Move to reveal period
+        now = timezone.now()
+        self.dispute.voting_end_at = now - timedelta(hours=1)
+        self.dispute.reveal_end_at = now + timedelta(days=1)
+        self.dispute.save()
+
+        self.assertTrue(self.dispute.is_reveal_period)
+        self.assertFalse(self.dispute.is_reveal_completed)
+        self.assertIsNone(self.dispute.get_vote_tally())
+
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertContains(response, "Live vote tally is hidden")
+
+    def test_live_tally_visible_after_reveal_period_unrevealed_ignored(self):
+        # Juror 1 commits and reveals
+        hash1 = hashlib.sha256(b"postersecret_salt_123").hexdigest()
+        v1 = JurorVote.objects.create(dispute=self.dispute, juror=self.juror1, vote_commitment_hash=hash1)
+
+        # Juror 2 commits but does NOT reveal
+        hash2 = hashlib.sha256(b"takersecret_salt_456").hexdigest()
+        v2 = JurorVote.objects.create(dispute=self.dispute, juror=self.juror2, vote_commitment_hash=hash2)
+
+        # Reveal juror 1
+        v1.revealed_vote = 'poster'
+        v1.is_revealed = True
+        v1.save()
+
+        # Move dispute past reveal_end_at
+        now = timezone.now()
+        self.dispute.voting_end_at = now - timedelta(days=3)
+        self.dispute.reveal_end_at = now - timedelta(days=1)
+        self.dispute.save()
+
+        self.assertTrue(self.dispute.is_reveal_completed)
+        tally = self.dispute.get_vote_tally()
+        self.assertIsNotNone(tally)
+        self.assertEqual(tally.get('poster'), 1)
+        self.assertNotIn('taker', tally)
+
+        self.client.login(username='juror1', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertNotContains(response, "Live vote tally is hidden")
+        self.assertContains(response, "poster:")
+
 

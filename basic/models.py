@@ -1,4 +1,5 @@
 import math
+from datetime import timedelta
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -96,9 +97,47 @@ class Dispute(models.Model):
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
+    voting_end_at = models.DateTimeField(null=True, blank=True)
+    reveal_end_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    @property
+    def is_voting_period(self):
+        if self.status != 'open':
+            return False
+        now = timezone.now()
+        if self.voting_end_at:
+            return now <= self.voting_end_at
+        return now <= (self.created_at or timezone.now()) + timedelta(days=3)
+
+    @property
+    def is_reveal_period(self):
+        if self.status != 'open':
+            return False
+        now = timezone.now()
+        voting_end = self.voting_end_at or ((self.created_at or timezone.now()) + timedelta(days=3))
+        reveal_end = self.reveal_end_at or ((self.created_at or timezone.now()) + timedelta(days=6))
+        return voting_end < now <= reveal_end
+
+    @property
+    def is_reveal_completed(self):
+        if self.status == 'resolved':
+            return True
+        now = timezone.now()
+        reveal_end = self.reveal_end_at or ((self.created_at or timezone.now()) + timedelta(days=6))
+        return now > reveal_end
+
+    def get_vote_tally(self):
+        if not self.is_reveal_completed:
+            return None
+        revealed_votes = self.juror_votes.filter(is_revealed=True)
+        tally = {}
+        for vote in revealed_votes:
+            choice = vote.revealed_vote
+            tally[choice] = tally.get(choice, 0) + 1
+        return tally
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -141,6 +180,21 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class JurorVote(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='juror_votes')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='juror_votes')
+    vote_commitment_hash = models.CharField(max_length=64, blank=True, null=True)
+    revealed_vote = models.CharField(max_length=100, blank=True, null=True)
+    is_revealed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    revealed_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"JurorVote by {self.juror.username} on Dispute {self.dispute.id} (Revealed: {self.is_revealed})"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
