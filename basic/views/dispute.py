@@ -2,7 +2,9 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from django.contrib.auth.models import User
+from ..models import Dispute, Task, Notification, RewardLedger, JurorAssignment
+from ..juror_service import assign_jurors_to_dispute, submit_juror_vote
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,12 +12,18 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+    is_juror = dispute.juror_assignments.filter(juror=request.user).exists()
+    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff and not is_juror:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+
+    juror_assignment = dispute.juror_assignments.filter(juror=request.user).first() if is_juror else None
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'is_juror': is_juror,
+        'juror_assignment': juror_assignment,
     }
     return render(request, 'dispute_detail.html', context)
 
@@ -79,9 +87,39 @@ def raise_dispute(request, task_id):
                 message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
                 link=reverse('dispute_detail', args=[dispute.id])
             )
+
+            # Select and impanel jury candidates
+            assignments = assign_jurors_to_dispute(dispute)
+            for assignment in assignments:
+                Notification.objects.create(
+                    recipient=assignment.juror,
+                    message=f"You have been assigned as a juror for dispute on task: '{task.title}'. 10 points held as stake bond.",
+                    link=reverse('dispute_detail', args=[dispute.id])
+                )
+
         messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def submit_dispute_vote_view(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id, status='open')
+    assignment = get_object_or_404(JurorAssignment, dispute=dispute, juror=request.user)
+
+    voted_for_id = request.POST.get('voted_for')
+    if not voted_for_id:
+        messages.error(request, "A valid vote option is required.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    voted_for = get_object_or_404(User, id=voted_for_id)
+    if voted_for not in [dispute.task.posted_by, dispute.task.taken_by]:
+        messages.error(request, "Invalid candidate to vote for.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    submit_juror_vote(assignment, voted_for)
+    messages.success(request, "Your vote has been recorded and your 10 point stake bond has been refunded.")
+    return redirect('dispute_detail', dispute_id=dispute.id)
 
 @login_required(login_url='/login/')
 @require_POST
