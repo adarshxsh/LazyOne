@@ -192,3 +192,20 @@ class Notification(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+class DisputeVote(models.Model):
+    VOTE_CHOICES = (
+        ('posted_by', 'Poster'),
+        ('taken_by', 'Worker'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    vote = models.CharField(max_length=20, choices=VOTE_CHOICES)
+    reason = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'voter')
+
+    def __str__(self):
+        return f"Vote by {self.voter.username} on dispute for '{self.dispute.task.title}'"
