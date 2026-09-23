@@ -2,7 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, Task, Notification, RewardLedger, DisputeJuror, Conversation
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,12 +10,24 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+    is_juror = DisputeJuror.objects.filter(dispute=dispute, user=request.user).exists()
+    is_party = (request.user == task.posted_by or request.user == task.taken_by)
+
+    if not is_party and not is_juror and not request.user.is_staff:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+
+    main_chat = task.main_chat
+    if not main_chat:
+        main_chat, _ = Conversation.objects.get_or_create(task=task)
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'is_juror': is_juror,
+        'is_party': is_party,
+        'can_deliberate': is_juror or (request.user.is_staff and not is_party),
+        'main_chat': main_chat,
     }
     return render(request, 'dispute_detail.html', context)
 
