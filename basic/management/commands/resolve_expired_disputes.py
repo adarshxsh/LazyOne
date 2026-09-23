@@ -17,12 +17,10 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        days = options['days']
         now = timezone.now()
-        expiry_threshold = now - timedelta(days=days)
 
-        # Find open disputes created before the expiration window
-        expired_disputes = Dispute.objects.filter(status='open', created_at__lte=expiry_threshold)
+        # Find open disputes where voting_deadline has passed
+        expired_disputes = Dispute.objects.filter(status='open', voting_deadline__lte=now)
 
         count = 0
         for dispute in expired_disputes:
@@ -80,7 +78,7 @@ class Command(BaseCommand):
                 for participant in participants:
                     Notification.objects.create(
                         recipient=participant,
-                        message=f"Dispute for task '{task.title}' has expired ({days}d SLA) and was automatically resolved.",
+                        message=f"Dispute for task '{task.title}' has expired and was automatically resolved.",
                         link=dispute_link
                     )
 

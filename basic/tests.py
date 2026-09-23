@@ -3,7 +3,8 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from django.core.management import call_command
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, Notification
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +182,88 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class DisputeVotingDeadlineTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+        self.task = Task.objects.create(
+            title="SLA Test Task",
+            description="Test Description",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=timezone.now() + timedelta(days=2)
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_raising_dispute_sets_voting_deadline_7_days(self):
+        self.client.login(username='taker', password='password123')
+        now = timezone.now()
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Incomplete work'}
+        )
+        self.assertEqual(response.status_code, 302)
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertIsNotNone(dispute.voting_deadline)
+        expected_deadline = now + timedelta(days=7)
+        delta = abs((dispute.voting_deadline - expected_deadline).total_seconds())
+        self.assertLess(delta, 10)
+
+    def test_resolve_expired_disputes_command_processes_past_deadline(self):
+        past_deadline = timezone.now() - timedelta(hours=1)
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Stale dispute',
+            deposit_amount=50,
+            escrow_status='held',
+            voting_deadline=past_deadline
+        )
+        self.task.status = 'disputed'
+        self.task.save()
+
+        call_command('resolve_expired_disputes')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.escrow_status, 'refunded')
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 500 + 200 + 50)
+
+        notifications = Notification.objects.filter(recipient=self.poster)
+        self.assertTrue(notifications.exists())
+        self.assertIn("expired", notifications.first().message)
+
+    def test_resolve_expired_disputes_command_ignores_future_deadline(self):
+        future_deadline = timezone.now() + timedelta(days=5)
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Active dispute',
+            deposit_amount=50,
+            escrow_status='held',
+            voting_deadline=future_deadline
+        )
+        self.task.status = 'disputed'
+        self.task.save()
+
+        call_command('resolve_expired_disputes')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'open')
+        self.assertEqual(dispute.escrow_status, 'held')
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+
 

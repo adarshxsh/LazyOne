@@ -2,6 +2,8 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
+from django.utils import timezone
+from datetime import timedelta
 from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
@@ -53,6 +55,7 @@ def raise_dispute(request, task_id):
                 dispute.status = 'open'
                 dispute.deposit_amount = deposit_amount
                 dispute.escrow_status = 'held'
+                dispute.voting_deadline = timezone.now() + timedelta(days=7)
                 dispute.save()
             else:
                 dispute = Dispute.objects.create(
