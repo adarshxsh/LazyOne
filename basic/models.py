@@ -192,3 +192,34 @@ class Notification(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+class JuryPanel(models.Model):
+    STATUS_CHOICES = (
+        ('assigned', 'Assigned'),
+        ('fallback', 'Fallback to Staff'),
+        ('closed', 'Closed'),
+    )
+    dispute = models.OneToOneField(Dispute, on_delete=models.CASCADE, related_name='jury_panel')
+    created_at = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='assigned')
+
+    def __str__(self):
+        return f"Jury Panel for {self.dispute}"
+
+class JuryMember(models.Model):
+    STATUS_CHOICES = (
+        ('assigned', 'Assigned'),
+        ('voted', 'Voted'),
+        ('declined', 'Declined'),
+    )
+    panel = models.ForeignKey(JuryPanel, on_delete=models.CASCADE, related_name='members')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jury_memberships')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='assigned')
+
+    class Meta:
+        unique_together = ('panel', 'user')
+
+    def __str__(self):
+        return f"Juror {self.user.username} on panel {self.panel.id}"
+
