@@ -23,6 +23,26 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Audit Event History</h3>
+            {% if dispute.audit_events.all %}
+                <ul class="space-y-2">
+                    {% for event in dispute.audit_events.all %}
+                        <li class="bg-gray-900/50 p-3 rounded-lg border border-gray-700 flex justify-between items-center text-sm">
+                            <div>
+                                <span class="font-semibold text-cyan-300">[{{ event.event_type }}]</span>
+                                {% if event.actor %}{{ event.actor.username }}{% else %}System{% endif %}
+                                &mdash; {{ event.description|default:"State transition recorded" }}
+                            </div>
+                            <span class="text-xs text-gray-400">{{ event.timestamp|date:"M d, Y H:i" }}</span>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="text-gray-400 text-sm italic">No audit events recorded yet.</p>
+            {% endif %}
+        </div>
     </div>
 
 {% endblock %}

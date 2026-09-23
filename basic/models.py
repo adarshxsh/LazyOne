@@ -100,7 +100,9 @@ class Dispute(models.Model):
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
 
-    def refund_deposit(self, reason_description=None):
+    def refund_deposit(self, reason_description=None, actor=None):
+        if actor:
+            self._actor = actor
         if self.escrow_status == 'held' and self.deposit_amount > 0:
             user_profile = self.raised_by.userprofile
             user_profile.rewards += self.deposit_amount
@@ -117,7 +119,9 @@ class Dispute(models.Model):
             self.escrow_status = 'refunded'
             self.save()
 
-    def forfeit_deposit(self, beneficiary=None, reason_description=None):
+    def forfeit_deposit(self, beneficiary=None, reason_description=None, actor=None):
+        if actor:
+            self._actor = actor
         if self.escrow_status == 'held' and self.deposit_amount > 0:
             if beneficiary:
                 beneficiary_profile = beneficiary.userprofile
@@ -141,6 +145,56 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class DisputeAuditEvent(models.Model):
+    EVENT_TYPES = (
+        ('RAISED', 'Dispute Raised'),
+        ('WITHDRAWN', 'Dispute Withdrawn'),
+        ('RESOLVED', 'Dispute Resolved'),
+        ('EXPIRED', 'Dispute Expired'),
+        ('ESCROW_REFUNDED', 'Escrow Refunded'),
+        ('ESCROW_FORFEITED', 'Escrow Forfeited'),
+    )
+
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='audit_events')
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='dispute_audit_events')
+    event_type = models.CharField(max_length=50)
+    previous_status = models.CharField(max_length=50, blank=True, default='')
+    new_status = models.CharField(max_length=50, blank=True, default='')
+    details_json = models.JSONField(default=dict, blank=True)
+    description = models.TextField(blank=True, default='')
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['timestamp']
+
+    def __str__(self):
+        actor_name = self.actor.username if self.actor else "System"
+        return f"[{self.timestamp}] Dispute #{self.dispute_id} - {self.event_type} by {actor_name}"
+
+    @property
+    def created_at(self):
+        return self.timestamp
+
+    @property
+    def status_from(self):
+        return self.previous_status
+
+    @property
+    def status_to(self):
+        return self.new_status
+
+    @property
+    def metadata(self):
+        return self.details_json
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValueError("DisputeAuditEvent records are immutable and cannot be updated.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("DisputeAuditEvent records are immutable and cannot be deleted.")
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)

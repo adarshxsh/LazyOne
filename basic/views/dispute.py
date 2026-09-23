@@ -48,6 +48,8 @@ def raise_dispute(request, task_id):
 
             if hasattr(task, 'dispute'):
                 dispute = task.dispute
+                dispute._actor = request.user
+                dispute._event_type = 'RAISED'
                 dispute.raised_by = request.user
                 dispute.reason = reason
                 dispute.status = 'open'
@@ -55,13 +57,16 @@ def raise_dispute(request, task_id):
                 dispute.escrow_status = 'held'
                 dispute.save()
             else:
-                dispute = Dispute.objects.create(
+                dispute = Dispute(
                     task=task,
                     raised_by=request.user,
                     reason=reason,
                     deposit_amount=deposit_amount,
                     escrow_status='held'
                 )
+                dispute._actor = request.user
+                dispute._event_type = 'RAISED'
+                dispute.save()
 
             RewardLedger.objects.create(
                 user=request.user,
@@ -73,12 +78,6 @@ def raise_dispute(request, task_id):
 
             task.status = 'disputed'
             task.save()
-
-            Notification.objects.create(
-                recipient=task.posted_by,
-                message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
-                link=reverse('dispute_detail', args=[dispute.id])
-            )
         messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
@@ -90,18 +89,15 @@ def withdraw_dispute(request, dispute_id):
     task = dispute.task
     with transaction.atomic():
         dispute.refund_deposit(
-            reason_description=f"Security deposit bond refunded for withdrawn dispute on task: '{task.title}'"
+            reason_description=f"Security deposit bond refunded for withdrawn dispute on task: '{task.title}'",
+            actor=request.user
         )
+        dispute._actor = request.user
+        dispute._event_type = 'WITHDRAWN'
         dispute.status = 'resolved'
         dispute.save()
 
         task.status = 'in_progress'
         task.save()
-
-        Notification.objects.create(
-            recipient=task.posted_by,
-            message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
-            link=reverse('my_tasks')
-        )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')

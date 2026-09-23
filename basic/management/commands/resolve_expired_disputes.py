@@ -28,6 +28,9 @@ class Command(BaseCommand):
         for dispute in expired_disputes:
             task = dispute.task
             with transaction.atomic():
+                dispute._actor = None
+                dispute._event_type = 'EXPIRED'
+                dispute._is_expired = True
                 dispute.status = 'resolved'
                 dispute.save()
 
@@ -70,19 +73,6 @@ class Command(BaseCommand):
 
                     if dispute.escrow_status == 'held':
                         dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
-
-                # Notify participants
-                participants = [task.posted_by]
-                if task.taken_by and task.taken_by not in participants:
-                    participants.append(task.taken_by)
-
-                dispute_link = reverse('dispute_detail', args=[dispute.id])
-                for participant in participants:
-                    Notification.objects.create(
-                        recipient=participant,
-                        message=f"Dispute for task '{task.title}' has expired ({days}d SLA) and was automatically resolved.",
-                        link=dispute_link
-                    )
 
                 count += 1
 

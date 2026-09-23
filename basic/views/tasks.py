@@ -90,11 +90,15 @@ def complete_task(request, task_id):
         task.save()
 
         if hasattr(task, 'dispute') and task.dispute.status == 'open':
-            task.dispute.refund_deposit(
-                reason_description=f"Security deposit bond refunded upon dispute resolution for task: '{task.title}'"
+            dispute = task.dispute
+            dispute.refund_deposit(
+                reason_description=f"Security deposit bond refunded upon dispute resolution for task: '{task.title}'",
+                actor=request.user
             )
-            task.dispute.status = 'resolved'
-            task.dispute.save()
+            dispute._actor = request.user
+            dispute._event_type = 'RESOLVED'
+            dispute.status = 'resolved'
+            dispute.save()
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,
