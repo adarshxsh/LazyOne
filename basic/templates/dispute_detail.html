@@ -8,13 +8,37 @@
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg font-medium text-white">{{ dispute.task.title }}</p>
+            <p class="text-sm text-gray-400">Posted by: {{ task.posted_by.username }} | Assigned to: {{ task.taken_by.username }}</p>
+        </div>
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Symmetrical Deposit Bonds</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                    <h4 class="font-bold text-white">Worker Deposit Bond</h4>
+                    <p class="text-sm">Amount: <span class="text-cyan-300 font-semibold">{{ dispute.deposit_amount }} points</span></p>
+                    <p class="text-sm">Status: <span class="px-2 py-0.5 text-xs rounded-full bg-cyan-500/20 text-cyan-300">{{ dispute.get_escrow_status_display }}</span></p>
+                </div>
+                <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                    <h4 class="font-bold text-white">Poster Counter-Stake Bond</h4>
+                    <p class="text-sm">Amount: <span class="text-cyan-300 font-semibold">{{ task.deposit_bond_amount }} points</span></p>
+                    <p class="text-sm">Status: <span class="px-2 py-0.5 text-xs rounded-full {% if dispute.poster_escrow_status == 'held' %}bg-cyan-500/20 text-cyan-300{% else %}bg-yellow-500/20 text-yellow-300{% endif %}">{{ dispute.get_poster_escrow_status_display }}</span></p>
+                    {% if user == task.posted_by and dispute.poster_escrow_status == 'pending' and dispute.status == 'open' %}
+                        <form method="POST" action="{% url 'counter_stake_dispute' dispute.id %}" class="mt-3">
+                            {% csrf_token %}
+                            <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors text-sm">
+                                Match Deposit Bond ({{ task.deposit_bond_amount }} pts)
+                            </button>
+                        </form>
+                    {% endif %}
+                </div>
+            </div>
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
             <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
         </div>
@@ -23,6 +47,75 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <!-- Community Jury Voting Section -->
+        <div class="border-t border-gray-700 pt-6">
+            <h3 class="text-2xl font-bold text-white mb-2">Community Jury Review & Staking</h3>
+            {% if not dispute.is_jury_review_active %}
+                <div class="bg-yellow-900/30 border border-yellow-700 p-4 rounded-lg text-yellow-200">
+                    <p class="font-semibold">Jury Review Blocked</p>
+                    <p class="text-sm">Disputes cannot proceed to community jury review until both parties commit required deposit bonds. Waiting for the task poster to counter-stake.</p>
+                </div>
+            {% else %}
+                <p class="text-gray-400 text-sm mb-4">
+                    Cast your vote as a community juror. A mandatory stake bond of <strong class="text-cyan-300">{{ dispute.juror_stake_amount }} points</strong> is held in escrow when voting.
+                    Minority voters will have their stake slashed and redistributed to majority jurors and the winning party upon settlement!
+                </p>
+
+                <!-- Current Votes Summary -->
+                <div class="bg-gray-800 p-4 rounded-lg border border-gray-700 mb-6 flex justify-around text-center">
+                    <div>
+                        <p class="text-sm text-gray-400">Votes for Worker ({{ task.taken_by.username }})</p>
+                        <p class="text-2xl font-bold text-green-400">{{ worker_votes_count }}</p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-400">Votes for Poster ({{ task.posted_by.username }})</p>
+                        <p class="text-2xl font-bold text-blue-400">{{ poster_votes_count }}</p>
+                    </div>
+                </div>
+
+                {% if dispute.status == 'open' %}
+                    {% if is_party %}
+                        <p class="text-sm text-gray-400 italic">As a party to this task, you cannot vote as a juror on this dispute.</p>
+                    {% elif user_vote %}
+                        <div class="bg-blue-900/30 border border-blue-700 p-4 rounded-lg text-blue-200">
+                            <p class="font-semibold">Your Vote Has Been Recorded</p>
+                            <p class="text-sm">You voted for <strong class="text-white">{{ user_vote.voted_for.username }}</strong>. Your stake of {{ user_vote.stake_amount }} points is held in escrow until dispute resolution.</p>
+                        </div>
+                    {% else %}
+                        <form method="POST" action="{% url 'vote_dispute' dispute.id %}" class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-4">
+                            {% csrf_token %}
+                            <h4 class="font-bold text-white text-lg">Cast Your Juror Vote</h4>
+                            <div class="space-y-2">
+                                <label class="flex items-center space-x-3 cursor-pointer">
+                                    <input type="radio" name="voted_for" value="{{ task.taken_by.id }}" class="form-radio text-cyan-500" required>
+                                    <span class="text-white font-medium">In favor of Worker ({{ task.taken_by.username }})</span>
+                                </label>
+                                <label class="flex items-center space-x-3 cursor-pointer">
+                                    <input type="radio" name="voted_for" value="{{ task.posted_by.id }}" class="form-radio text-cyan-500" required>
+                                    <span class="text-white font-medium">In favor of Poster ({{ task.posted_by.username }})</span>
+                                </label>
+                            </div>
+                            <button type="submit" class="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold py-2 px-6 rounded-lg transition-colors">
+                                Submit Vote & Commit {{ dispute.juror_stake_amount }} Points Stake
+                            </button>
+                        </form>
+                    {% endif %}
+                {% endif %}
+            {% endif %}
+        </div>
+
+        {% if dispute.status == 'open' and is_party or user.is_staff %}
+            <div class="border-t border-gray-700 pt-6">
+                <h3 class="text-xl font-bold text-white mb-2">Settle Dispute</h3>
+                <form method="POST" action="{% url 'settle_dispute' dispute.id %}" class="flex gap-4">
+                    {% csrf_token %}
+                    <button type="submit" class="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-6 rounded-lg transition-colors">
+                        Settle Dispute via Jury Consensus
+                    </button>
+                </form>
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}
