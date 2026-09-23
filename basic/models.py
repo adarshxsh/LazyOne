@@ -82,6 +82,9 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('evidence_submission', 'Evidence Submission'),
+        ('under_review', 'Under Review'),
+        ('voting', 'Voting'),
         ('resolved', 'Resolved'),
     )
     ESCROW_STATUS_CHOICES = (
@@ -96,9 +99,102 @@ class Dispute(models.Model):
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def is_participant(self, user):
+        if not user or not user.is_authenticated:
+            return False
+        return user == self.task.posted_by or user == self.task.taken_by
+
+    def is_eligible_voter(self, user):
+        if not user or not user.is_authenticated:
+            return False
+        if self.is_participant(user):
+            return False
+        if self.status != 'voting':
+            return False
+        return not self.votes.filter(voter=user).exists()
+
+    def can_transition_to(self, target_status):
+        valid_transitions = {
+            'open': ['evidence_submission', 'under_review', 'voting', 'resolved'],
+            'evidence_submission': ['under_review', 'voting', 'resolved'],
+            'under_review': ['voting', 'resolved'],
+            'voting': ['resolved'],
+            'resolved': [],
+        }
+        return target_status in valid_transitions.get(self.status, [])
+
+    def transition_to(self, target_status):
+        if self.can_transition_to(target_status):
+            self.status = target_status
+            self.save()
+            return True
+        return False
+
+    def resolve_dispute(self, winner_user=None, reason_description=None):
+        if self.status == 'resolved':
+            return
+
+        poster_votes = self.votes.filter(voted_for=self.task.posted_by).count()
+        taker_votes = self.votes.filter(voted_for=self.task.taken_by).count()
+
+        if not winner_user:
+            if taker_votes > poster_votes:
+                winner_user = self.task.taken_by
+            elif poster_votes > taker_votes:
+                winner_user = self.task.posted_by
+            else:
+                if self.raised_by == self.task.posted_by:
+                    winner_user = self.task.posted_by
+                else:
+                    winner_user = self.task.taken_by
+
+        if winner_user == self.task.taken_by:
+            if self.task.taken_by:
+                taker_profile = self.task.taken_by.userprofile
+                taker_profile.rewards += self.task.reward
+                taker_profile.save()
+                RewardLedger.objects.create(
+                    user=self.task.taken_by,
+                    task=self.task,
+                    amount=self.task.reward,
+                    transaction_type='task_completion',
+                    description=reason_description or f"Awarded task reward after dispute resolution for task: '{self.task.title}'"
+                )
+            self.task.status = 'completed'
+            self.task.save()
+
+            if self.escrow_status == 'held':
+                self.refund_deposit(reason_description=reason_description or f"Security deposit bond refunded for resolved dispute on task: '{self.task.title}'")
+
+        else:
+            poster_profile = self.task.posted_by.userprofile
+            poster_profile.rewards += self.task.reward
+            poster_profile.save()
+
+            RewardLedger.objects.create(
+                user=self.task.posted_by,
+                task=self.task,
+                amount=self.task.reward,
+                transaction_type='task_cancellation',
+                description=reason_description or f"Refund for task reward after dispute resolution on task: '{self.task.title}'"
+            )
+
+            self.task.status = 'cancelled'
+            self.task.save()
+
+            if self.escrow_status == 'held':
+                if self.raised_by == self.task.taken_by:
+                    self.forfeit_deposit(beneficiary=self.task.posted_by, reason_description=reason_description or f"Deposit bond forfeited to poster after dispute resolution on task: '{self.task.title}'")
+                else:
+                    self.refund_deposit(reason_description=reason_description or f"Security deposit bond refunded on resolved dispute for task '{self.task.title}'")
+
+        self.status = 'resolved'
+        self.save()
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -141,6 +237,31 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidences')
+    submitted_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_evidences')
+    text_evidence = models.TextField(blank=True)
+    file_evidence = models.FileField(upload_to='dispute_evidences/', blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Evidence by {self.submitted_by.username} for task {self.dispute.task.title}"
+
+
+class DisputeVote(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes_cast')
+    voted_for = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes_received')
+    comment = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'voter')
+
+    def __str__(self):
+        return f"Vote by {self.voter.username} for {self.voted_for.username} in dispute {self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
