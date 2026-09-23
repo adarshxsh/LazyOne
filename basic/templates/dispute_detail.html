@@ -8,21 +8,91 @@
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg font-bold text-white">{{ dispute.task.title }}</p>
+            <p class="text-sm text-gray-400">{{ dispute.task.description }}</p>
+            <p class="text-sm text-cyan-300 mt-1">Reward: {{ dispute.task.reward }} points</p>
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% elif dispute.status == 'resolved' %}bg-green-500/20 text-green-300{% else %}bg-purple-500/20 text-purple-300{% endif %}">{{ dispute.get_status_display }}</span></p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y H:i" }}</p>
+            <p><strong>Voting Window Closes:</strong> {{ dispute.voting_deadline|date:"F d, Y H:i" }}</p>
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <!-- Evidence / Chat Logs Section -->
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Dispute Evidence & Chat Logs</h3>
+            <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 max-h-60 overflow-y-auto space-y-2">
+                {% if task_messages %}
+                    {% for msg in task_messages %}
+                        <div class="p-2 rounded bg-gray-800/60 border border-gray-700/50">
+                            <span class="text-xs text-cyan-400 font-semibold">{{ msg.sender.username }}</span>
+                            <span class="text-xs text-gray-500 float-right">{{ msg.timestamp|date:"M d, H:i" }}</span>
+                            <p class="text-sm text-gray-200 mt-1">{{ msg.content }}</p>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-sm text-gray-400">No chat messages logged for this task.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Secret Jury Voting Section -->
+        {% if is_juror %}
+            <div class="bg-cyan-900/20 p-6 rounded-lg border border-cyan-500/30 mt-6">
+                <h3 class="text-2xl font-bold text-cyan-300 mb-2">Peer Jury Arbitration Interface</h3>
+                <p class="text-sm text-gray-300 mb-4">As an assigned peer juror, your vote is completely confidential. A simple majority (2 matching votes) settles the dispute and awards a 25-point participation bonus to active jurors.</p>
+
+                {% if can_vote %}
+                    <form method="POST" action="{% url 'submit_vote' dispute.id %}" class="space-y-4">
+                        {% csrf_token %}
+                        <p class="font-semibold text-white">Cast your secret vote:</p>
+                        <div class="flex flex-col sm:flex-row gap-4">
+                            <label class="flex items-center space-x-2 p-3 bg-gray-800 rounded-lg border border-gray-700 hover:border-cyan-500 cursor-pointer">
+                                <input type="radio" name="voted_user" value="{{ task.posted_by.id }}" required class="text-cyan-500 focus:ring-cyan-400">
+                                <span class="text-white">In favor of Task Poster (<strong>{{ task.posted_by.username }}</strong>)</span>
+                            </label>
+
+                            {% if task.taken_by %}
+                            <label class="flex items-center space-x-2 p-3 bg-gray-800 rounded-lg border border-gray-700 hover:border-cyan-500 cursor-pointer">
+                                <input type="radio" name="voted_user" value="{{ task.taken_by.id }}" required class="text-cyan-500 focus:ring-cyan-400">
+                                <span class="text-white">In favor of Task Taker (<strong>{{ task.taken_by.username }}</strong>)</span>
+                            </label>
+                            {% endif %}
+                        </div>
+                        <button type="submit" class="mt-4 px-6 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg shadow-lg transition duration-200">
+                            Submit Confidential Vote
+                        </button>
+                    </form>
+                {% elif user_has_voted %}
+                    <p class="text-green-400 font-semibold">✓ Your vote has been recorded confidentially. Thank you for serving on this peer jury!</p>
+                {% elif dispute.is_voting_expired %}
+                    <p class="text-yellow-400 font-semibold">The 48-hour jury voting window has closed.</p>
+                {% else %}
+                    <p class="text-gray-400 font-semibold">Voting is closed for this dispute.</p>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        <!-- Withdraw Option for Disputant -->
+        {% if dispute.raised_by == request.user and dispute.status == 'open' %}
+            <div class="mt-6">
+                <form method="POST" action="{% url 'withdraw_dispute' dispute.id %}">
+                    {% csrf_token %}
+                    <button type="submit" class="px-4 py-2 bg-red-600/80 hover:bg-red-600 text-white font-semibold rounded-lg transition duration-200" onclick="return confirm('Are you sure you want to withdraw this dispute? Your deposit bond will be refunded.');">
+                        Withdraw Dispute
+                    </button>
+                </form>
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}
