@@ -1,4 +1,5 @@
 import math
+import hashlib
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -89,16 +90,76 @@ class Dispute(models.Model):
         ('refunded', 'Refunded'),
         ('forfeited', 'Forfeited'),
     )
+    VOTING_PHASE_CHOICES = (
+        ('commit', 'Commit Phase'),
+        ('reveal', 'Reveal Phase'),
+        ('finished', 'Finished'),
+    )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    voting_phase = models.CharField(max_length=20, choices=VOTING_PHASE_CHOICES, default='commit')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
+    commit_deadline = models.DateTimeField(null=True, blank=True)
+    reveal_deadline = models.DateTimeField(null=True, blank=True)
+    jurors = models.ManyToManyField(User, related_name='assigned_disputes', blank=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def get_current_phase(self):
+        now = timezone.now()
+        if self.voting_phase == 'finished' or self.status == 'resolved':
+            return 'finished'
+        if self.commit_deadline and now >= self.commit_deadline and self.voting_phase == 'commit':
+            self.voting_phase = 'reveal'
+            self.save(update_fields=['voting_phase'])
+        if self.reveal_deadline and now >= self.reveal_deadline and self.voting_phase == 'reveal':
+            self.finalize_resolution()
+            return 'finished'
+        return self.voting_phase
+
+    def can_user_vote(self, user):
+        if not user or not user.is_authenticated:
+            return False
+        if user == self.task.posted_by or user == self.task.taken_by:
+            return False
+        if self.jurors.exists():
+            return self.jurors.filter(id=user.id).exists()
+        return True
+
+    def tally_votes(self):
+        revealed_commitments = self.commitments.filter(revealed=True)
+        poster_votes = revealed_commitments.filter(vote_choice='poster').count()
+        taker_votes = revealed_commitments.filter(vote_choice='taker').count()
+        return {
+            'poster': poster_votes,
+            'taker': taker_votes,
+            'total': poster_votes + taker_votes
+        }
+
+    def finalize_resolution(self):
+        tallies = self.tally_votes()
+        poster_votes = tallies['poster']
+        taker_votes = tallies['taker']
+
+        self.voting_phase = 'finished'
+        self.status = 'resolved'
+        self.save(update_fields=['voting_phase', 'status'])
+
+        if taker_votes > poster_votes:
+            self.refund_deposit()
+            self.task.status = 'completed'
+            self.task.save(update_fields=['status'])
+        elif poster_votes > taker_votes:
+            self.forfeit_deposit(beneficiary=self.task.posted_by)
+            self.task.status = 'cancelled'
+            self.task.save(update_fields=['status'])
+        else:
+            self.refund_deposit()
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -141,6 +202,38 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+
+class DisputeCommitment(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='commitments')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_commitments')
+    commitment_hash = models.CharField(max_length=64)
+    committed_at = models.DateTimeField(auto_now_add=True)
+    vote_choice = models.CharField(max_length=50, blank=True, null=True)
+    salt = models.CharField(max_length=128, blank=True, null=True)
+    revealed = models.BooleanField(default=False)
+    revealed_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Commitment by {self.juror.username} for dispute {self.dispute.id}"
+
+    @staticmethod
+    def compute_hash(choice, salt, juror_id):
+        data = f"{choice}:{salt}:{juror_id}".encode('utf-8')
+        return hashlib.sha256(data).hexdigest()
+
+    def verify_reveal(self, choice, salt):
+        submitted_hash = self.commitment_hash.strip().lower()
+        candidates = [
+            hashlib.sha256(f"{choice}:{salt}:{self.juror.id}".encode('utf-8')).hexdigest(),
+            hashlib.sha256(f"{choice}{salt}{self.juror.id}".encode('utf-8')).hexdigest(),
+            hashlib.sha256(f"{choice}:{salt}".encode('utf-8')).hexdigest(),
+            hashlib.sha256(f"{choice}{salt}".encode('utf-8')).hexdigest(),
+        ]
+        return submitted_hash in candidates
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
