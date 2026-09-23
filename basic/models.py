@@ -68,11 +68,17 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('juror_slashing', 'Juror Slashing Penalty'),
+        ('litigant_slashing', 'Litigant Slashing Penalty'),
+        ('appeal_deposit', 'Appeal Stake Bond Held'),
+        ('appeal_refund', 'Appeal Stake Bond Refunded'),
+        ('dispute_settlement', 'Dispute Settlement'),
+        ('juror_reward', 'Juror Reward'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -82,12 +88,20 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('voting', 'Voting'),
+        ('tier1_resolved', 'Tier 1 Resolved'),
+        ('appealed', 'Appealed'),
         ('resolved', 'Resolved'),
+        ('withdrawn', 'Withdrawn'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
         ('refunded', 'Refunded'),
         ('forfeited', 'Forfeited'),
+    )
+    VERDICT_CHOICES = (
+        ('poster', 'Poster'),
+        ('taker', 'Taker'),
     )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
@@ -95,10 +109,32 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    primary_verdict = models.CharField(max_length=20, choices=VERDICT_CHOICES, null=True, blank=True)
+    final_verdict = models.CharField(max_length=20, choices=VERDICT_CHOICES, null=True, blank=True)
+    verdict_published_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def is_in_appeal_window(self):
+        if self.status == 'tier1_resolved' and self.verdict_published_at:
+            from datetime import timedelta
+            return timezone.now() <= self.verdict_published_at + timedelta(hours=48)
+        return False
+
+    def can_appeal(self, user):
+        if not self.is_in_appeal_window():
+            return False
+        if hasattr(self, 'appeal'):
+            return False
+        if user not in [self.task.posted_by, self.task.taken_by]:
+            return False
+        if self.primary_verdict == 'poster' and user == self.task.posted_by:
+            return False
+        if self.primary_verdict == 'taker' and user == self.task.taken_by:
+            return False
+        return True
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -141,6 +177,41 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class JurorAssignment(models.Model):
+    VOTE_CHOICES = (
+        ('poster', 'Poster'),
+        ('taker', 'Taker'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='juror_assignments')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='juror_assignments')
+    tier = models.IntegerField(default=1)
+    vote = models.CharField(max_length=20, choices=VOTE_CHOICES, null=True, blank=True)
+    voted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror', 'tier')
+
+    def __str__(self):
+        return f"Juror {self.juror.username} for Dispute {self.dispute.id} (Tier {self.tier})"
+
+class DisputeAppeal(models.Model):
+    STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('upheld', 'Upheld'),
+        ('reversed', 'Reversed'),
+    )
+    dispute = models.OneToOneField(Dispute, on_delete=models.CASCADE, related_name='appeal')
+    appellant = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_appeals')
+    reason = models.TextField()
+    stake_amount = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Appeal for Dispute {self.dispute.id} by {self.appellant.username}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
