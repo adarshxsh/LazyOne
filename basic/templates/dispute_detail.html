@@ -23,6 +23,38 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Jury Panel</h3>
+            {% if juror_assignments %}
+                <ul class="space-y-2">
+                    {% for ja in juror_assignments %}
+                        <li class="bg-gray-800 p-3 rounded flex justify-between items-center border border-gray-700">
+                            <span>Juror: <strong>{{ ja.juror.username }}</strong></span>
+                            <span class="text-sm px-2 py-1 rounded bg-gray-700 text-cyan-300">Status: {{ ja.get_status_display }}</span>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="text-gray-400 italic">No jury panel assigned yet (pending eligible jurors).</p>
+            {% endif %}
+        </div>
+
+        {% if can_vote %}
+            <div class="bg-gray-800/80 p-6 rounded-lg border border-cyan-500/30">
+                <h3 class="text-xl font-semibold text-cyan-400 mb-2">Cast Your Juror Vote</h3>
+                <p class="text-sm text-gray-300 mb-4">You have a locked stake of {{ user_assignment.stake_amount }} points. Vote for the party you believe is in the right.</p>
+                <form action="{% url 'cast_juror_vote' dispute.id %}" method="POST" class="flex gap-4">
+                    {% csrf_token %}
+                    <button type="submit" name="vote_choice" value="poster" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg transition">Vote Poster ({{ task.posted_by.username }})</button>
+                    <button type="submit" name="vote_choice" value="taker" class="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white font-medium rounded-lg transition">Vote Taker ({{ task.taken_by.username }})</button>
+                </form>
+            </div>
+        {% elif user_assignment and user_assignment.status == 'voted' %}
+            <div class="bg-gray-800/80 p-4 rounded-lg border border-gray-700">
+                <p class="text-green-400 font-medium">You have submitted your vote ({{ user_assignment.get_vote_choice_display }}).</p>
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}
