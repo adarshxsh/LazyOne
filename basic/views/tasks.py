@@ -81,20 +81,20 @@ def take_task(request, task_id):
 
 @login_required(login_url='/login/')
 def complete_task(request, task_id):
-    task = get_object_or_404(Task, Q(status='in_progress') | Q(status='disputed'), id=task_id, posted_by=request.user)
+    task = get_object_or_404(Task, id=task_id, posted_by=request.user)
+    if task.status == 'disputed':
+        messages.error(request, "Dispute escrow locks the task. You cannot complete a task under active dispute.")
+        return redirect('my_tasks')
+    if task.status != 'in_progress':
+        messages.error(request, "Only tasks currently in progress can be completed.")
+        return redirect('my_tasks')
+
     with transaction.atomic():
         task_doer_profile = task.taken_by.userprofile
         task_doer_profile.rewards += task.reward
         task_doer_profile.save()
         task.status = 'completed'
         task.save()
-
-        if hasattr(task, 'dispute') and task.dispute.status == 'open':
-            task.dispute.refund_deposit(
-                reason_description=f"Security deposit bond refunded upon dispute resolution for task: '{task.title}'"
-            )
-            task.dispute.status = 'resolved'
-            task.dispute.save()
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,
