@@ -8,7 +8,8 @@
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg"><a href="#" class="hover:underline">{{ task.title }}</a></p>
+            <p class="text-sm text-gray-400 mt-1">Poster: <span class="text-white">{{ task.posted_by.username }}</span> | Worker: <span class="text-white">{{ task.taken_by.username }}</span></p>
         </div>
 
         <div>
@@ -22,6 +23,84 @@
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+        </div>
+
+        <!-- Community Vote & Settlement Section -->
+        <div class="bg-gray-800/60 p-6 rounded-xl border border-gray-700">
+            <h3 class="text-2xl font-semibold text-cyan-400 mb-2">Community Consensus Vote</h3>
+            <p class="text-sm text-gray-400 mb-4">
+                Disputes are settled automatically when <strong>{{ quorum_threshold }} votes</strong> are reached by community members.
+            </p>
+
+            <!-- Live Vote Progress Bar & Tallies -->
+            <div class="mb-6 space-y-3">
+                <div class="flex justify-between text-sm font-medium">
+                    <span>Total Votes Cast: <strong>{{ total_votes }} / {{ quorum_threshold }}</strong></span>
+                    <span>Quorum Target: {{ quorum_threshold }} votes</span>
+                </div>
+
+                <!-- Poster vs Worker breakdown -->
+                <div class="grid grid-cols-2 gap-4 text-center">
+                    <div class="bg-gray-900/70 p-3 rounded-lg border border-gray-700">
+                        <span class="block text-xs text-gray-400">Favoring Poster ({{ task.posted_by.username }})</span>
+                        <span id="poster-vote-count" class="text-xl font-bold text-cyan-300">{{ poster_votes }}</span>
+                        <span class="text-xs text-gray-500">({{ poster_percent }}%)</span>
+                    </div>
+                    <div class="bg-gray-900/70 p-3 rounded-lg border border-gray-700">
+                        <span class="block text-xs text-gray-400">Favoring Worker ({{ task.taken_by.username }})</span>
+                        <span id="worker-vote-count" class="text-xl font-bold text-green-400">{{ worker_votes }}</span>
+                        <span class="text-xs text-gray-500">({{ worker_percent }}%)</span>
+                    </div>
+                </div>
+
+                <!-- Live Progress Bar -->
+                <div class="w-full bg-gray-700 rounded-full h-4 overflow-hidden flex">
+                    <div class="bg-cyan-500 h-4 transition-all duration-300" style="width: {{ poster_percent }}%;" title="Poster votes: {{ poster_votes }}"></div>
+                    <div class="bg-green-500 h-4 transition-all duration-300" style="width: {{ worker_percent }}%;" title="Worker votes: {{ worker_votes }}"></div>
+                </div>
+            </div>
+
+            <!-- Vote Submission Controls / Form -->
+            {% if can_vote %}
+                <form action="{% url 'submit_dispute_vote' dispute.id %}" method="post" class="mt-4 space-y-4">
+                    {% csrf_token %}
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Cast Your Vote</label>
+                        <div class="flex flex-col sm:flex-row gap-4">
+                            <label class="flex items-center p-3 bg-gray-900/50 rounded-lg border border-gray-700 hover:border-cyan-500 cursor-pointer flex-1">
+                                <input type="radio" name="vote" value="posted_by" required class="text-cyan-500 focus:ring-cyan-400">
+                                <span class="ml-2 font-medium">In Favor of Poster ({{ task.posted_by.username }})</span>
+                            </label>
+                            <label class="flex items-center p-3 bg-gray-900/50 rounded-lg border border-gray-700 hover:border-green-500 cursor-pointer flex-1">
+                                <input type="radio" name="vote" value="taken_by" required class="text-green-500 focus:ring-green-400">
+                                <span class="ml-2 font-medium">In Favor of Worker ({{ task.taken_by.username }})</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="reason" class="block text-sm font-medium text-gray-300 mb-1">Submission Reason (Optional)</label>
+                        <textarea id="reason" name="reason" rows="2" placeholder="Briefly explain your voting decision..." class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"></textarea>
+                    </div>
+
+                    <button type="submit" class="px-6 py-2 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-lg transition-colors">
+                        Submit Vote
+                    </button>
+                </form>
+            {% elif is_participant %}
+                <div class="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-yellow-300 text-sm">
+                    As a task participant (poster or worker), you cannot vote on this dispute.
+                </div>
+            {% elif has_voted %}
+                <div class="p-3 bg-cyan-500/10 border border-cyan-500/30 rounded-lg text-cyan-300 text-sm">
+                    You have already submitted your vote on this dispute
+                    (voted for <strong>{% if user_vote.vote == 'posted_by' %}Poster ({{ task.posted_by.username }}){% else %}Worker ({{ task.taken_by.username }}){% endif %}</strong>).
+                </div>
+            {% elif dispute.status == 'resolved' %}
+                <div class="p-3 bg-gray-700/50 border border-gray-600 rounded-lg text-gray-400 text-sm">
+                    Voting controls are disabled because this dispute has been resolved.
+                </div>
+            {% endif %}
         </div>
     </div>
 
