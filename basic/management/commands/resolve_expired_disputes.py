@@ -4,9 +4,10 @@ from django.utils import timezone
 from django.db import transaction
 from django.urls import reverse
 from basic.models import Dispute, RewardLedger, Notification
+from basic.services.dispute import DisputeService
 
 class Command(BaseCommand):
-    help = 'Resolves expired open disputes, refunds/forfeits escrowed bonds, and settles task points.'
+    help = 'Resolves expired open disputes and finalizes uncontested tier-1 rulings post appeal window.'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -21,18 +22,21 @@ class Command(BaseCommand):
         now = timezone.now()
         expiry_threshold = now - timedelta(days=days)
 
-        # Find open disputes created before the expiration window
+        # 1. Process open disputes past expiration threshold (excluding active appeals or tier1_resolved)
         expired_disputes = Dispute.objects.filter(status='open', created_at__lte=expiry_threshold)
 
         count = 0
         for dispute in expired_disputes:
+            # Skip if dispute has an active appeal or is in appealed status
+            if dispute.status == 'appealed' or hasattr(dispute, 'appeal'):
+                continue
+
             task = dispute.task
             with transaction.atomic():
                 dispute.status = 'resolved'
                 dispute.save()
 
                 if dispute.raised_by == task.posted_by:
-                    # Poster challenged an unresponsive taker: cancel task, refund task reward, forfeit bond
                     poster_profile = task.posted_by.userprofile
                     poster_profile.rewards += task.reward
                     poster_profile.save()
@@ -48,11 +52,9 @@ class Command(BaseCommand):
                         description=f"Refund for expired dispute on task: '{task.title}'"
                     )
 
-                    # Handle escrow bond refund / forfeiture
                     if dispute.escrow_status == 'held':
                         dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
                 else:
-                    # Taker raised dispute: award reward to taker, complete task, and refund bond
                     if task.taken_by:
                         taker_profile = task.taken_by.userprofile
                         taker_profile.rewards += task.reward
@@ -71,7 +73,6 @@ class Command(BaseCommand):
                     if dispute.escrow_status == 'held':
                         dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
 
-                # Notify participants
                 participants = [task.posted_by]
                 if task.taken_by and task.taken_by not in participants:
                     participants.append(task.taken_by)
@@ -84,6 +85,18 @@ class Command(BaseCommand):
                         link=dispute_link
                     )
 
+                count += 1
+
+        # 2. Finalize uncontested tier1_resolved disputes past 48-hour appeal window
+        appeal_window_threshold = now - timedelta(hours=48)
+        uncontested_disputes = Dispute.objects.filter(
+            status='tier1_resolved',
+            verdict_published_at__lte=appeal_window_threshold
+        )
+
+        for dispute in uncontested_disputes:
+            if not hasattr(dispute, 'appeal'):
+                DisputeService.finalize_uncontested_dispute(dispute)
                 count += 1
 
         self.stdout.write(self.style.SUCCESS(f"Successfully processed {count} expired dispute(s)."))

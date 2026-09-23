@@ -13,16 +13,63 @@
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' or dispute.status == 'voting' %}bg-yellow-500/20 text-yellow-300{% elif dispute.status == 'appealed' %}bg-purple-500/20 text-purple-300{% elif dispute.status == 'tier1_resolved' %}bg-blue-500/20 text-blue-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            {% if dispute.primary_verdict %}
+                <p><strong>Primary Verdict:</strong> {{ dispute.get_primary_verdict_display }} Favored</p>
+            {% endif %}
+            {% if dispute.final_verdict %}
+                <p><strong>Final Verdict:</strong> {{ dispute.get_final_verdict_display }} Favored</p>
+            {% endif %}
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if active_assignment %}
+        <!-- Juror Voting Panel -->
+        <div class="bg-gray-800 p-6 rounded-lg border border-cyan-500/50">
+            <h3 class="text-xl font-bold text-cyan-300 mb-2">Juror Arbitration - Cast Your Vote (Tier {{ active_assignment.tier }})</h3>
+            <p class="text-sm text-gray-300 mb-4">Please review the task details and evidence, then cast your vote to resolve this dispute.</p>
+            <form action="{% url 'cast_juror_vote' dispute.id %}" method="POST" class="flex gap-4">
+                {% csrf_token %}
+                <button type="submit" name="vote" value="poster" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors">Favor Task Poster ({{ task.posted_by.username }})</button>
+                <button type="submit" name="vote" value="taker" class="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors">Favor Task Taker ({{ task.taken_by.username }})</button>
+            </form>
+        </div>
+        {% endif %}
+
+        {% if can_appeal %}
+        <!-- Litigant Appeal Form -->
+        <div class="bg-gray-800 p-6 rounded-lg border border-purple-500/50">
+            <h3 class="text-xl font-bold text-purple-300 mb-2">Contest Primary Ruling - Submit Appeal</h3>
+            <p class="text-sm text-gray-300 mb-4">You have 48 hours to appeal the primary ruling. Escrowed stake bond required: <strong>{{ task.deposit_bond_amount }} points</strong>.</p>
+            <form action="{% url 'appeal_dispute' dispute.id %}" method="POST" class="space-y-4">
+                {% csrf_token %}
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-1">Reason for Appeal</label>
+                    <textarea name="reason" rows="3" required class="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-purple-500" placeholder="Provide clear evidence or reasons challenging the primary verdict..."></textarea>
+                </div>
+                <button type="submit" class="px-6 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg transition-colors">Deposit Appeal Stake & Submit Appeal</button>
+            </form>
+        </div>
+        {% endif %}
+
+        {% if appeal %}
+        <!-- Appeal Information -->
+        <div class="bg-gray-800 p-6 rounded-lg border border-gray-700">
+            <h3 class="text-xl font-bold text-purple-400 mb-2">Dispute Appeal Details</h3>
+            <p><strong>Appellant:</strong> {{ appeal.appellant.username }}</p>
+            <p><strong>Appeal Stake:</strong> {{ appeal.stake_amount }} points</p>
+            <p><strong>Appeal Status:</strong> <span class="capitalize text-purple-300 font-semibold">{{ appeal.status }}</span></p>
+            <p><strong>Appeal Reason:</strong></p>
+            <p class="bg-gray-900/50 p-3 rounded-lg border border-gray-700 mt-1">{{ appeal.reason|linebreaksbr }}</p>
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}
