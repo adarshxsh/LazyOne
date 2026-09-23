@@ -21,6 +21,15 @@ class Command(BaseCommand):
         now = timezone.now()
         expiry_threshold = now - timedelta(days=days)
 
+        # Process active disputes with phase deadlines
+        active_disputes = Dispute.objects.filter(status='open')
+        phase_advanced_count = 0
+        for dispute in active_disputes:
+            old_phase = dispute.voting_phase
+            new_phase = dispute.get_current_phase()
+            if old_phase != new_phase:
+                phase_advanced_count += 1
+
         # Find open disputes created before the expiration window
         expired_disputes = Dispute.objects.filter(status='open', created_at__lte=expiry_threshold)
 

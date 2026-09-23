@@ -14,6 +14,11 @@
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
             <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Voting Phase:</strong> 
+                <span id="voting-phase-badge" class="px-2 py-1 text-sm rounded-full bg-cyan-500/20 text-cyan-300 font-semibold uppercase">
+                    {{ current_phase }} Phase
+                </span>
+            </p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
@@ -23,6 +28,202 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <!-- Cryptographic Dispute Voting Section -->
+        <div class="bg-gray-800/80 p-6 rounded-xl border border-gray-700 space-y-4" id="voting-section">
+            <h3 class="text-2xl font-bold text-cyan-400">Cryptographic Dispute Voting</h3>
+
+            {% if current_phase == 'commit' %}
+                <div class="p-4 bg-blue-900/30 border border-blue-500/40 rounded-lg text-blue-200">
+                    <p class="font-semibold mb-1">Commit Phase Active</p>
+                    <p class="text-sm">Vote selections are hidden using SHA-256 cryptographic commitments. No vote counts or choices are visible during this phase.</p>
+                </div>
+
+                {% if can_vote %}
+                    {% if has_committed %}
+                        <div class="p-4 bg-green-900/30 border border-green-500/40 rounded-lg text-green-200">
+                            <p class="font-semibold text-lg">Commitment Received</p>
+                            <p class="text-sm mt-1">Your vote commitment hash has been recorded. Please retain your secret salt to reveal your vote when the reveal window opens.</p>
+                            <p class="text-xs font-mono mt-2 bg-black/40 p-2 rounded text-green-300 break-all">
+                                Commitment Hash: {{ user_commitment.commitment_hash }}
+                            </p>
+                        </div>
+                    {% else %}
+                        <form method="POST" action="{% url 'commit_dispute_vote' dispute.id %}" id="commit-form" class="space-y-4">
+                            {% csrf_token %}
+                            <div>
+                                <label class="block text-sm font-medium text-gray-200 mb-2">Select Your Juror Vote Choice:</label>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <label class="flex items-center p-3 bg-gray-900/60 border border-gray-700 rounded-lg cursor-pointer hover:border-cyan-500">
+                                        <input type="radio" name="vote_choice" value="poster" class="text-cyan-500 focus:ring-cyan-400" required>
+                                        <span class="ml-2 font-medium text-white">Favor Poster ({{ task.posted_by.username }})</span>
+                                    </label>
+                                    <label class="flex items-center p-3 bg-gray-900/60 border border-gray-700 rounded-lg cursor-pointer hover:border-cyan-500">
+                                        <input type="radio" name="vote_choice" value="taker" class="text-cyan-500 focus:ring-cyan-400" required>
+                                        <span class="ml-2 font-medium text-white">Favor Taker ({{ task.taken_by.username }})</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label for="secret-salt" class="block text-sm font-medium text-gray-200 mb-1">Secret Salt (Auto-generated client-side):</label>
+                                <div class="flex space-x-2">
+                                    <input type="text" id="secret-salt" name="salt" class="w-full bg-gray-900 border border-gray-700 text-white rounded p-2 text-sm font-mono" readonly>
+                                    <button type="button" id="re-gen-salt" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-xs rounded text-white">Generate</button>
+                                </div>
+                            </div>
+
+                            <input type="hidden" name="commitment_hash" id="commitment-hash-input">
+                            <p class="text-xs text-gray-400 font-mono break-all" id="hash-preview">SHA-256 Hash: Pending choice...</p>
+
+                            <button type="submit" id="submit-commit-btn" class="w-full py-3 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg transition shadow-lg">
+                                Submit Cryptographic Vote Commitment
+                            </button>
+                        </form>
+                    {% endif %}
+                {% else %}
+                    <p class="text-sm text-gray-400">You are not an assigned juror for this dispute.</p>
+                {% endif %}
+
+            {% elif current_phase == 'reveal' %}
+                <div class="p-4 bg-amber-900/30 border border-amber-500/40 rounded-lg text-amber-200">
+                    <p class="font-semibold mb-1">Reveal Phase Active</p>
+                    <p class="text-sm">Please submit your original vote choice and secret salt to verify and record your vote. Tallies remain hidden until the reveal window closes.</p>
+                </div>
+
+                {% if can_vote %}
+                    {% if has_revealed %}
+                        <div class="p-4 bg-green-900/30 border border-green-500/40 rounded-lg text-green-200">
+                            <p class="font-semibold text-lg">Vote Revealed & Verified</p>
+                            <p class="text-sm mt-1">Your revealed vote has been cryptographically verified against your original commitment.</p>
+                        </div>
+                    {% elif has_committed %}
+                        <form method="POST" action="{% url 'reveal_dispute_vote' dispute.id %}" id="reveal-form" class="space-y-4">
+                            {% csrf_token %}
+                            <div>
+                                <label class="block text-sm font-medium text-gray-200 mb-2">Original Vote Choice:</label>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <label class="flex items-center p-3 bg-gray-900/60 border border-gray-700 rounded-lg cursor-pointer hover:border-cyan-500">
+                                        <input type="radio" name="vote_choice" value="poster" class="text-cyan-500 focus:ring-cyan-400" required>
+                                        <span class="ml-2 font-medium text-white">Favor Poster ({{ task.posted_by.username }})</span>
+                                    </label>
+                                    <label class="flex items-center p-3 bg-gray-900/60 border border-gray-700 rounded-lg cursor-pointer hover:border-cyan-500">
+                                        <input type="radio" name="vote_choice" value="taker" class="text-cyan-500 focus:ring-cyan-400" required>
+                                        <span class="ml-2 font-medium text-white">Favor Taker ({{ task.taken_by.username }})</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label for="reveal-salt" class="block text-sm font-medium text-gray-200 mb-1">Enter Secret Salt:</label>
+                                <input type="text" id="reveal-salt" name="salt" class="w-full bg-gray-900 border border-gray-700 text-white rounded p-2 text-sm font-mono" placeholder="Paste your secret salt here..." required>
+                            </div>
+
+                            <button type="submit" class="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg transition shadow-lg">
+                                Submit Vote Reveal
+                            </button>
+                        </form>
+                    {% else %}
+                        <p class="text-sm text-yellow-400">You did not submit a vote commitment during the Commit Phase.</p>
+                    {% endif %}
+                {% endif %}
+
+            {% elif current_phase == 'finished' %}
+                <div class="p-4 bg-gray-900/80 border border-gray-700 rounded-lg space-y-3">
+                    <h4 class="text-lg font-semibold text-green-400">Final Dispute Resolution & Tally</h4>
+                    {% if tallies %}
+                        <div class="grid grid-cols-2 gap-4 my-2">
+                            <div class="p-3 bg-gray-800 rounded border border-gray-700 text-center">
+                                <span class="text-sm text-gray-400 block">Poster Votes</span>
+                                <span class="text-2xl font-bold text-white">{{ tallies.poster }}</span>
+                            </div>
+                            <div class="p-3 bg-gray-800 rounded border border-gray-700 text-center">
+                                <span class="text-sm text-gray-400 block">Taker Votes</span>
+                                <span class="text-2xl font-bold text-white">{{ tallies.taker }}</span>
+                            </div>
+                        </div>
+                        <p class="text-sm text-gray-300">Total Valid Revealed Votes: <strong class="text-cyan-300">{{ tallies.total }}</strong></p>
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
     </div>
+
+    <!-- Client-side SHA-256 Hashing & Automatic Salt Generation -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const userId = "{{ user.id }}";
+            const saltInput = document.getElementById('secret-salt');
+            const regenBtn = document.getElementById('re-gen-salt');
+            const hashInput = document.getElementById('commitment-hash-input');
+            const hashPreview = document.getElementById('hash-preview');
+            const commitForm = document.getElementById('commit-form');
+
+            function generateSalt() {
+                const array = new Uint8Array(16);
+                window.crypto.getRandomValues(array);
+                return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+            }
+
+            async function computeSha256(str) {
+                const encoder = new TextEncoder();
+                const data = encoder.encode(str);
+                const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            }
+
+            if (saltInput) {
+                const storedSalt = localStorage.getItem('dispute_salt_{{ dispute.id }}') || generateSalt();
+                saltInput.value = storedSalt;
+                localStorage.setItem('dispute_salt_{{ dispute.id }}', storedSalt);
+
+                if (regenBtn) {
+                    regenBtn.addEventListener('click', function() {
+                        const newSalt = generateSalt();
+                        saltInput.value = newSalt;
+                        localStorage.setItem('dispute_salt_{{ dispute.id }}', newSalt);
+                        updateHash();
+                    });
+                }
+            }
+
+            async function updateHash() {
+                const selected = document.querySelector('input[name="vote_choice"]:checked');
+                if (selected && saltInput) {
+                    const choice = selected.value;
+                    const salt = saltInput.value;
+                    const plainStr = `${choice}:${salt}:${userId}`;
+                    const hashVal = await computeSha256(plainStr);
+                    if (hashInput) hashInput.value = hashVal;
+                    if (hashPreview) hashPreview.innerText = `SHA-256 Commitment Hash: ${hashVal}`;
+                }
+            }
+
+            if (commitForm) {
+                commitForm.querySelectorAll('input[name="vote_choice"]').forEach(radio => {
+                    radio.addEventListener('change', updateHash);
+                });
+
+                commitForm.addEventListener('submit', async function(e) {
+                    if (!hashInput.value) {
+                        e.preventDefault();
+                        await updateHash();
+                        if (hashInput.value) {
+                            commitForm.submit();
+                        }
+                    }
+                });
+            }
+
+            const revealSaltInput = document.getElementById('reveal-salt');
+            if (revealSaltInput) {
+                const savedSalt = localStorage.getItem('dispute_salt_{{ dispute.id }}');
+                if (savedSalt) {
+                    revealSaltInput.value = savedSalt;
+                }
+            }
+        });
+    </script>
 
 {% endblock %}
