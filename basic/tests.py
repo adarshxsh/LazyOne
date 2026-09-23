@@ -113,7 +113,7 @@ class DisputeDepositBondTests(TestCase):
 
         dispute.refresh_from_db()
         self.assertEqual(dispute.escrow_status, 'refunded')
-        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.status, 'withdrawn')
 
         # Balance restored: 40 + 60 = 100
         self.taker_profile.refresh_from_db()
@@ -123,6 +123,102 @@ class DisputeDepositBondTests(TestCase):
         ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_refund').first()
         self.assertIsNotNone(ledger)
         self.assertEqual(ledger.amount, 60)
+
+    def test_poster_raise_dispute_success(self):
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Incomplete work by taker'}
+        )
+
+        # Poster deposit bond is 60. Poster balance was 1000 -> now 940
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 940)
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertEqual(dispute.deposit_amount, 60)
+        self.assertEqual(dispute.escrow_status, 'held')
+        self.assertEqual(dispute.status, 'open')
+        self.assertEqual(dispute.raised_by, self.poster)
+
+    def test_unauthorized_user_raise_dispute(self):
+        other_user = User.objects.create_user(username='other', password='password123')
+        UserProfile.objects.create(user=other_user, rewards=500)
+        self.client.login(username='other', password='password123')
+
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Unrelated dispute'}
+        )
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+        self.assertFalse(Dispute.objects.filter(task=self.task).exists())
+
+    def test_poster_withdraw_dispute(self):
+        self.client.login(username='poster', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Poster dispute'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.escrow_status, 'refunded')
+        self.assertEqual(dispute.status, 'withdrawn')
+
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1000)
+
+    def test_admin_withdraw_dispute(self):
+        # Taker raises dispute
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Dispute reason'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+
+        # Admin logs in and withdraws dispute
+        admin_user = User.objects.create_superuser(username='admin', password='password123', email='admin@test.com')
+        UserProfile.objects.create(user=admin_user, rewards=1000)
+        self.client.login(username='admin', password='password123')
+
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'withdrawn')
+
+    def test_unauthorized_user_withdraw_dispute(self):
+        # Taker raises dispute
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Dispute reason'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+
+        # Other non-raiser, non-admin user attempts withdrawal
+        other_user = User.objects.create_user(username='other_user', password='password123')
+        UserProfile.objects.create(user=other_user, rewards=500)
+        self.client.login(username='other_user', password='password123')
+
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'open')
 
     def test_complete_disputed_task_refunds_deposit(self):
         # Taker raises dispute (deposit 60 deducted from 100 -> 40 left)
