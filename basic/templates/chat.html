@@ -37,12 +37,19 @@
         <p id="loading-messages" class="text-center text-gray-400">Loading chat...</p>
     </div>
 
+    {% if is_read_only %}
+    <div class="mt-4 p-4 bg-gray-800 border border-cyan-500/30 rounded-xl text-cyan-200 text-sm flex items-center">
+        <svg class="w-5 h-5 mr-2 text-cyan-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span><strong>Read-Only Evidence Review:</strong> You are viewing this task conversation as an assigned dispute juror. Message posting is disabled in evidence review mode.</span>
+    </div>
+    {% else %}
     <form class="mt-4 flex items-center space-x-3" id="message-form">
         <input type="text" id="message-input" placeholder="Type your message..." autocomplete="off" required class="flex-grow w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-full text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
         <button type="submit" id="message-submit" title="Send Message" class="flex-shrink-0 bg-cyan-500 hover:bg-cyan-600 text-white font-bold rounded-full h-12 w-12 flex items-center justify-center transition-colors">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
         </button>
     </form>
+    {% endif %}
 </div>
 
 <!-- Firebase SDKs -->
@@ -75,7 +82,7 @@
         const messageSubmitButton = document.getElementById('message-submit');
         const loadingIndicator = document.getElementById('loading-messages');
 
-        messageInput.focus();
+        if (messageInput) messageInput.focus();
 
         // --- Firestore Real-Time Listener ---
         const messagesRef = db.collection('conversations').doc(conversationId).collection('messages').orderBy('timestamp');
@@ -93,14 +100,16 @@
         });
 
         // --- Form Submission ---
-        messageForm.addEventListener('submit', e => {
-            e.preventDefault();
-            const messageContent = messageInput.value;
-            if (messageContent.trim() === '' || messageSubmitButton.disabled) return;
-            
-            sendMessage(messageContent);
-            messageInput.value = '';
-        });
+        if (messageForm) {
+            messageForm.addEventListener('submit', e => {
+                e.preventDefault();
+                const messageContent = messageInput.value;
+                if (messageContent.trim() === '' || messageSubmitButton.disabled) return;
+                
+                sendMessage(messageContent);
+                messageInput.value = '';
+            });
+        }
 
         function sendMessage(content) {
             messageSubmitButton.disabled = true;
