@@ -1,8 +1,9 @@
+import os
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, DisputeEvidence, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -13,11 +14,76 @@ def dispute_detail_view(request, dispute_id):
     if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+    evidences = dispute.evidence.all()
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'evidences': evidences,
     }
     return render(request, 'dispute_detail.html', context)
+
+@login_required(login_url='/login/')
+@require_POST
+def upload_dispute_evidence(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+
+    if request.user != task.posted_by and request.user != task.taken_by and request.user != dispute.raised_by and not request.user.is_staff:
+        messages.error(request, "You are not authorized to upload evidence for this dispute.")
+        return redirect('home')
+
+    if dispute.status != 'open':
+        messages.error(request, "Cannot upload evidence to a closed or resolved dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    files = request.FILES.getlist('files') or request.FILES.getlist('file')
+    if not files and 'file' in request.FILES:
+        files = [request.FILES['file']]
+
+    if not files:
+        messages.error(request, "No files selected for upload.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    description = request.POST.get('description', '').strip()
+    evidence_type_param = request.POST.get('evidence_type', '').strip()
+
+    uploaded_count = 0
+    with transaction.atomic():
+        for f in files:
+            ext = os.path.splitext(f.name)[1].lower()
+            if evidence_type_param in ['screenshot', 'document', 'proof', 'other']:
+                evidence_type = evidence_type_param
+            elif ext in ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']:
+                evidence_type = 'screenshot'
+            elif ext in ['.pdf', '.txt', '.doc', '.docx', '.csv', '.rtf']:
+                evidence_type = 'document'
+            else:
+                evidence_type = 'proof'
+
+            DisputeEvidence.objects.create(
+                dispute=dispute,
+                uploaded_by=request.user,
+                file=f,
+                description=description,
+                evidence_type=evidence_type
+            )
+            uploaded_count += 1
+
+        recipient = None
+        if request.user == task.posted_by:
+            recipient = task.taken_by
+        elif request.user == task.taken_by:
+            recipient = task.posted_by
+
+        if recipient and recipient != request.user:
+            Notification.objects.create(
+                recipient=recipient,
+                message=f"{request.user.username} uploaded evidence for dispute on task: '{task.title}'.",
+                link=reverse('dispute_detail', args=[dispute.id])
+            )
+
+    messages.success(request, f"Successfully uploaded {uploaded_count} evidence file(s).")
+    return redirect('dispute_detail', dispute_id=dispute.id)
 
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
