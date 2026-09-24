@@ -3,7 +3,9 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from django.core.management import call_command
+from .models import UserProfile, Task, Dispute, DisputeAuditEvent, Notification, RewardLedger, Conversation
+from .services.dispute import DisputeService
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +183,139 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class DisputeAuditEventAndNotificationTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        self.juror = User.objects.create_user(username='juror1', password='password123')
+        self.juror_profile = UserProfile.objects.create(user=self.juror, rewards=500)
+
+        self.unauthorized_user = User.objects.create_user(username='outsider', password='password123')
+        UserProfile.objects.create(user=self.unauthorized_user, rewards=500)
+
+        self.staff_user = User.objects.create_superuser(username='admin', password='password123', email='admin@example.com')
+
+        self.task = Task.objects.create(
+            title="Disputed Audit Task",
+            description="Testing audit logs and notifications",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=timezone.now() + timedelta(days=2)
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_audit_event_immutability(self):
+        dispute = DisputeService.raise_dispute(self.task, self.taker, "Work unverified")
+        event = DisputeAuditEvent.objects.filter(dispute=dispute).first()
+        self.assertIsNotNone(event)
+
+        # Attempting to save/update an existing event must raise ValueError
+        with self.assertRaises(ValueError):
+            event.event_type = 'modified_event'
+            event.save()
+
+        # Attempting to delete an audit event record must raise ValueError
+        with self.assertRaises(ValueError):
+            event.delete()
+
+    def test_multi_party_notifications_on_raise(self):
+        dispute = DisputeService.raise_dispute(self.task, self.taker, "Quality issue")
+        dispute.jurors.add(self.juror)
+
+        # Re-trigger an audit event to verify assigned juror gets notified
+        DisputeService.log_audit_event(
+            dispute=dispute,
+            event_type='evidence_submitted',
+            actor=self.taker,
+            details={'evidence': 'photo.png'},
+            message=f"New evidence submitted for dispute on task '{self.task.title}'"
+        )
+
+        # Check notifications for poster, taker, and juror
+        poster_notifs = Notification.objects.filter(recipient=self.poster)
+        taker_notifs = Notification.objects.filter(recipient=self.taker)
+        juror_notifs = Notification.objects.filter(recipient=self.juror)
+
+        self.assertTrue(poster_notifs.exists())
+        self.assertTrue(taker_notifs.exists())
+        self.assertTrue(juror_notifs.exists())
+
+        # Verify notification links point to dispute detail
+        dispute_url = reverse('dispute_detail', args=[dispute.id])
+        self.assertEqual(poster_notifs.first().link, dispute_url)
+        self.assertEqual(juror_notifs.first().link, dispute_url)
+
+    def test_dispute_detail_authorization(self):
+        dispute = DisputeService.raise_dispute(self.task, self.taker, "Reason")
+        dispute.jurors.add(self.juror)
+
+        dispute_url = reverse('dispute_detail', args=[dispute.id])
+
+        # Litigants (poster, taker) can access
+        self.client.login(username='poster', password='password123')
+        res = self.client.get(dispute_url)
+        self.assertEqual(res.status_code, 200)
+
+        self.client.login(username='taker', password='password123')
+        res = self.client.get(dispute_url)
+        self.assertEqual(res.status_code, 200)
+
+        # Assigned juror can access
+        self.client.login(username='juror1', password='password123')
+        res = self.client.get(dispute_url)
+        self.assertEqual(res.status_code, 200)
+
+        # Staff can access
+        self.client.login(username='admin', password='password123')
+        res = self.client.get(dispute_url)
+        self.assertEqual(res.status_code, 200)
+
+        # Unauthorized user is redirected to home
+        self.client.login(username='outsider', password='password123')
+        res = self.client.get(dispute_url)
+        self.assertRedirects(res, reverse('home'))
+
+    def test_resolve_dispute_service_and_audit_event(self):
+        dispute = DisputeService.raise_dispute(self.task, self.taker, "Reason")
+
+        # Resolve favoring poster
+        DisputeService.resolve_dispute(dispute, self.staff_user, 'posted_by')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'cancelled')
+
+        # Verify audit log entry
+        resolved_event = DisputeAuditEvent.objects.filter(dispute=dispute, event_type='dispute_resolved').first()
+        self.assertIsNotNone(resolved_event)
+        self.assertEqual(resolved_event.actor, self.staff_user)
+        self.assertEqual(resolved_event.details_json.get('outcome'), 'posted_by')
+
+    def test_resolve_expired_disputes_command_creates_audit_event(self):
+        dispute = DisputeService.raise_dispute(self.task, self.taker, "Unresponsive")
+        # Backdate creation time beyond SLA (e.g. 8 days ago)
+        dispute.created_at = timezone.now() - timedelta(days=8)
+        dispute.save()
+
+        call_command('resolve_expired_disputes', days=7)
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+
+        expired_event = DisputeAuditEvent.objects.filter(dispute=dispute, event_type='dispute_expired').first()
+        self.assertIsNotNone(expired_event)
+        self.assertIsNone(expired_event.actor)  # System action
+
 

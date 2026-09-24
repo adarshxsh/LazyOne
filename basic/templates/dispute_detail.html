@@ -13,16 +13,65 @@
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% elif dispute.status == 'withdrawn' %}bg-gray-500/20 text-gray-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y H:i" }}</p>
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
-    </div>
 
+        {% if dispute.jurors.all %}
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400">Assigned Jurors</h3>
+            <ul class="list-disc list-inside bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-1">
+                {% for juror in dispute.jurors.all %}
+                    <li>{{ juror.username }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        {% if dispute.status == 'open' and is_staff %}
+        <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Resolve Dispute (Staff Action)</h3>
+            <form action="{% url 'resolve_dispute' dispute.id %}" method="POST" class="flex gap-4">
+                {% csrf_token %}
+                <button type="submit" name="outcome" value="posted_by" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded font-semibold transition-colors">
+                    Favor Poster (Cancel Task & Refund)
+                </button>
+                <button type="submit" name="outcome" value="taken_by" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded font-semibold transition-colors">
+                    Favor Taker (Complete Task & Award)
+                </button>
+            </form>
+        </div>
+        {% endif %}
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-3">Audit Log & Event History</h3>
+            {% if audit_events %}
+                <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 divide-y divide-gray-800 space-y-3">
+                    {% for event in audit_events %}
+                        <div class="pt-3 first:pt-0">
+                            <div class="flex justify-between items-center">
+                                <span class="font-bold text-cyan-300">{{ event.event_type }}</span>
+                                <span class="text-xs text-gray-400">{{ event.timestamp|date:"M d, Y H:i:s" }}</span>
+                            </div>
+                            <p class="text-sm text-gray-300 mt-1">
+                                Actor: <span class="font-medium text-white">{% if event.actor %}{{ event.actor.username }}{% else %}System{% endif %}</span>
+                            </p>
+                            {% if event.details_json %}
+                                <pre class="text-xs bg-gray-950 p-2 rounded mt-2 text-gray-400 overflow-x-auto">{{ event.details_json }}</pre>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-gray-500 italic">No audit events recorded yet.</p>
+            {% endif %}
+        </div>
+    </div>
 {% endblock %}
