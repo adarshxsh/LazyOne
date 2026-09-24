@@ -68,11 +68,15 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('counter_dispute_deposit', 'Counter Dispute Deposit Bond Held'),
+        ('juror_stake', 'Juror Vote Stake Deducted'),
+        ('juror_slash', 'Juror Vote Stake Slashed'),
+        ('juror_reward', 'Juror Vote Reward Payout'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=30, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -82,6 +86,8 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('pending_counter_deposit', 'Pending Counter-Deposit'),
+        ('active_voting', 'Active Voting'),
         ('resolved', 'Resolved'),
     )
     ESCROW_STATUS_CHOICES = (
@@ -92,8 +98,10 @@ class Dispute(models.Model):
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='pending_counter_deposit')
     deposit_amount = models.PositiveIntegerField(default=0)
+    initiator_deposit_amount = models.PositiveIntegerField(default=0)
+    counter_deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -141,6 +149,19 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class DisputeVote(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    voted_for = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes_received')
+    stake_amount = models.PositiveIntegerField(default=50)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'voter')
+
+    def __str__(self):
+        return f"Vote by {self.voter.username} for {self.voted_for.username} on Dispute {self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
