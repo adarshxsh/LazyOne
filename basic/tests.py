@@ -182,3 +182,230 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class JurySelectionAndVotingTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Create staff user
+        self.staff_user = User.objects.create_user(username='staff', password='password123', is_staff=True)
+
+        # Poster and Taker
+        self.poster = User.objects.create_user(username='poster_juror', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker_juror', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        # Poster friend via UserProfile.friends
+        self.poster_friend = User.objects.create_user(username='poster_friend', password='password123')
+        self.poster_friend_profile = UserProfile.objects.create(user=self.poster_friend, rewards=500)
+        self.poster_profile.friends.add(self.poster_friend_profile)
+
+        # Taker friend via Friendship
+        self.taker_friend = User.objects.create_user(username='taker_friend', password='password123')
+        self.taker_friend_profile = UserProfile.objects.create(user=self.taker_friend, rewards=500)
+        from .models import Friendship, FriendRequest, JuryPool, JurorAssignment, Notification
+        Friendship.objects.create(from_user=self.taker_profile, to_user=self.taker_friend_profile)
+
+        # Pending contact via FriendRequest
+        self.pending_user = User.objects.create_user(username='pending_user', password='password123')
+        self.pending_user_profile = UserProfile.objects.create(user=self.pending_user, rewards=500)
+        FriendRequest.objects.create(from_user=self.poster, to_user=self.pending_user)
+
+        # Neutral candidates
+        self.neutral_jurors = []
+        for i in range(5):
+            u = User.objects.create_user(username=f'neutral_juror_{i}', password='password123')
+            UserProfile.objects.create(user=u, rewards=500)
+            self.neutral_jurors.append(u)
+
+        # Task
+        self.task = Task.objects.create(
+            title="Juror Test Task",
+            description="Testing jury selection",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=timezone.now() + timedelta(days=2)
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_coi_exclusion_and_juror_assignment(self):
+        from .models import JuryPool, JurorAssignment, Notification
+        self.client.login(username='taker_juror', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work disputed by taker'}
+        )
+        self.assertEqual(response.status_code, 302)
+
+        dispute = Dispute.objects.get(task=self.task)
+        jury_pool = JuryPool.objects.get(dispute=dispute)
+        self.assertEqual(jury_pool.status, 'assigned')
+        self.assertEqual(jury_pool.target_size, 3)
+
+        assignments = jury_pool.assignments.all()
+        assigned_user_ids = {a.juror.id for a in assignments}
+
+        # Excluded users
+        excluded_ids = {
+            self.poster.id,
+            self.taker.id,
+            self.poster_friend.id,
+            self.taker_friend.id,
+            self.pending_user.id
+        }
+
+        # Verify 0 assigned jurors are in excluded set
+        self.assertEqual(len(assigned_user_ids.intersection(excluded_ids)), 0)
+        self.assertEqual(len(assigned_user_ids), 3)
+
+        # Verify notifications sent to assigned jurors
+        for juror in assignments:
+            notif = Notification.objects.filter(recipient=juror.juror, link=reverse('dispute_detail', args=[dispute.id])).first()
+            self.assertIsNotNone(notif)
+            self.assertIn("peer juror", notif.message)
+
+    def test_five_person_panel_selection(self):
+        from .models import JuryPool
+        self.client.login(username='taker_juror', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work disputed by taker', 'panel_size': '5'}
+        )
+        self.assertEqual(response.status_code, 302)
+
+        dispute = Dispute.objects.get(task=self.task)
+        jury_pool = JuryPool.objects.get(dispute=dispute)
+        self.assertEqual(jury_pool.status, 'assigned')
+        self.assertEqual(jury_pool.target_size, 5)
+        self.assertEqual(jury_pool.assignments.count(), 5)
+
+    def test_insufficient_jurors_handling(self):
+        from .models import JuryPool, Notification
+        # Create a new task where only 1 neutral user is available
+        small_task = Task.objects.create(
+            title="Small Task For Insufficient Jurors",
+            description="Desc",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=timezone.now() + timedelta(days=2)
+        )
+        Conversation.objects.create(task=small_task)
+
+        # Deactivate all neutral jurors except 1
+        for u in self.neutral_jurors[1:]:
+            u.is_active = False
+            u.save()
+
+        self.client.login(username='taker_juror', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[small_task.id]),
+            {'reason': 'Not enough jurors available'}
+        )
+
+        dispute = Dispute.objects.get(task=small_task)
+        jury_pool = JuryPool.objects.get(dispute=dispute)
+        self.assertEqual(jury_pool.status, 'insufficient_jurors')
+
+        # Staff user notified
+        staff_notif = Notification.objects.filter(recipient=self.staff_user, link=reverse('dispute_detail', args=[dispute.id])).first()
+        self.assertIsNotNone(staff_notif)
+
+    def test_dispute_detail_view_authorization(self):
+        from .models import JuryPool, JurorAssignment
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Detail view auth test',
+            deposit_amount=50,
+            escrow_status='held'
+        )
+        jury_pool = JuryPool.objects.create(dispute=dispute, target_size=3, status='assigned')
+        JurorAssignment.objects.create(jury_pool=jury_pool, juror=self.neutral_jurors[0])
+
+        # Unauthorized neutral user
+        self.client.login(username=self.neutral_jurors[1].username, password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertRedirects(response, reverse('home'))
+
+        # Assigned juror CAN view detail
+        self.client.login(username=self.neutral_jurors[0].username, password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Peer Jury Panel")
+
+    def test_juror_majority_voting_worker_wins(self):
+        from .models import JuryPool, JurorAssignment
+        # Raise dispute
+        self.client.login(username='taker_juror', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Disputed work'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        jury_pool = dispute.jury_pool
+        jurors = [a.juror for a in jury_pool.assignments.all()]
+
+        # Juror 1 votes for worker
+        self.client.login(username=jurors[0].username, password='password123')
+        res1 = self.client.post(reverse('submit_juror_vote', args=[dispute.id]), {'vote': 'worker'})
+        self.assertRedirects(res1, reverse('dispute_detail', args=[dispute.id]))
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'open')
+
+        # Juror 2 votes for worker -> majority 2/3 reached!
+        self.client.login(username=jurors[1].username, password='password123')
+        res2 = self.client.post(reverse('submit_juror_vote', args=[dispute.id]), {'vote': 'worker'})
+        self.assertRedirects(res2, reverse('dispute_detail', args=[dispute.id]))
+
+        dispute.refresh_from_db()
+        jury_pool.refresh_from_db()
+        self.task.refresh_from_db()
+
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.escrow_status, 'refunded')
+        self.assertEqual(jury_pool.status, 'resolved')
+        self.assertEqual(self.task.status, 'completed')
+
+        # Taker balance: 500 - 50 (deposit) + 50 (deposit refund) + 200 (task reward) = 700
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 700)
+
+    def test_juror_majority_voting_poster_wins(self):
+        from .models import JuryPool, JurorAssignment
+        # Raise dispute
+        self.client.login(username='taker_juror', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Disputed work'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        jury_pool = dispute.jury_pool
+        jurors = [a.juror for a in jury_pool.assignments.all()]
+
+        # Juror 1 votes for poster
+        self.client.login(username=jurors[0].username, password='password123')
+        self.client.post(reverse('submit_juror_vote', args=[dispute.id]), {'vote': 'poster'})
+
+        # Juror 2 votes for poster -> majority 2/3 reached!
+        self.client.login(username=jurors[1].username, password='password123')
+        self.client.post(reverse('submit_juror_vote', args=[dispute.id]), {'vote': 'poster'})
+
+        dispute.refresh_from_db()
+        jury_pool.refresh_from_db()
+        self.task.refresh_from_db()
+
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.escrow_status, 'forfeited')
+        self.assertEqual(jury_pool.status, 'resolved')
+        self.assertEqual(self.task.status, 'cancelled')
+
+        # Poster balance: 1000 + 50 (forfeited deposit bond) = 1050
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1050)
+

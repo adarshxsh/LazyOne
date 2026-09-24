@@ -23,6 +23,46 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if jury_pool %}
+        <div class="bg-gray-900/50 p-6 rounded-lg border border-gray-700 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Peer Jury Panel</h3>
+            <p><strong>Jury Panel Status:</strong> <span class="px-2 py-1 text-sm rounded-full bg-cyan-500/20 text-cyan-300">{{ jury_pool.get_status_display }}</span></p>
+
+            {% if jury_pool.status == 'insufficient_jurors' %}
+            <div class="p-4 bg-red-900/40 border border-red-500/50 rounded-lg text-red-200">
+                <strong>Notice:</strong> Insufficient conflict-free peer jurors were available to form a panel. This dispute has been escalated for staff review.
+            </div>
+            {% endif %}
+
+            {% if is_juror %}
+            <div class="mt-4 p-4 bg-gray-800 rounded-lg border border-gray-600">
+                <h4 class="text-lg font-semibold text-white mb-2">Juror Decision</h4>
+                {% if user_assignment.vote %}
+                    <p class="text-green-400">You submitted your vote: <strong>In favor of {{ user_assignment.get_vote_display }}</strong> on {{ user_assignment.voted_at|date:"F d, Y H:i" }}.</p>
+                {% elif dispute.status == 'open' %}
+                    <p class="text-gray-300 mb-4">You have been assigned as an unbiased juror for this dispute. Please review the task details and submit your binding vote:</p>
+                    <form method="POST" action="{% url 'submit_juror_vote' dispute.id %}" class="flex flex-wrap gap-4">
+                        {% csrf_token %}
+                        <button type="submit" name="vote" value="poster" class="px-5 py-2 rounded-lg text-white font-semibold bg-blue-600 hover:bg-blue-700 transition-colors">
+                            Vote in favor of Task Poster ({{ task.posted_by.username }})
+                        </button>
+                        <button type="submit" name="vote" value="worker" class="px-5 py-2 rounded-lg text-white font-semibold bg-green-600 hover:bg-green-700 transition-colors">
+                            Vote in favor of Task Worker ({{ task.taken_by.username }})
+                        </button>
+                    </form>
+                {% else %}
+                    <p class="text-gray-400">Voting is closed for this dispute.</p>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            <div class="mt-4">
+                <h4 class="text-md font-semibold text-gray-300">Voting Progress</h4>
+                <p class="text-sm text-gray-400">Votes Cast: {{ total_votes }} / {{ jury_pool.target_size }}</p>
+            </div>
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}

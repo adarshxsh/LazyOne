@@ -142,6 +142,37 @@ class Dispute(models.Model):
             self.escrow_status = 'forfeited'
             self.save()
 
+class JuryPool(models.Model):
+    STATUS_CHOICES = (
+        ('assigned', 'Assigned'),
+        ('resolved', 'Resolved'),
+        ('insufficient_jurors', 'Insufficient Jurors'),
+    )
+    dispute = models.OneToOneField(Dispute, on_delete=models.CASCADE, related_name='jury_pool')
+    target_size = models.PositiveIntegerField(default=3)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='assigned')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"JuryPool ({self.status}) for {self.dispute}"
+
+class JurorAssignment(models.Model):
+    VOTE_CHOICES = (
+        ('poster', 'Poster'),
+        ('worker', 'Worker'),
+    )
+    jury_pool = models.ForeignKey(JuryPool, on_delete=models.CASCADE, related_name='assignments')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='juror_assignments')
+    vote = models.CharField(max_length=20, choices=VOTE_CHOICES, null=True, blank=True)
+    voted_at = models.DateTimeField(null=True, blank=True)
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('jury_pool', 'juror')
+
+    def __str__(self):
+        return f"Juror {self.juror.username} assigned to {self.jury_pool}"
+
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
     to_user = models.ForeignKey(User, related_name='to_user', on_delete=models.CASCADE)

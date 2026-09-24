@@ -95,6 +95,9 @@ def complete_task(request, task_id):
             )
             task.dispute.status = 'resolved'
             task.dispute.save()
+            if hasattr(task.dispute, 'jury_pool') and task.dispute.jury_pool:
+                task.dispute.jury_pool.status = 'resolved'
+                task.dispute.jury_pool.save()
 
         RewardLedger.objects.create(
             user=task.taken_by, task=task, amount=task.reward,
