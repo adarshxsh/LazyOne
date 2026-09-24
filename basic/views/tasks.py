@@ -89,10 +89,34 @@ def complete_task(request, task_id):
         task.status = 'completed'
         task.save()
 
-        if hasattr(task, 'dispute') and task.dispute.status == 'open':
+        if hasattr(task, 'dispute') and task.dispute.status != 'resolved':
             task.dispute.refund_deposit(
                 reason_description=f"Security deposit bond refunded upon dispute resolution for task: '{task.title}'"
             )
+            if task.dispute.counter_deposit_amount > 0:
+                responder = task.posted_by if task.dispute.raised_by == task.taken_by else task.taken_by
+                responder_profile = responder.userprofile
+                responder_profile.rewards += task.dispute.counter_deposit_amount
+                responder_profile.save()
+                RewardLedger.objects.create(
+                    user=responder,
+                    task=task,
+                    amount=task.dispute.counter_deposit_amount,
+                    transaction_type='dispute_refund',
+                    description=f"Counter-deposit bond refunded upon task completion for task: '{task.title}'"
+                )
+            # Refund juror stakes if any
+            for v in task.dispute.votes.all():
+                voter_profile = v.voter.userprofile
+                voter_profile.rewards += v.stake_amount
+                voter_profile.save()
+                RewardLedger.objects.create(
+                    user=v.voter,
+                    task=task,
+                    amount=v.stake_amount,
+                    transaction_type='dispute_refund',
+                    description=f"Juror stake refunded due to completed task dispute on: '{task.title}'"
+                )
             task.dispute.status = 'resolved'
             task.dispute.save()
 
