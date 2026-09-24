@@ -89,7 +89,7 @@ def complete_task(request, task_id):
         task.status = 'completed'
         task.save()
 
-        if hasattr(task, 'dispute') and task.dispute.status == 'open':
+        if hasattr(task, 'dispute') and task.dispute.status != 'resolved':
             task.dispute.refund_deposit(
                 reason_description=f"Security deposit bond refunded upon dispute resolution for task: '{task.title}'"
             )

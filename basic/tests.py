@@ -1,9 +1,176 @@
+import hashlib
 from django.test import TestCase, Client
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, DisputeVote, Notification
+
+
+class CommitRevealDisputeJuryVotingTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        self.j1 = User.objects.create_user(username='jury1', password='password123')
+        self.j1_profile = UserProfile.objects.create(user=self.j1, rewards=200)
+
+        self.j2 = User.objects.create_user(username='jury2', password='password123')
+        self.j2_profile = UserProfile.objects.create(user=self.j2, rewards=200)
+
+        self.j3 = User.objects.create_user(username='jury3', password='password123')
+        self.j3_profile = UserProfile.objects.create(user=self.j3, rewards=200)
+
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="Jury Test Task",
+            description="Jury Test Description",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=self.deadline
+        )
+        Conversation.objects.create(task=self.task)
+
+        # Taker raises dispute
+        self.client.login(username='taker', password='password123')
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Unfinished work dispute'})
+        self.dispute = Dispute.objects.get(task=self.task)
+
+    def test_dispute_parties_cannot_vote_as_jury(self):
+        # Poster attempts to vote as jury
+        self.client.login(username='poster', password='password123')
+        res = self.client.post(
+            reverse('commit_vote', args=[self.dispute.id]),
+            {'vote': 'poster', 'salt': 'postersalt'}
+        )
+        self.assertFalse(DisputeVote.objects.filter(dispute=self.dispute, voter=self.poster).exists())
+
+        # Taker attempts to vote as jury
+        self.client.login(username='taker', password='password123')
+        res = self.client.post(
+            reverse('commit_vote', args=[self.dispute.id]),
+            {'vote': 'taker', 'salt': 'takersalt'}
+        )
+        self.assertFalse(DisputeVote.objects.filter(dispute=self.dispute, voter=self.taker).exists())
+
+    def test_commit_phase_stores_only_hash_and_prevents_duplicates(self):
+        self.client.login(username='jury1', password='password123')
+        vote_choice = 'poster'
+        salt = 'secret_passphrase_123'
+        expected_hash = hashlib.sha256(f"{vote_choice}:{salt}".encode('utf-8')).hexdigest().lower()
+
+        response = self.client.post(
+            reverse('commit_vote', args=[self.dispute.id]),
+            {'vote': vote_choice, 'salt': salt}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+
+        vote = DisputeVote.objects.get(dispute=self.dispute, voter=self.j1)
+        self.assertEqual(vote.commit_hash, expected_hash)
+        self.assertFalse(vote.revealed)
+        self.assertIsNone(vote.revealed_vote)
+
+        # Duplicate commit attempt
+        dup_response = self.client.post(
+            reverse('commit_vote', args=[self.dispute.id]),
+            {'vote': 'taker', 'salt': 'differentsalt'}
+        )
+        self.assertEqual(DisputeVote.objects.filter(dispute=self.dispute, voter=self.j1).count(), 1)
+
+    def test_reveal_phase_verification_failure_and_success(self):
+        # Jury 1 commits
+        self.client.login(username='jury1', password='password123')
+        self.client.post(
+            reverse('commit_vote', args=[self.dispute.id]),
+            {'vote': 'taker', 'salt': 'mysalt99'}
+        )
+
+        # Advance to Reveal phase
+        self.dispute.advance_to_reveal()
+        self.assertEqual(self.dispute.status, 'reveal')
+
+        # Try to reveal with WRONG salt -> should fail
+        fail_res = self.client.post(
+            reverse('reveal_vote', args=[self.dispute.id]),
+            {'vote': 'taker', 'salt': 'wrongsalt'}
+        )
+        vote_obj = DisputeVote.objects.get(dispute=self.dispute, voter=self.j1)
+        self.assertFalse(vote_obj.revealed)
+
+        # Try to reveal with CORRECT salt & choice -> should succeed
+        success_res = self.client.post(
+            reverse('reveal_vote', args=[self.dispute.id]),
+            {'vote': 'taker', 'salt': 'mysalt99'}
+        )
+        vote_obj.refresh_from_db()
+        self.assertTrue(vote_obj.revealed)
+        self.assertEqual(vote_obj.revealed_vote, 'taker')
+
+    def test_full_commit_reveal_resolution_cycle_poster_wins(self):
+        # Jury 1 votes poster
+        self.client.login(username='jury1', password='password123')
+        self.client.post(reverse('commit_vote', args=[self.dispute.id]), {'vote': 'poster', 'salt': 's1'})
+
+        # Jury 2 votes poster
+        self.client.login(username='jury2', password='password123')
+        self.client.post(reverse('commit_vote', args=[self.dispute.id]), {'vote': 'poster', 'salt': 's2'})
+
+        # Jury 3 votes taker
+        self.client.login(username='jury3', password='password123')
+        self.client.post(reverse('commit_vote', args=[self.dispute.id]), {'vote': 'taker', 'salt': 's3'})
+
+        # Advance phase to reveal
+        self.client.login(username='poster', password='password123')
+        self.client.post(reverse('advance_dispute_phase', args=[self.dispute.id]))
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'reveal')
+
+        # Reveals
+        self.client.login(username='jury1', password='password123')
+        self.client.post(reverse('reveal_vote', args=[self.dispute.id]), {'vote': 'poster', 'salt': 's1'})
+
+        self.client.login(username='jury2', password='password123')
+        self.client.post(reverse('reveal_vote', args=[self.dispute.id]), {'vote': 'poster', 'salt': 's2'})
+
+        self.client.login(username='jury3', password='password123')
+        self.client.post(reverse('reveal_vote', args=[self.dispute.id]), {'vote': 'taker', 'salt': 's3'})
+
+        # Tally and resolve
+        self.client.login(username='poster', password='password123')
+        self.client.post(reverse('advance_dispute_phase', args=[self.dispute.id]))
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'resolved')
+
+        # Poster wins:
+        # Poster reward was 1000, receives task reward 200 + forfeited deposit bond 50 = 1250
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1250)
+
+        # Task cancelled
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'cancelled')
+
+        # Escrow status forfeited
+        self.assertEqual(self.dispute.escrow_status, 'forfeited')
+
+    def test_dispute_list_and_detail_views(self):
+        self.client.login(username='jury1', password='password123')
+        list_res = self.client.get(reverse('dispute_list'))
+        self.assertEqual(list_res.status_code, 200)
+        self.assertContains(list_res, self.task.title)
+
+        detail_res = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(detail_res.status_code, 200)
+        self.assertTrue(detail_res.context['can_vote'])
+        self.assertFalse(detail_res.context['is_party'])
+
 
 
 class DisputeDepositBondTests(TestCase):

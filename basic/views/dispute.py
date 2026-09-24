@@ -1,8 +1,10 @@
+import hashlib
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from django.utils import timezone
+from ..models import Dispute, Task, Notification, RewardLedger, DisputeVote
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,14 +12,154 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
-        messages.error(request, "You are not authorized to view this dispute.")
-        return redirect('home')
+    is_party = (request.user == task.posted_by or request.user == task.taken_by or request.user == dispute.raised_by)
+    user_vote = None
+    if request.user.is_authenticated:
+        user_vote = DisputeVote.objects.filter(dispute=dispute, voter=request.user).first()
+
+    revealed_votes = dispute.votes.filter(revealed=True)
+    poster_votes_count = revealed_votes.filter(revealed_vote='poster').count()
+    taker_votes_count = revealed_votes.filter(revealed_vote='taker').count()
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'is_party': is_party,
+        'can_vote': not is_party,
+        'user_vote': user_vote,
+        'total_commits_count': dispute.votes.count(),
+        'revealed_votes_count': revealed_votes.count(),
+        'poster_votes_count': poster_votes_count,
+        'taker_votes_count': taker_votes_count,
     }
     return render(request, 'dispute_detail.html', context)
+
+@login_required(login_url='/login/')
+def dispute_list_view(request):
+    open_disputes = Dispute.objects.exclude(status='resolved').select_related('task', 'raised_by')
+    resolved_disputes = Dispute.objects.filter(status='resolved').select_related('task', 'raised_by')[:10]
+    context = {
+        'open_disputes': open_disputes,
+        'resolved_disputes': resolved_disputes,
+    }
+    return render(request, 'dispute_list.html', context)
+
+@login_required(login_url='/login/')
+@require_POST
+def commit_vote(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+    if request.user == task.posted_by or request.user == task.taken_by or request.user == dispute.raised_by:
+        messages.error(request, "Parties involved in the dispute cannot vote as jury.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if dispute.status not in ('open', 'commit'):
+        messages.error(request, "Commit phase is closed for this dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if DisputeVote.objects.filter(dispute=dispute, voter=request.user).exists():
+        messages.error(request, "You have already submitted a vote commitment for this dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    commit_hash_input = request.POST.get('commit_hash', '').strip().lower()
+    vote = request.POST.get('vote', '').strip().lower()
+    salt = request.POST.get('salt', '').strip()
+
+    if commit_hash_input:
+        if len(commit_hash_input) != 64:
+            messages.error(request, "Commit hash must be a 64-character SHA-256 hex string.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+        final_hash = commit_hash_input
+    elif vote and salt:
+        if vote not in ('poster', 'taker'):
+            messages.error(request, "Invalid vote choice. Must be 'poster' or 'taker'.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+        final_hash = hashlib.sha256(f"{vote}:{salt}".encode('utf-8')).hexdigest().lower()
+    else:
+        messages.error(request, "You must provide either a vote choice and secret salt, or a valid commit hash.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    DisputeVote.objects.create(
+        dispute=dispute,
+        voter=request.user,
+        commit_hash=final_hash
+    )
+
+    Notification.objects.create(
+        recipient=task.posted_by,
+        message=f"A new jury vote commitment was submitted for dispute on task '{task.title}'.",
+        link=reverse('dispute_detail', args=[dispute.id])
+    )
+    if task.taken_by and task.taken_by != task.posted_by:
+        Notification.objects.create(
+            recipient=task.taken_by,
+            message=f"A new jury vote commitment was submitted for dispute on task '{task.title}'.",
+            link=reverse('dispute_detail', args=[dispute.id])
+        )
+
+    messages.success(request, "Your vote commitment has been securely recorded.")
+    return redirect('dispute_detail', dispute_id=dispute.id)
+
+@login_required(login_url='/login/')
+@require_POST
+def reveal_vote(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    if dispute.status != 'reveal':
+        messages.error(request, "Dispute is not in the reveal phase.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    vote_obj = DisputeVote.objects.filter(dispute=dispute, voter=request.user).first()
+    if not vote_obj:
+        messages.error(request, "You did not submit a vote commitment in the commit phase.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if vote_obj.revealed:
+        messages.error(request, "You have already revealed your vote.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    vote = request.POST.get('vote', '').strip().lower()
+    salt = request.POST.get('salt', '').strip()
+
+    if not vote or not salt:
+        messages.error(request, "Both vote choice and secret salt are required to reveal your vote.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if vote not in ('poster', 'taker'):
+        messages.error(request, "Invalid vote choice.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    computed_hash = hashlib.sha256(f"{vote}:{salt}".encode('utf-8')).hexdigest().lower()
+    if computed_hash != vote_obj.commit_hash.lower():
+        messages.error(request, "Cryptographic hash mismatch! The provided vote choice and secret salt do not match your committed hash.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    vote_obj.revealed = True
+    vote_obj.revealed_vote = vote
+    vote_obj.revealed_at = timezone.now()
+    vote_obj.save()
+
+    messages.success(request, "Your vote has been successfully verified and revealed!")
+    return redirect('dispute_detail', dispute_id=dispute.id)
+
+@login_required(login_url='/login/')
+@require_POST
+def advance_dispute_phase(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+    if request.user != task.posted_by and request.user != task.taken_by and request.user != dispute.raised_by and not request.user.is_staff:
+        messages.error(request, "You are not authorized to advance the phase of this dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if dispute.status in ('open', 'commit'):
+        dispute.advance_to_reveal()
+        messages.success(request, "Dispute phase successfully advanced to Reveal Phase.")
+    elif dispute.status == 'reveal':
+        dispute.tally_and_resolve()
+        messages.success(request, "Dispute tallied and resolved successfully.")
+    else:
+        messages.error(request, "Dispute is already resolved.")
+
+    return redirect('dispute_detail', dispute_id=dispute.id)
 
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):

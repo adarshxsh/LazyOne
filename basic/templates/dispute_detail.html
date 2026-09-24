@@ -3,26 +3,200 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
-
-    <div class="space-y-6 text-gray-300">
+<div class="max-w-4xl mx-auto space-y-8">
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-200 dark:border-gray-700 pb-4">
         <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <h2 class="text-3xl font-bold text-gray-900 dark:text-white">Dispute Details</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Task: <strong class="text-cyan-600 dark:text-cyan-400">{{ dispute.task.title }}</strong></p>
         </div>
-
         <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
-            <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
-        </div>
-
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
-            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+            <span class="px-3 py-1 text-sm font-semibold rounded-full 
+                {% if dispute.status == 'resolved' %}bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300
+                {% elif dispute.status == 'reveal' %}bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300
+                {% else %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300{% endif %}">
+                Phase: {{ dispute.get_status_display }}
+            </span>
         </div>
     </div>
 
+    <!-- Dispute Info Summary -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-50 dark:bg-gray-800/50 p-6 rounded-xl border border-gray-200 dark:border-gray-700">
+        <div>
+            <h3 class="text-lg font-semibold text-cyan-600 dark:text-cyan-400 mb-2">Dispute Overview</h3>
+            <p class="text-sm text-gray-700 dark:text-gray-300"><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
+            <p class="text-sm text-gray-700 dark:text-gray-300"><strong>Task Poster:</strong> {{ dispute.task.posted_by.username }}</p>
+            <p class="text-sm text-gray-700 dark:text-gray-300"><strong>Task Taker:</strong> {{ dispute.task.taken_by.username|default:"N/A" }}</p>
+            <p class="text-sm text-gray-700 dark:text-gray-300"><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y H:i" }}</p>
+        </div>
+        <div>
+            <h3 class="text-lg font-semibold text-cyan-600 dark:text-cyan-400 mb-2">Escrow & Financial Bond</h3>
+            <p class="text-sm text-gray-700 dark:text-gray-300"><strong>Deposit Bond:</strong> {{ dispute.deposit_amount }} points</p>
+            <p class="text-sm text-gray-700 dark:text-gray-300"><strong>Escrow Status:</strong> <span class="font-medium text-cyan-600 dark:text-cyan-300">{{ dispute.get_escrow_status_display }}</span></p>
+            <p class="text-sm text-gray-700 dark:text-gray-300"><strong>Task Reward at Stake:</strong> {{ dispute.task.reward }} points</p>
+        </div>
+    </div>
+
+    <div>
+        <h3 class="text-lg font-semibold text-cyan-600 dark:text-cyan-400 mb-2">Reason for Dispute</h3>
+        <div class="bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-200">
+            {{ dispute.reason|linebreaksbr }}
+        </div>
+    </div>
+
+    <!-- Phase Indicator Flow -->
+    <div class="p-4 rounded-xl bg-gray-100 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 space-y-2">
+        <h3 class="font-semibold text-gray-800 dark:text-gray-200">Two-Phase Secret Ballot Voting Scheme</h3>
+        <div class="grid grid-cols-3 gap-2 text-center text-xs font-medium">
+            <div class="p-2 rounded-lg {% if dispute.status in 'open commit' %}bg-cyan-600 text-white{% else %}bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300{% endif %}">
+                1. Commit Phase (Secret Hashes)
+            </div>
+            <div class="p-2 rounded-lg {% if dispute.status == 'reveal' %}bg-purple-600 text-white{% else %}bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300{% endif %}">
+                2. Reveal Phase (Verify Salt & Vote)
+            </div>
+            <div class="p-2 rounded-lg {% if dispute.status == 'resolved' %}bg-green-600 text-white{% else %}bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300{% endif %}">
+                3. Resolved (Tally & Financial Settlement)
+            </div>
+        </div>
+    </div>
+
+    <!-- Jury Voting Section -->
+    <div class="p-6 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-md space-y-4">
+        <h3 class="text-xl font-bold text-gray-900 dark:text-white">Community Jury Ballot</h3>
+
+        {% if is_party %}
+            <div class="p-4 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 text-sm">
+                As an involved party in this dispute, you are not eligible to vote as jury.
+            </div>
+        {% elif can_vote %}
+            {% if dispute.status in 'open commit' %}
+                {% if user_vote %}
+                    <div class="p-4 rounded-lg bg-green-50 dark:bg-green-900/30 text-green-800 dark:text-green-200 text-sm font-medium">
+                        ✓ Your vote commitment hash has been recorded: <code class="font-mono bg-green-100 dark:bg-green-800 px-2 py-0.5 rounded">{{ user_vote.commit_hash|slice:":20" }}...</code>. Please keep your secret salt safe for the Reveal Phase!
+                    </div>
+                {% else %}
+                    <form action="{% url 'commit_vote' dispute.id %}" method="POST" class="space-y-4">
+                        {% csrf_token %}
+                        <p class="text-sm text-gray-600 dark:text-gray-300">
+                            Select your vote choice and enter a secret salt. A SHA-256 hash will be generated to keep your vote completely secret until the reveal phase.
+                        </p>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">In Favor Of:</label>
+                                <select name="vote" class="w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white p-2.5 text-sm" required>
+                                    <option value="">-- Choose Winner --</option>
+                                    <option value="poster">Task Poster ({{ dispute.task.posted_by.username }})</option>
+                                    <option value="taker">Task Taker ({{ dispute.task.taken_by.username }})</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Secret Salt Passphrase:</label>
+                                <input type="text" name="salt" placeholder="e.g. secret123" class="w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white p-2.5 text-sm" required>
+                            </div>
+                        </div>
+                        <button type="submit" class="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-700 text-white font-medium rounded-lg text-sm transition-colors">
+                            Submit Secret Vote Commitment
+                        </button>
+                    </form>
+                {% endif %}
+            {% elif dispute.status == 'reveal' %}
+                {% if user_vote %}
+                    {% if user_vote.revealed %}
+                        <div class="p-4 rounded-lg bg-green-50 dark:bg-green-900/30 text-green-800 dark:text-green-200 text-sm font-medium">
+                            ✓ Your vote has been verified and revealed: <strong>Vote for {{ user_vote.get_revealed_vote_display }}</strong>.
+                        </div>
+                    {% else %}
+                        <form action="{% url 'reveal_vote' dispute.id %}" method="POST" class="space-y-4">
+                            {% csrf_token %}
+                            <p class="text-sm text-gray-600 dark:text-gray-300">
+                                Provide your vote choice and secret salt matching your commitment hash to reveal and count your vote.
+                            </p>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Your Vote Choice:</label>
+                                    <select name="vote" class="w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white p-2.5 text-sm" required>
+                                        <option value="">-- Choose Choice --</option>
+                                        <option value="poster">Task Poster ({{ dispute.task.posted_by.username }})</option>
+                                        <option value="taker">Task Taker ({{ dispute.task.taken_by.username }})</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Your Secret Salt:</label>
+                                    <input type="text" name="salt" placeholder="Enter secret salt used during commit" class="w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white p-2.5 text-sm" required>
+                                </div>
+                            </div>
+                            <button type="submit" class="px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg text-sm transition-colors">
+                                Verify & Reveal Vote
+                            </button>
+                        </form>
+                    {% endif %}
+                {% else %}
+                    <div class="p-4 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-sm">
+                        You did not submit a vote commitment hash during the commit phase for this dispute.
+                    </div>
+                {% endif %}
+            {% elif dispute.status == 'resolved' %}
+                <div class="p-4 rounded-lg bg-green-50 dark:bg-green-900/30 text-green-800 dark:text-green-200 text-sm">
+                    This dispute is fully resolved. Total revealed votes tallied: <strong>{{ revealed_votes_count }}</strong>.
+                </div>
+            {% endif %}
+        {% endif %}
+
+        <!-- Tally / Votes Summary -->
+        <div class="pt-4 border-t border-gray-200 dark:border-gray-700">
+            <h4 class="font-semibold text-gray-800 dark:text-gray-200 text-sm mb-2">Current Tally & Participation:</h4>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center text-xs">
+                <div class="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                    <span class="block font-bold text-base text-gray-800 dark:text-gray-100">{{ total_commits_count }}</span>
+                    <span class="text-gray-500 dark:text-gray-400">Total Commitments</span>
+                </div>
+                <div class="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                    <span class="block font-bold text-base text-purple-600 dark:text-purple-400">{{ revealed_votes_count }}</span>
+                    <span class="text-gray-500 dark:text-gray-400">Revealed Votes</span>
+                </div>
+                <div class="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                    <span class="block font-bold text-base text-cyan-600 dark:text-cyan-400">{{ poster_votes_count }}</span>
+                    <span class="text-gray-500 dark:text-gray-400">Poster Votes</span>
+                </div>
+                <div class="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                    <span class="block font-bold text-base text-cyan-600 dark:text-cyan-400">{{ taker_votes_count }}</span>
+                    <span class="text-gray-500 dark:text-gray-400">Taker Votes</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Management & Actions -->
+    <div class="flex flex-wrap gap-4 justify-between items-center pt-4 border-t border-gray-200 dark:border-gray-700">
+        <div>
+            {% if user == dispute.raised_by and dispute.status != 'resolved' %}
+                <form action="{% url 'withdraw_dispute' dispute.id %}" method="POST" class="inline">
+                    {% csrf_token %}
+                    <button type="submit" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white text-sm font-medium rounded-lg transition-colors" onclick="return confirm('Are you sure you want to withdraw this dispute?')">
+                        Withdraw Dispute & Refund Deposit
+                    </button>
+                </form>
+            {% endif %}
+        </div>
+
+        <div>
+            {% if is_party or user.is_staff %}
+                {% if dispute.status in 'open commit' %}
+                    <form action="{% url 'advance_dispute_phase' dispute.id %}" method="POST" class="inline">
+                        {% csrf_token %}
+                        <button type="submit" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition-colors">
+                            Advance to Reveal Phase →
+                        </button>
+                    </form>
+                {% elif dispute.status == 'reveal' %}
+                    <form action="{% url 'advance_dispute_phase' dispute.id %}" method="POST" class="inline">
+                        {% csrf_token %}
+                        <button type="submit" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors">
+                            Tally & Resolve Dispute ✓
+                        </button>
+                    </form>
+                {% endif %}
+            {% endif %}
+        </div>
+    </div>
+</div>
 {% endblock %}
