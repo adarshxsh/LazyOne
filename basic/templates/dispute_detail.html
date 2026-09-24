@@ -23,6 +23,61 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if jury %}
+        <div class="bg-gray-800/80 p-6 rounded-xl border border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-3">Decentralized Jury Consensus Panel</h3>
+            <div class="space-y-2 mb-4">
+                <p><strong>Jury Panel Status:</strong> <span class="capitalize px-2 py-1 text-sm rounded bg-cyan-900/50 text-cyan-200">{{ jury.get_status_display }}</span></p>
+                {% if jury.consensus_reached %}
+                <p><strong>Consensus Outcome:</strong> <span class="font-bold text-green-400 capitalize">{{ jury.get_consensus_outcome_display }}</span></p>
+                {% endif %}
+                <p><strong>Weighted Vote Tally:</strong> Poster: <span class="font-semibold text-cyan-300">{{ poster_weight_sum }}</span> | Taker: <span class="font-semibold text-cyan-300">{{ taker_weight_sum }}</span></p>
+            </div>
+
+            {% if can_vote %}
+            <div class="bg-gray-900 p-5 rounded-lg border border-cyan-500/50 mt-4">
+                <h4 class="text-lg font-bold text-cyan-300 mb-2">Cast Your Juror Vote</h4>
+                <p class="text-sm text-gray-400 mb-4">You are an assigned juror with voting weight <strong>{{ juror.weight }}</strong>. Your stake of <strong>{{ juror.staked_amount }}</strong> points is held in escrow.</p>
+                <form method="POST" action="{% url 'cast_vote' dispute.id %}" class="space-y-4">
+                    {% csrf_token %}
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Your Decision:</label>
+                        <div class="flex space-x-6">
+                            <label class="inline-flex items-center space-x-2">
+                                <input type="radio" name="choice" value="poster" required class="text-cyan-500 focus:ring-cyan-400">
+                                <span class="text-white">Poster Wins ({{ dispute.task.posted_by.username }})</span>
+                            </label>
+                            <label class="inline-flex items-center space-x-2">
+                                <input type="radio" name="choice" value="taker" required class="text-cyan-500 focus:ring-cyan-400">
+                                <span class="text-white">Taker Wins ({{ dispute.task.taken_by.username }})</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div>
+                        <label for="reasoning" class="block text-sm font-medium text-gray-300 mb-1">Reasoning (Optional):</label>
+                        <textarea id="reasoning" name="reasoning" rows="2" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white focus:outline-none focus:border-cyan-400" placeholder="Explain your decision..."></textarea>
+                    </div>
+                    <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white px-5 py-2 rounded-lg font-semibold transition">Submit Juror Vote</button>
+                </form>
+            </div>
+            {% elif juror and juror.status == 'voted' %}
+            <p class="text-green-400 font-medium mt-3">You have submitted your vote for this dispute. Awaiting final consensus aggregation.</p>
+            {% endif %}
+
+            <div class="mt-6">
+                <h4 class="text-md font-semibold text-gray-300 mb-2">Assigned Jurors Panel</h4>
+                <ul class="divide-y divide-gray-700 border border-gray-700 rounded-lg overflow-hidden bg-gray-900/40">
+                    {% for j in jury.jurors.all %}
+                    <li class="p-3 flex justify-between items-center">
+                        <span>{{ j.user.username }} (Weight: {{ j.weight }})</span>
+                        <span class="text-xs px-2 py-1 rounded capitalize {% if j.status == 'voted' %}bg-blue-500/20 text-blue-300{% elif j.status == 'rewarded' %}bg-green-500/20 text-green-300{% elif j.status == 'slashed' %}bg-red-500/20 text-red-300{% else %}bg-gray-700 text-gray-300{% endif %}">{{ j.get_status_display }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}
