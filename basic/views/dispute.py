@@ -2,7 +2,8 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, Task, Notification, RewardLedger, JurorAssignment
+from ..jury import select_juror_pool
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,7 +11,8 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+    is_juror = JurorAssignment.objects.filter(dispute=dispute, juror=request.user).exists()
+    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff and not is_juror:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
     context = {
@@ -22,7 +24,7 @@ def dispute_detail_view(request, dispute_id):
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
     task = get_object_or_404(Task, id=task_id)
-    if hasattr(task, 'dispute') and task.dispute.status == 'open':
+    if hasattr(task, 'dispute') and task.dispute.status in ['open', 'voting']:
         return redirect('dispute_detail', dispute_id=task.dispute.id)
     if task.taken_by != request.user or task.status != 'in_progress':
         messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
@@ -79,6 +81,10 @@ def raise_dispute(request, task_id):
                 message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
                 link=reverse('dispute_detail', args=[dispute.id])
             )
+
+            # Trigger anti-bias juror pool selection with reward points staking
+            select_juror_pool(dispute)
+
         messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
