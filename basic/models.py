@@ -83,6 +83,8 @@ class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
         ('resolved', 'Resolved'),
+        ('withdrawn', 'Withdrawn'),
+        ('expired', 'Expired'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
@@ -95,6 +97,7 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    jurors = models.ManyToManyField(User, related_name='assigned_disputes', blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -141,6 +144,28 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class DisputeAuditEvent(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='audit_events')
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    event_type = models.CharField(max_length=50)
+    details_json = models.JSONField(default=dict, blank=True)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['timestamp']
+
+    def __str__(self):
+        actor_name = self.actor.username if self.actor else "System"
+        return f"[{self.timestamp.strftime('%Y-%m-%d %H:%M:%S')}] {self.dispute}: {self.event_type} by {actor_name}"
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValueError("DisputeAuditEvent records are immutable and cannot be updated.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("DisputeAuditEvent records are immutable and cannot be deleted.")
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
