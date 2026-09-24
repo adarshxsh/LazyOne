@@ -10,19 +10,20 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+    if request.user != task.posted_by and request.user != task.taken_by and request.user != dispute.raised_by and not request.user.is_staff:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'status_choices': Dispute.STATUS_CHOICES,
     }
     return render(request, 'dispute_detail.html', context)
 
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
     task = get_object_or_404(Task, id=task_id)
-    if hasattr(task, 'dispute') and task.dispute.status == 'open':
+    if hasattr(task, 'dispute') and task.dispute.status != 'resolved':
         return redirect('dispute_detail', dispute_id=task.dispute.id)
     if task.taken_by != request.user or task.status != 'in_progress':
         messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
@@ -85,8 +86,54 @@ def raise_dispute(request, task_id):
 
 @login_required(login_url='/login/')
 @require_POST
+def update_dispute_status(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+
+    if request.user != task.posted_by and request.user != task.taken_by and request.user != dispute.raised_by and not request.user.is_staff:
+        messages.error(request, "You are not authorized to update this dispute status.")
+        return redirect('home')
+
+    new_status = request.POST.get('status')
+    valid_statuses = [choice[0] for choice in Dispute.STATUS_CHOICES]
+    if new_status not in valid_statuses:
+        messages.error(request, f"Invalid status: {new_status}")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    with transaction.atomic():
+        old_status_display = dispute.get_status_display()
+        dispute.status = new_status
+
+        if new_status == 'resolved' and dispute.escrow_status == 'held':
+            dispute.refund_deposit(
+                reason_description=f"Security deposit bond refunded on dispute resolution for task: '{task.title}'"
+            )
+            if task.status == 'disputed':
+                task.status = 'completed'
+                task.save()
+
+        dispute.save()
+
+        participants = set([task.posted_by, task.taken_by, dispute.raised_by])
+        recipients = [p for p in participants if p and p != request.user]
+        dispute_link = reverse('dispute_detail', args=[dispute.id])
+        for recipient in recipients:
+            Notification.objects.create(
+                recipient=recipient,
+                message=f"Dispute status for '{task.title}' was updated to '{dispute.get_status_display()}'.",
+                link=dispute_link
+            )
+
+    messages.success(request, f"Dispute status updated from '{old_status_display}' to '{dispute.get_status_display()}'.")
+    return redirect('dispute_detail', dispute_id=dispute.id)
+
+@login_required(login_url='/login/')
+@require_POST
 def withdraw_dispute(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user)
+    if dispute.status == 'resolved':
+        messages.error(request, "Dispute is already resolved.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
     task = dispute.task
     with transaction.atomic():
         dispute.refund_deposit(

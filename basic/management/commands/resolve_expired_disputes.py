@@ -21,8 +21,8 @@ class Command(BaseCommand):
         now = timezone.now()
         expiry_threshold = now - timedelta(days=days)
 
-        # Find open disputes created before the expiration window
-        expired_disputes = Dispute.objects.filter(status='open', created_at__lte=expiry_threshold)
+        # Find unresolved disputes created before the expiration window
+        expired_disputes = Dispute.objects.exclude(status='resolved').filter(created_at__lte=expiry_threshold)
 
         count = 0
         for dispute in expired_disputes:
