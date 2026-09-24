@@ -17,6 +17,13 @@ class UserProfile(models.Model):
     batch = models.IntegerField(default=2029)
     friends = models.ManyToManyField('self', blank=True)
     rewards = models.IntegerField(default=1500)
+    reputation_score = models.IntegerField(default=100)
+    disputes_won = models.IntegerField(default=0)
+    disputes_lost = models.IntegerField(default=0)
+    tasks_completed = models.IntegerField(default=0)
+    tasks_cancelled = models.IntegerField(default=0)
+    tasks_abandoned = models.IntegerField(default=0)
+    locked_collateral = models.IntegerField(default=0)
     phone_number = models.CharField(max_length=20, blank=True)
     is_phone_verified = models.BooleanField(default=False)
     instagram_username = models.CharField(max_length=100, blank=True)
@@ -25,6 +32,13 @@ class UserProfile(models.Model):
     # Fields for Email OTP Verification
     email_otp = models.CharField(max_length=6, blank=True, null=True)
     email_otp_created_at = models.DateTimeField(blank=True, null=True)
+
+    def calculate_risk_tier(self):
+        if self.reputation_score < 50 or self.disputes_lost >= 2 or (self.tasks_cancelled >= 2 and self.tasks_cancelled > self.tasks_completed):
+            return 'HIGH'
+        elif self.reputation_score < 80 or self.disputes_lost == 1 or self.tasks_cancelled > 0:
+            return 'MEDIUM'
+        return 'LOW'
 
     def __str__(self):
         return self.user.username
@@ -68,11 +82,21 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('juror_stake_lock', 'Juror Stake Locked'),
+        ('juror_stake_refunded', 'Juror Stake Refunded'),
+        ('juror_stake_slash', 'Juror Stake Slashed'),
+        ('juror_reward_payout', 'Juror Reward Payout'),
+        ('dispute_appeal_bond', 'Dispute Appeal Stake Bond Held'),
+        ('dispute_appeal_refund', 'Dispute Appeal Stake Bond Refunded'),
+        ('dispute_appeal_forfeit', 'Dispute Appeal Stake Bond Forfeited'),
+        ('juror_slashing', 'Dishonest Juror Slashing Penalty'),
+        ('slash_penalty', 'Slash Penalty'),
+        ('appeal_fee', 'Appeal Fee'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -82,7 +106,17 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('evidence_submission', 'Evidence Submission'),
+        ('voting', 'Voting'),
+        ('under_review', 'Under Review'),
+        ('appealed', 'Appealed'),
+        ('under_appeal', 'Under Appeal'),
         ('resolved', 'Resolved'),
+        ('appeal_upheld', 'Appeal Upheld'),
+        ('appeal_reversed', 'Appeal Reversed'),
+        ('withdrawn', 'Withdrawn'),
+        ('slashed', 'Slashed'),
+        ('staff_review', 'Staff Review'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
@@ -92,13 +126,33 @@ class Dispute(models.Model):
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    
+    tier = models.IntegerField(default=1)
+    appealed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='appeals_raised')
+    appeal_reason = models.TextField(blank=True, default='')
+    appealed_at = models.DateTimeField(null=True, blank=True)
+    appeal_bond_amount = models.PositiveIntegerField(default=0)
+    appeal_escrow_status = models.CharField(
+        max_length=20,
+        choices=[('none', 'None'), ('held', 'Held in Escrow'), ('refunded', 'Refunded'), ('forfeited', 'Forfeited')],
+        default='none'
+    )
+    winner = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='won_disputes')
+    consensus_outcome = models.CharField(max_length=20, blank=True, default='')
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def is_appealable(self):
+        return self.status in ['resolved', 'appealable'] and self.tier == 1 and self.appealed_by is None
+
+    def can_withdraw(self):
+        return self.status in ['open', 'voting'] and self.task.status == 'disputed'
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -141,6 +195,54 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class JurorAssignment(models.Model):
+    STATUS_CHOICES = (
+        ('pending', 'Pending Vote'),
+        ('voted', 'Voted'),
+        ('slashed', 'Slashed'),
+        ('rewarded', 'Rewarded'),
+        ('refunded', 'Refunded'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='juror_assignments')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='juror_assignments')
+    tier = models.IntegerField(default=1)
+    stake_amount = models.PositiveIntegerField(default=50)
+    has_voted = models.BooleanField(default=False)
+    vote = models.CharField(max_length=20, blank=True, default='')
+    voting_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Juror {self.juror.username} for dispute #{self.dispute.id} (Tier {self.tier})"
+
+    @property
+    def user(self):
+        return self.juror
+
+class DisputeAuditEvent(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='audit_events')
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    event_type = models.CharField(max_length=50)
+    details_json = models.JSONField(default=dict, blank=True)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['timestamp']
+
+    def __str__(self):
+        return f"AuditEvent {self.event_type} on dispute #{self.dispute.id}"
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError("DisputeAuditEvent records are immutable and cannot be updated.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("DisputeAuditEvent records are immutable and cannot be deleted.")
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
