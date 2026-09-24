@@ -23,6 +23,68 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Evidence Attachments</h3>
+            {% if evidences %}
+                <div class="space-y-3">
+                    {% for ev in evidences %}
+                        <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <span class="px-2 py-0.5 text-xs rounded-full bg-cyan-500/20 text-cyan-300 font-medium">
+                                        {{ ev.get_evidence_type_display }}
+                                    </span>
+                                    <a href="{{ ev.file.url }}" target="_blank" class="text-cyan-400 hover:underline font-semibold">
+                                        {{ ev.file.name }}
+                                    </a>
+                                </div>
+                                {% if ev.description %}
+                                    <p class="text-sm text-gray-300 mt-1">{{ ev.description }}</p>
+                                {% endif %}
+                                <p class="text-xs text-gray-400 mt-1">Uploaded by <span class="font-medium text-gray-300">{{ ev.uploaded_by.username }}</span> on {{ ev.created_at|date:"M d, Y H:i" }}</p>
+                            </div>
+                            <a href="{{ ev.file.url }}" download class="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium rounded transition">Download</a>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-gray-400 italic bg-gray-900/50 p-4 rounded-lg border border-gray-700">No evidence attached yet.</p>
+            {% endif %}
+        </div>
+
+        {% if dispute.status == 'open' %}
+            <div class="bg-gray-900/70 p-6 rounded-lg border border-gray-700">
+                <h3 class="text-xl font-semibold text-cyan-400 mb-4">Upload Supporting Evidence</h3>
+                <form action="{% url 'upload_dispute_evidence' dispute.id %}" method="post" enctype="multipart/form-data" class="space-y-4">
+                    {% csrf_token %}
+                    <div>
+                        <label for="id_files" class="block text-sm font-medium text-gray-300 mb-1">Select Files (Screenshots, Documents, Proof):</label>
+                        <input type="file" id="id_files" name="files" multiple required class="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-cyan-600 file:text-white hover:file:bg-cyan-500 cursor-pointer">
+                    </div>
+
+                    <div>
+                        <label for="id_evidence_type" class="block text-sm font-medium text-gray-300 mb-1">Evidence Type (Optional):</label>
+                        <select id="id_evidence_type" name="evidence_type" class="w-full bg-gray-800 border border-gray-700 text-gray-200 rounded-md p-2 text-sm focus:outline-none focus:border-cyan-500">
+                            <option value="">Auto-detect from file format</option>
+                            <option value="screenshot">Screenshot</option>
+                            <option value="document">Text Document</option>
+                            <option value="proof">Proof</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label for="id_description" class="block text-sm font-medium text-gray-300 mb-1">Description / Notes:</label>
+                        <textarea id="id_description" name="description" rows="3" placeholder="Provide context or description for the uploaded evidence..." class="w-full bg-gray-800 border border-gray-700 text-gray-200 rounded-md p-2 text-sm focus:outline-none focus:border-cyan-500"></textarea>
+                    </div>
+
+                    <button type="submit" class="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-medium rounded-md transition shadow">
+                        Upload Evidence
+                    </button>
+                </form>
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}
