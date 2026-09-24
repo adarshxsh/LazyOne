@@ -23,6 +23,44 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Community Jury Evaluation</h3>
+            <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-4">
+                <p><strong>Jury Vote Tally:</strong></p>
+                <div class="flex space-x-6 text-sm">
+                    <p>Votes for Task Poster ({{ task.posted_by.username }}): <span class="font-bold text-cyan-400">{{ poster_votes }}</span></p>
+                    <p>Votes for Task Taker ({{ task.taken_by.username }}): <span class="font-bold text-cyan-400">{{ taker_votes }}</span></p>
+                    <p>Total Votes: <span class="font-bold text-yellow-400">{{ total_votes }} / {{ consensus_threshold }}</span></p>
+                </div>
+
+                {% if can_vote %}
+                    <div class="mt-4 pt-4 border-t border-gray-700">
+                        <p class="text-sm text-gray-300 mb-3">Cast your neutral juror vote to help reach consensus. Winning jurors receive an equal share of the forfeited deposit bond.</p>
+                        <form action="{% url 'vote_dispute' dispute.id %}" method="post" class="space-y-3">
+                            {% csrf_token %}
+                            <div class="flex space-x-4">
+                                <label class="flex items-center space-x-2 cursor-pointer">
+                                    <input type="radio" name="voted_for_id" value="{{ task.posted_by.id }}" required class="text-cyan-500 focus:ring-cyan-500">
+                                    <span>In favor of Task Poster ({{ task.posted_by.username }})</span>
+                                </label>
+                                <label class="flex items-center space-x-2 cursor-pointer">
+                                    <input type="radio" name="voted_for_id" value="{{ task.taken_by.id }}" required class="text-cyan-500 focus:ring-cyan-500">
+                                    <span>In favor of Task Taker ({{ task.taken_by.username }})</span>
+                                </label>
+                            </div>
+                            <button type="submit" class="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-colors">Submit Juror Vote</button>
+                        </form>
+                    </div>
+                {% elif is_party %}
+                    <p class="text-xs text-yellow-400 italic">As a party involved in this dispute, you cannot vote as a juror.</p>
+                {% elif has_voted %}
+                    <p class="text-xs text-green-400 italic">You have voted in favor of {{ user_vote.voted_for.username }}. Thank you for participating in community governance!</p>
+                {% elif dispute.status == 'resolved' %}
+                    <p class="text-xs text-gray-400 italic">This dispute has been resolved by jury consensus.</p>
+                {% endif %}
+            </div>
+        </div>
     </div>
 
 {% endblock %}
