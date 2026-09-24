@@ -13,7 +13,11 @@
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' or dispute.status == 'evidence_submission' %}bg-yellow-500/20 text-yellow-300{% elif dispute.status == 'voting' %}bg-purple-500/20 text-purple-300{% elif dispute.status == 'under_appeal' %}bg-orange-500/20 text-orange-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Active SLA Phase:</strong> <span class="font-medium text-cyan-300">{{ current_phase|title }}</span></p>
+            {% if current_deadline %}
+            <p><strong>Phase Deadline:</strong> {{ current_deadline|date:"F d, Y, g:i a" }} UTC {% if is_phase_expired %}<span class="text-red-400 font-semibold">(SLA Expired - Processing Transition)</span>{% endif %}</p>
+            {% endif %}
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>

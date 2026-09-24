@@ -182,3 +182,124 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class SLATimerEngineTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.poster = User.objects.create_user(username='poster_sla', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker_sla', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        self.task = Task.objects.create(
+            title="SLA Test Task",
+            description="Testing SLA state transitions",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress'
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_raise_dispute_initializes_evidence_deadline(self):
+        self.client.login(username='taker_sla', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Incomplete deliverables'}
+        )
+
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertIn(dispute.status, ['open', 'evidence_submission'])
+        self.assertIsNotNone(dispute.evidence_deadline)
+        self.assertEqual(dispute.get_current_phase(), 'evidence_submission')
+        self.assertFalse(dispute.is_phase_expired())
+
+    def test_sla_transition_evidence_to_voting(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Evidence phase test',
+            deposit_amount=50,
+            escrow_status='held'
+        )
+        dispute.start_evidence_phase(save=True)
+        # Fast-forward evidence deadline to past
+        dispute.evidence_deadline = timezone.now() - timedelta(minutes=10)
+        dispute.save()
+
+        from basic.services.sla_engine import SLATimerEngine
+        counts = SLATimerEngine.process_dispute_sla_transitions()
+
+        dispute.refresh_from_db()
+        self.assertEqual(counts['evidence_to_voting'], 1)
+        self.assertEqual(dispute.status, 'voting')
+        self.assertIsNotNone(dispute.voting_deadline)
+        self.assertEqual(dispute.get_current_phase(), 'voting')
+
+    def test_sla_transition_voting_to_appeal(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Voting phase test',
+            deposit_amount=50,
+            escrow_status='held'
+        )
+        dispute.start_voting_phase(save=True)
+        # Fast-forward voting deadline to past
+        dispute.voting_deadline = timezone.now() - timedelta(minutes=10)
+        dispute.save()
+
+        from basic.services.sla_engine import SLATimerEngine
+        counts = SLATimerEngine.process_dispute_sla_transitions()
+
+        dispute.refresh_from_db()
+        self.assertEqual(counts['voting_to_appeal'], 1)
+        self.assertEqual(dispute.status, 'under_appeal')
+        self.assertIsNotNone(dispute.appeal_deadline)
+        self.assertEqual(dispute.get_current_phase(), 'appeal')
+
+    def test_sla_transition_appeal_to_resolved(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Appeal phase test',
+            deposit_amount=50,
+            escrow_status='held'
+        )
+        dispute.start_appeal_phase(save=True)
+        # Fast-forward appeal deadline to past
+        dispute.appeal_deadline = timezone.now() - timedelta(minutes=10)
+        dispute.save()
+
+        from basic.services.sla_engine import SLATimerEngine
+        counts = SLATimerEngine.process_dispute_sla_transitions()
+
+        dispute.refresh_from_db()
+        self.assertEqual(counts['appeal_to_resolved'], 1)
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.escrow_status, 'refunded')
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+
+    def test_dispute_detail_view_renders_sla_phase(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='SLA view test',
+            deposit_amount=50,
+            escrow_status='held'
+        )
+        dispute.start_evidence_phase(save=True)
+
+        self.client.login(username='taker_sla', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['current_phase'], 'evidence_submission')
+        self.assertIsNotNone(response.context['current_deadline'])
+        self.assertContains(response, 'Active SLA Phase:')
+
+
