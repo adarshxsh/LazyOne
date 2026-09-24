@@ -23,6 +23,47 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <div class="bg-gray-800/60 p-5 rounded-lg border border-gray-700 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Community Jury Votes</h3>
+            <div class="grid grid-cols-3 gap-4 text-center">
+                <div class="bg-gray-900/50 p-3 rounded-lg border border-gray-700">
+                    <p class="text-sm text-gray-400">Taker Win Votes</p>
+                    <p class="text-2xl font-bold text-green-400" id="taker-votes-count">{{ taker_votes_count }}</p>
+                </div>
+                <div class="bg-gray-900/50 p-3 rounded-lg border border-gray-700">
+                    <p class="text-sm text-gray-400">Poster Win Votes</p>
+                    <p class="text-2xl font-bold text-red-400" id="poster-votes-count">{{ poster_votes_count }}</p>
+                </div>
+                <div class="bg-gray-900/50 p-3 rounded-lg border border-gray-700">
+                    <p class="text-sm text-gray-400">Total Votes</p>
+                    <p class="text-2xl font-bold text-cyan-400" id="total-votes-count">{{ total_votes_count }}</p>
+                </div>
+            </div>
+
+            {% if dispute.status == 'open' %}
+                {% if is_participant %}
+                    <p class="text-yellow-400 italic text-sm mt-2">Task participants (poster and taker) cannot vote on their own dispute.</p>
+                {% elif user_voted %}
+                    <p class="text-green-400 font-semibold text-sm mt-2">You have already cast your vote: {{ user_vote.get_choice_display }}</p>
+                {% elif can_vote %}
+                    <div class="mt-4 pt-4 border-t border-gray-700">
+                        <p class="text-sm text-gray-300 mb-3">Cast your jury vote to help resolve this dispute (5 votes needed with 66% supermajority for consensus):</p>
+                        <form method="post" action="{% url 'submit_vote' dispute.id %}" class="flex space-x-4">
+                            {% csrf_token %}
+                            <button type="submit" name="choice" value="taker_win" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors text-sm">
+                                Vote Taker Win
+                            </button>
+                            <button type="submit" name="choice" value="poster_win" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition-colors text-sm">
+                                Vote Poster Win
+                            </button>
+                        </form>
+                    </div>
+                {% endif %}
+            {% else %}
+                <p class="text-gray-400 italic text-sm mt-2">This dispute has been resolved.</p>
+            {% endif %}
+        </div>
     </div>
 
 {% endblock %}
