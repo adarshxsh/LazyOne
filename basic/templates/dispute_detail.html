@@ -8,21 +8,125 @@
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg font-medium text-white">{{ dispute.task.title }}</p>
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
+            <p><strong>Status:</strong> 
+                <span class="px-2 py-1 text-sm rounded-full 
+                    {% if dispute.status == 'voting' or dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300
+                    {% elif dispute.status == 'appealed' or dispute.status == 'under_appeal' %}bg-purple-500/20 text-purple-300
+                    {% elif dispute.status == 'appeal_reversed' %}bg-red-500/20 text-red-300
+                    {% else %}bg-green-500/20 text-green-300{% endif %}">
+                    {{ dispute.get_status_display }}
+                </span>
+            </p>
+            <p><strong>Escalation Tier:</strong> Tier {{ dispute.tier }} {% if dispute.tier == 1 %}(Peer Jury){% else %}(Grand Jury Appeal){% endif %}</p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y H:i" }}</p>
+            {% if dispute.winner %}
+                <p><strong>Established Winner:</strong> <span class="font-bold text-green-400">{{ dispute.winner.username }}</span></p>
+            {% endif %}
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if dispute.appealed_by %}
+        <div class="bg-purple-950/40 p-4 rounded-lg border border-purple-800 space-y-2">
+            <h3 class="text-xl font-semibold text-purple-400">Appeal Escalation Details</h3>
+            <p><strong>Appealed By:</strong> {{ dispute.appealed_by.username }}</p>
+            <p><strong>Appeal Stake Bond:</strong> {{ dispute.appeal_bond_amount }} points ({{ dispute.get_appeal_escrow_status_display }})</p>
+            <p><strong>Appealed At:</strong> {{ dispute.appealed_at|date:"F d, Y H:i" }}</p>
+            <p><strong>Reason for Appeal:</strong> {{ dispute.appeal_reason }}</p>
+        </div>
+        {% endif %}
+
+        {% if can_vote %}
+        <div class="bg-cyan-950/40 p-5 rounded-lg border border-cyan-800 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-300">Cast Your Juror Vote</h3>
+            <p class="text-sm text-gray-300">You have been selected as a neutral juror for Tier {{ dispute.tier }} review. Please review the evidence and cast your vote.</p>
+            <form method="POST" action="{% url 'vote_dispute' dispute.id %}" class="flex gap-4">
+                {% csrf_token %}
+                <button type="submit" name="vote" value="poster" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-lg transition-colors">
+                    Vote for Poster ({{ dispute.task.posted_by.username }})
+                </button>
+                <button type="submit" name="vote" value="taker" class="px-5 py-2.5 bg-green-600 hover:bg-green-500 text-white font-medium rounded-lg transition-colors">
+                    Vote for Taker ({{ dispute.task.taken_by.username }})
+                </button>
+            </form>
+        </div>
+        {% endif %}
+
+        {% if can_appeal %}
+        <div class="bg-amber-950/40 p-5 rounded-lg border border-amber-800 space-y-4">
+            <h3 class="text-xl font-semibold text-amber-300">Escalate Dispute to Tier 2 Appeal</h3>
+            <p class="text-sm text-gray-300">If you disagree with the primary jury outcome, you can appeal to a Tier 2 Grand Jury. Requires posting a higher stake bond of <strong class="text-amber-400">{{ appeal_bond_amount }} points</strong>.</p>
+            <form method="POST" action="{% url 'file_appeal' dispute.id %}" class="space-y-3">
+                {% csrf_token %}
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-1">Reason for Appeal</label>
+                    <textarea name="appeal_reason" rows="3" required class="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-cyan-500" placeholder="Provide clear rationale for appealing the decision..."></textarea>
+                </div>
+                <button type="submit" class="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-medium rounded-lg transition-colors">
+                    File Appeal (Post {{ appeal_bond_amount }} Points Bond)
+                </button>
+            </form>
+        </div>
+        {% endif %}
+
+        {% if tier1_assignments %}
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Tier 1 Jury Panel</h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {% for assignment in tier1_assignments %}
+                <div class="bg-gray-900/50 p-3 rounded-lg border border-gray-800 text-sm">
+                    <p class="font-medium text-white">Juror: {{ assignment.juror.username }}</p>
+                    <p class="text-xs text-gray-400">Status: {{ assignment.get_voting_status_display }}</p>
+                    {% if assignment.has_voted %}
+                        <p class="text-xs text-cyan-300">Voted Choice: {{ assignment.vote }}</p>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if tier2_assignments %}
+        <div>
+            <h3 class="text-xl font-semibold text-purple-400 mb-2">Tier 2 Appeal Grand Jury Panel</h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {% for assignment in tier2_assignments %}
+                <div class="bg-gray-900/50 p-3 rounded-lg border border-purple-900 text-sm">
+                    <p class="font-medium text-white">Juror: {{ assignment.juror.username }}</p>
+                    <p class="text-xs text-gray-400">Status: {{ assignment.get_voting_status_display }}</p>
+                    {% if assignment.has_voted %}
+                        <p class="text-xs text-purple-300">Voted Choice: {{ assignment.vote }}</p>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if audit_events %}
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Dispute Audit Log Trail</h3>
+            <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-800 space-y-2 text-xs font-mono">
+                {% for event in audit_events %}
+                <div class="flex justify-between border-b border-gray-800 pb-1 text-gray-300">
+                    <span><strong class="text-cyan-400">[{{ event.timestamp|date:"H:i:s" }}]</strong> {{ event.event_type }} {% if event.actor %}by {{ event.actor.username }}{% endif %}</span>
+                    <span class="text-gray-500">{{ event.details_json }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
     </div>
 
 {% endblock %}
