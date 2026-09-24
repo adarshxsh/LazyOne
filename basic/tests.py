@@ -182,3 +182,80 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class DisputeLifecycleTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        self.outsider = User.objects.create_user(username='outsider', password='password123')
+        self.outsider_profile = UserProfile.objects.create(user=self.outsider, rewards=500)
+
+        self.task = Task.objects.create(
+            title="Lifecycle Test Task",
+            description="Test Description",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed'
+        )
+        Conversation.objects.create(task=self.task)
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Quality dispute",
+            deposit_amount=50,
+            escrow_status='held',
+            status='open'
+        )
+
+    def test_status_choices_expansion(self):
+        expected_statuses = ['open', 'evidence_submission', 'juror_deliberation', 'voting', 'appealed', 'resolved']
+        choice_keys = [choice[0] for choice in Dispute.STATUS_CHOICES]
+        for status in expected_statuses:
+            self.assertIn(status, choice_keys)
+
+    def test_update_dispute_status_authorized_flow(self):
+        self.client.login(username='poster', password='password123')
+
+        statuses_to_test = ['evidence_submission', 'juror_deliberation', 'voting', 'appealed', 'resolved']
+        for new_status in statuses_to_test:
+            response = self.client.post(
+                reverse('update_dispute_status', args=[self.dispute.id]),
+                {'status': new_status}
+            )
+            self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+            self.dispute.refresh_from_db()
+            self.assertEqual(self.dispute.status, new_status)
+
+        # Upon transitioning to resolved, deposit bond should be refunded and task completed
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.escrow_status, 'refunded')
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+
+    def test_update_dispute_status_unauthorized(self):
+        self.client.login(username='outsider', password='password123')
+        response = self.client.post(
+            reverse('update_dispute_status', args=[self.dispute.id]),
+            {'status': 'evidence_submission'}
+        )
+        self.assertRedirects(response, reverse('home'))
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'open')
+
+    def test_update_dispute_status_invalid(self):
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('update_dispute_status', args=[self.dispute.id]),
+            {'status': 'invalid_status_xyz'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'open')
+
+
