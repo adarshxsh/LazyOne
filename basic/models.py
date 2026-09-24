@@ -68,11 +68,15 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('juror_stake', 'Juror Stake Held'),
+        ('juror_reward', 'Juror Reward Payout'),
+        ('juror_slash', 'Juror Stake Slashed'),
+        ('juror_stake_refund', 'Juror Stake Refunded'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -141,6 +145,72 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+
+class Jury(models.Model):
+    STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('voting', 'Voting'),
+        ('resolved', 'Resolved'),
+        ('fallback', 'Fallback to Staff'),
+    )
+    OUTCOME_CHOICES = (
+        ('pending', 'Pending'),
+        ('poster_win', 'Poster Wins'),
+        ('taker_win', 'Taker Wins'),
+        ('draw', 'Draw / Split'),
+    )
+    dispute = models.OneToOneField(Dispute, on_delete=models.CASCADE, related_name='jury')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    consensus_outcome = models.CharField(max_length=20, choices=OUTCOME_CHOICES, default='pending')
+    consensus_reached = models.BooleanField(default=False)
+    quorum_required = models.PositiveIntegerField(default=3)
+    supermajority_threshold = models.FloatField(default=0.66)
+    voting_deadline = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Jury #{self.id} for Dispute on '{self.dispute.task.title}'"
+
+
+class Juror(models.Model):
+    STATUS_CHOICES = (
+        ('assigned', 'Assigned'),
+        ('voted', 'Voted'),
+        ('slashed', 'Slashed'),
+        ('rewarded', 'Rewarded'),
+    )
+    jury = models.ForeignKey(Jury, on_delete=models.CASCADE, related_name='jurors')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='juror_assignments')
+    weight = models.FloatField(default=1.0)
+    staked_amount = models.PositiveIntegerField(default=50)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='assigned')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('jury', 'user')
+
+    def __str__(self):
+        return f"Juror {self.user.username} (Weight: {self.weight}) in Jury #{self.jury.id}"
+
+
+class Vote(models.Model):
+    CHOICES = (
+        ('poster', 'Poster Wins'),
+        ('taker', 'Taker Wins'),
+    )
+    jury = models.ForeignKey(Jury, on_delete=models.CASCADE, related_name='votes')
+    juror = models.ForeignKey(Juror, on_delete=models.CASCADE, related_name='votes')
+    choice = models.CharField(max_length=10, choices=CHOICES)
+    weight = models.FloatField(default=1.0)
+    reasoning = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('jury', 'juror')
+
+    def __str__(self):
+        return f"Vote choice='{self.choice}' weight={self.weight} by {self.juror.user.username}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
