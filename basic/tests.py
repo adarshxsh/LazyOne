@@ -3,7 +3,8 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, JuryPool, JurorAssignment, Friendship, FriendRequest, Notification
+from .jury import select_juror_pool, get_conflict_user_ids
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +182,150 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class JurorSelectionAndStakeLockTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Task participants
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        # Poster's direct friend (via UserProfile.friends)
+        self.poster_friend = User.objects.create_user(username='poster_friend', password='password123')
+        self.poster_friend_profile = UserProfile.objects.create(user=self.poster_friend, rewards=200)
+        self.poster_profile.friends.add(self.poster_friend_profile)
+
+        # Taker's direct friend (via Friendship model)
+        self.taker_friend = User.objects.create_user(username='taker_friend', password='password123')
+        self.taker_friend_profile = UserProfile.objects.create(user=self.taker_friend, rewards=200)
+        Friendship.objects.create(from_user=self.taker_profile, to_user=self.taker_friend_profile)
+
+        # Taker's accepted friend request
+        self.request_friend = User.objects.create_user(username='request_friend', password='password123')
+        self.request_friend_profile = UserProfile.objects.create(user=self.request_friend, rewards=200)
+        FriendRequest.objects.create(from_user=self.taker, to_user=self.request_friend, is_accepted=True)
+
+        # Low rewards candidate (< 50 points)
+        self.poor_user = User.objects.create_user(username='poor_user', password='password123')
+        UserProfile.objects.create(user=self.poor_user, rewards=30)
+
+        # 4 Neutral candidates with sufficient rewards (>= 50)
+        self.neutrals = []
+        for i in range(1, 5):
+            u = User.objects.create_user(username=f'neutral_{i}', password='password123')
+            UserProfile.objects.create(user=u, rewards=200)
+            self.neutrals.append(u)
+
+        # Create Task & Dispute
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="Juror Test Task",
+            description="Juror Test Description",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=self.deadline
+        )
+        Conversation.objects.create(task=self.task)
+
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Unfair work demand",
+            deposit_amount=50,
+            escrow_status='held',
+            status='open'
+        )
+
+    def test_conflict_user_ids_detection(self):
+        conflict_ids = get_conflict_user_ids(self.dispute)
+        self.assertIn(self.poster.id, conflict_ids)
+        self.assertIn(self.taker.id, conflict_ids)
+        self.assertIn(self.poster_friend.id, conflict_ids)
+        self.assertIn(self.taker_friend.id, conflict_ids)
+        self.assertIn(self.request_friend.id, conflict_ids)
+
+    def test_select_juror_pool_anti_bias_and_staking(self):
+        jury_pool, jurors = select_juror_pool(self.dispute, pool_size=3, stake_amount=50)
+
+        self.assertEqual(len(jurors), 3)
+        self.assertEqual(jury_pool.status, 'active')
+
+        # Ensure no conflict users or poor users were selected
+        conflict_ids = {self.poster.id, self.taker.id, self.poster_friend.id, self.taker_friend.id, self.request_friend.id, self.poor_user.id}
+        selected_ids = {j.id for j in jurors}
+        self.assertTrue(selected_ids.isdisjoint(conflict_ids))
+
+        # Check each selected juror's balance and ledger
+        for juror in jurors:
+            juror.userprofile.refresh_from_db()
+            self.assertEqual(juror.userprofile.rewards, 150) # 200 - 50 = 150
+
+            ledger = RewardLedger.objects.filter(user=juror, transaction_type='juror_stake_lock').first()
+            self.assertIsNotNone(ledger)
+            self.assertEqual(ledger.amount, -50)
+
+            assignment = JurorAssignment.objects.filter(dispute=self.dispute, juror=juror).first()
+            self.assertIsNotNone(assignment)
+            self.assertEqual(assignment.stake_amount, 50)
+            self.assertEqual(assignment.voting_status, 'assigned')
+
+            notification = Notification.objects.filter(recipient=juror).first()
+            self.assertIsNotNone(notification)
+
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'voting')
+
+    def test_fallback_when_insufficient_candidates(self):
+        # Request pool size of 10 when only 4 neutral candidates exist
+        jury_pool, jurors = select_juror_pool(self.dispute, pool_size=10, stake_amount=50)
+
+        self.assertEqual(len(jurors), 0)
+        self.assertEqual(jury_pool.status, 'fallback')
+
+    def test_raise_dispute_triggers_juror_selection(self):
+        new_task = Task.objects.create(
+            title="Auto Jury Task",
+            description="Auto Jury Description",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=self.deadline
+        )
+        Conversation.objects.create(task=new_task)
+
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[new_task.id]),
+            {'reason': 'Auto jury dispute'}
+        )
+
+        new_dispute = Dispute.objects.get(task=new_task)
+        self.assertEqual(new_dispute.status, 'voting')
+        self.assertTrue(hasattr(new_dispute, 'jury_pool'))
+        self.assertEqual(new_dispute.juror_assignments.count(), 3)
+
+    def test_juror_authorization_for_dispute_detail(self):
+        jury_pool, jurors = select_juror_pool(self.dispute, pool_size=3, stake_amount=50)
+        assigned_juror = jurors[0]
+
+        # Assigned juror can view dispute detail
+        self.client.login(username=assigned_juror.username, password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(response.status_code, 200)
+
+        # Unassigned non-participant cannot view dispute detail
+        unassigned_user = User.objects.create_user(username='outsider', password='password123')
+        UserProfile.objects.create(user=unassigned_user, rewards=100)
+        self.client.login(username='outsider', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertRedirects(response, reverse('home'))
+
 
