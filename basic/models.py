@@ -1,3 +1,4 @@
+import os
 import math
 from django.db import models
 from django.contrib.auth.models import User
@@ -53,7 +54,7 @@ class Task(models.Model):
 
     @property
     def main_chat(self):
-        return self.conversations.first()
+        return getattr(self, 'conversation', None) or self.conversations.first()
 
     @property
     def deposit_bond_amount(self):
@@ -95,10 +96,18 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    deliberation_conversation = models.OneToOneField('Conversation', on_delete=models.SET_NULL, null=True, blank=True, related_name='dispute_deliberation')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if not self.deliberation_conversation:
+            conv = Conversation.objects.create()
+            self.deliberation_conversation = conv
+            super().save(update_fields=['deliberation_conversation'])
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -142,6 +151,39 @@ class Dispute(models.Model):
             self.escrow_status = 'forfeited'
             self.save()
 
+class DisputeJuror(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='jurors')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_juror_assignments')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'user')
+
+    def __str__(self):
+        return f"Juror {self.user.username} for dispute {self.dispute.id}"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.dispute and self.dispute.deliberation_conversation:
+            self.dispute.deliberation_conversation.participants.add(self.user)
+
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidence')
+    uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_evidences')
+    file = models.FileField(upload_to='dispute_evidence/%Y/%m/%d/')
+    description = models.TextField(blank=True, default='')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['uploaded_at']
+
+    def __str__(self):
+        return f"Evidence for Dispute #{self.dispute.id} by {self.uploaded_by.username}"
+
+    @property
+    def filename(self):
+        return os.path.basename(self.file.name)
+
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
     to_user = models.ForeignKey(User, related_name='to_user', on_delete=models.CASCADE)
@@ -164,6 +206,8 @@ class Conversation(models.Model):
     def __str__(self):
         if self.task:
             return f"Chat for task: {self.task.title}"
+        if hasattr(self, 'dispute_deliberation') and self.dispute_deliberation:
+            return f"Deliberation chat for dispute: {self.dispute_deliberation.task.title}"
         participant_names = [user.username for user in self.participants.all()]
         return f"Chat between {' and '.join(participant_names)}"
 

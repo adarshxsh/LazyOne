@@ -8,7 +8,11 @@
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg"><span class="text-white font-medium">{{ dispute.task.title }}</span></p>
+            <p class="text-sm text-gray-400 mt-1">
+                Posted by: <span class="text-gray-200">{{ task.posted_by.username }}</span> | 
+                Taken by: <span class="text-gray-200">{% if task.taken_by %}{{ task.taken_by.username }}{% else %}N/A{% endif %}</span>
+            </p>
         </div>
 
         <div>
@@ -22,6 +26,82 @@
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+        </div>
+
+        <!-- Task Conversation History Access -->
+        {% if main_chat %}
+        <div class="bg-gray-800/40 border border-gray-700 p-5 rounded-xl">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Task Conversation History</h3>
+            <p class="text-sm text-gray-400 mb-3">
+                {% if is_juror or request.user.is_staff and not is_party %}
+                    Inspect the original task chat transcript between poster and worker (Read-Only access for jurors).
+                {% else %}
+                    View the conversation transcript for this task.
+                {% endif %}
+            </p>
+            <a href="{% url 'chat_view' main_chat.id %}" class="inline-flex items-center px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-sm rounded-lg transition-colors">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+                View Task Conversation History
+            </a>
+        </div>
+        {% endif %}
+
+        <!-- Juror Deliberation Room -->
+        {% if can_deliberate %}
+        <div class="bg-purple-950/30 border border-purple-800/50 p-5 rounded-xl">
+            <h3 class="text-xl font-semibold text-purple-300 mb-2">Juror Deliberation Room</h3>
+            <p class="text-sm text-gray-300 mb-3">
+                Private chat channel for impaneled dispute jurors and authorized staff to deliberate on evidence. Disputing parties cannot access this channel.
+            </p>
+            <a href="{% url 'chat_view' dispute.deliberation_conversation.id %}" class="inline-flex items-center px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-semibold text-sm rounded-lg transition-colors">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"></path></svg>
+                Enter Juror Deliberation Room
+            </a>
+        </div>
+        {% endif %}
+
+        <!-- Evidence Attachments Section -->
+        <div class="bg-gray-800/40 border border-gray-700 p-5 rounded-xl">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-4">Evidence Attachments</h3>
+            
+            {% if evidence_list %}
+                <div class="space-y-3 mb-6">
+                    {% for item in evidence_list %}
+                        <div class="bg-gray-900/60 p-3 rounded-lg border border-gray-700/80 flex items-center justify-between">
+                            <div>
+                                <p class="font-medium text-white">{{ item.filename }}</p>
+                                {% if item.description %}
+                                    <p class="text-sm text-gray-300 mt-1">{{ item.description }}</p>
+                                {% endif %}
+                                <p class="text-xs text-gray-400 mt-1">Uploaded by {{ item.uploaded_by.username }} on {{ item.uploaded_at|date:"M d, Y H:i" }}</p>
+                            </div>
+                            {% if item.file %}
+                                <a href="{{ item.file.url }}" target="_blank" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-xs text-cyan-300 font-semibold rounded-lg transition-colors">View File</a>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-gray-400 text-sm mb-4">No evidence attachments uploaded yet.</p>
+            {% endif %}
+
+            {% if can_upload %}
+                <form action="{% url 'upload_dispute_evidence' dispute.id %}" method="POST" enctype="multipart/form-data" class="space-y-4 pt-3 border-t border-gray-700">
+                    {% csrf_token %}
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-1">Attach Evidence File(s)</label>
+                        <input type="file" name="evidence_files" multiple accept=".pdf,.png,.jpg,.jpeg,.txt" class="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-cyan-600 file:text-white hover:file:bg-cyan-500">
+                        <p class="text-xs text-gray-400 mt-1">Allowed file types: PDF, PNG, JPG, JPEG, TXT (Max size 10MB per file).</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-1">Evidence Description / Caption</label>
+                        <textarea name="description" rows="2" placeholder="Briefly describe what this evidence demonstrates..." class="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400"></textarea>
+                    </div>
+                    <button type="submit" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-sm rounded-lg transition-colors">
+                        Upload Evidence
+                    </button>
+                </form>
+            {% endif %}
         </div>
     </div>
 
