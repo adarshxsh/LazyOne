@@ -3,7 +3,8 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from django.core.files.uploadedfile import SimpleUploadedFile
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, DisputeJuror, DisputeEvidence
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +182,133 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class JurorDeliberationAndEvidenceTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.poster = User.objects.create_user(username='poster_juror_test', password='password123')
+        UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker_juror_test', password='password123')
+        UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        self.juror = User.objects.create_user(username='juror1', password='password123')
+        UserProfile.objects.create(user=self.juror, rewards=1000)
+
+        self.unassigned_user = User.objects.create_user(username='unassigned_user', password='password123')
+        UserProfile.objects.create(user=self.unassigned_user, rewards=1000)
+
+        self.staff_user = User.objects.create_user(username='staff_user', password='password123', is_staff=True)
+        UserProfile.objects.create(user=self.staff_user, rewards=1000)
+
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="Disputed Juror Task",
+            description="Task for juror deliberation test",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed',
+            deadline=self.deadline
+        )
+        self.task_conversation = Conversation.objects.create(task=self.task)
+        self.task_conversation.participants.add(self.poster, self.taker)
+
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Incomplete work claim",
+            deposit_amount=50,
+            status='open'
+        )
+        self.dispute_juror = DisputeJuror.objects.create(dispute=self.dispute, user=self.juror)
+
+    def test_dispute_detail_authorization(self):
+        # Impaneled juror can view
+        self.client.login(username='juror1', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(response.status_code, 200)
+
+        # Staff can view
+        self.client.login(username='staff_user', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(response.status_code, 200)
+
+        # Poster & Taker can view
+        self.client.login(username='poster_juror_test', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(response.status_code, 200)
+
+        # Unassigned third party blocked
+        self.client.login(username='unassigned_user', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertRedirects(response, reverse('home'))
+
+    def test_juror_read_only_task_conversation(self):
+        self.client.login(username='juror1', password='password123')
+        # Juror can view task conversation
+        response = self.client.get(reverse('chat_view', args=[self.task_conversation.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['is_read_only'])
+
+        # Juror cannot post in task conversation
+        response = self.client.post(
+            reverse('send_message', args=[self.task_conversation.id]),
+            {'content': 'Juror trying to post in main chat'}
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_evidence_upload_success_and_validation(self):
+        self.client.login(username='taker_juror_test', password='password123')
+        valid_file = SimpleUploadedFile("evidence.png", b"file_content", content_type="image/png")
+
+        response = self.client.post(
+            reverse('upload_dispute_evidence', args=[self.dispute.id]),
+            {'evidence_files': [valid_file], 'description': 'Screenshot of proof'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(DisputeEvidence.objects.filter(dispute=self.dispute).count(), 1)
+        evidence = DisputeEvidence.objects.get(dispute=self.dispute)
+        self.assertEqual(evidence.description, 'Screenshot of proof')
+        self.assertEqual(evidence.uploaded_by, self.taker)
+
+        # Invalid file extension test
+        invalid_file = SimpleUploadedFile("malicious.exe", b"executable", content_type="application/octet-stream")
+        response = self.client.post(
+            reverse('upload_dispute_evidence', args=[self.dispute.id]),
+            {'evidence_files': [invalid_file]}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(DisputeEvidence.objects.filter(dispute=self.dispute).count(), 1)
+
+    def test_juror_deliberation_chat_permissions(self):
+        deliberation_conv = self.dispute.deliberation_conversation
+
+        # Impaneled juror can view and send messages in deliberation chat
+        self.client.login(username='juror1', password='password123')
+        response = self.client.get(reverse('chat_view', args=[deliberation_conv.id]))
+        self.assertEqual(response.status_code, 200)
+
+        response = self.client.post(
+            reverse('send_message', args=[deliberation_conv.id]),
+            {'content': 'Deliberation remark by juror'}
+        )
+        self.assertEqual(response.status_code, 200)
+
+        # Poster and Worker are strictly forbidden from deliberation chat
+        self.client.login(username='poster_juror_test', password='password123')
+        response = self.client.get(reverse('chat_view', args=[deliberation_conv.id]))
+        self.assertEqual(response.status_code, 403)
+
+        response = self.client.post(
+            reverse('send_message', args=[deliberation_conv.id]),
+            {'content': 'Poster trying to intervene'}
+        )
+        self.assertEqual(response.status_code, 403)
+
+        self.client.login(username='taker_juror_test', password='password123')
+        response = self.client.get(reverse('chat_view', args=[deliberation_conv.id]))
+        self.assertEqual(response.status_code, 403)
+
 
