@@ -15,14 +15,17 @@ def dispute_detail_view(request, dispute_id):
         return redirect('home')
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'current_phase': dispute.get_current_phase(),
+        'current_deadline': dispute.get_current_deadline(),
+        'is_phase_expired': dispute.is_phase_expired(),
     }
     return render(request, 'dispute_detail.html', context)
 
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
     task = get_object_or_404(Task, id=task_id)
-    if hasattr(task, 'dispute') and task.dispute.status == 'open':
+    if hasattr(task, 'dispute') and task.dispute.status in ['open', 'evidence_submission', 'voting', 'under_appeal']:
         return redirect('dispute_detail', dispute_id=task.dispute.id)
     if task.taken_by != request.user or task.status != 'in_progress':
         messages.error(request, "You can only raise a dispute for a task you have taken that is currently in progress.")
@@ -50,18 +53,18 @@ def raise_dispute(request, task_id):
                 dispute = task.dispute
                 dispute.raised_by = request.user
                 dispute.reason = reason
-                dispute.status = 'open'
                 dispute.deposit_amount = deposit_amount
                 dispute.escrow_status = 'held'
-                dispute.save()
+                dispute.start_evidence_phase(save=True)
             else:
-                dispute = Dispute.objects.create(
+                dispute = Dispute(
                     task=task,
                     raised_by=request.user,
                     reason=reason,
                     deposit_amount=deposit_amount,
                     escrow_status='held'
                 )
+                dispute.start_evidence_phase(save=True)
 
             RewardLedger.objects.create(
                 user=request.user,

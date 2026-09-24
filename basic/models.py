@@ -82,7 +82,13 @@ class RewardLedger(models.Model):
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
+        ('evidence_submission', 'Evidence Submission'),
+        ('voting', 'Voting'),
+        ('under_appeal', 'Under Appeal'),
+        ('staff_review', 'Staff Review'),
         ('resolved', 'Resolved'),
+        ('expired', 'Expired'),
+        ('withdrawn', 'Withdrawn'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
@@ -92,13 +98,86 @@ class Dispute(models.Model):
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
 
+    # Phase-specific deadline timestamps
+    evidence_deadline = models.DateTimeField(null=True, blank=True)
+    voting_deadline = models.DateTimeField(null=True, blank=True)
+    appeal_deadline = models.DateTimeField(null=True, blank=True)
+
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def start_evidence_phase(self, save=True):
+        from django.conf import settings
+        from datetime import timedelta
+        hours = getattr(settings, 'DISPUTE_EVIDENCE_SLA_HOURS', 24)
+        self.status = 'open'
+        self.evidence_deadline = timezone.now() + timedelta(hours=hours)
+        if save:
+            self.save()
+
+    def start_voting_phase(self, save=True):
+        from django.conf import settings
+        from datetime import timedelta
+        hours = getattr(settings, 'DISPUTE_VOTING_SLA_HOURS', 24)
+        self.status = 'voting'
+        self.voting_deadline = timezone.now() + timedelta(hours=hours)
+        if save:
+            self.save()
+
+    def start_appeal_phase(self, save=True):
+        from django.conf import settings
+        from datetime import timedelta
+        hours = getattr(settings, 'DISPUTE_APPEAL_SLA_HOURS', 24)
+        self.status = 'under_appeal'
+        self.appeal_deadline = timezone.now() + timedelta(hours=hours)
+        if save:
+            self.save()
+
+    def get_current_phase(self):
+        if self.status in ['open', 'evidence_submission']:
+            return 'evidence_submission'
+        elif self.status == 'voting':
+            return 'voting'
+        elif self.status in ['under_appeal', 'appealed']:
+            return 'appeal'
+        return self.status
+
+    def get_current_deadline(self):
+        phase = self.get_current_phase()
+        if phase == 'evidence_submission':
+            if self.evidence_deadline:
+                return self.evidence_deadline
+            from django.conf import settings
+            from datetime import timedelta
+            hours = getattr(settings, 'DISPUTE_EVIDENCE_SLA_HOURS', 24)
+            base_time = self.created_at if self.created_at else timezone.now()
+            return base_time + timedelta(hours=hours)
+        elif phase == 'voting':
+            if self.voting_deadline:
+                return self.voting_deadline
+            from django.conf import settings
+            from datetime import timedelta
+            hours = getattr(settings, 'DISPUTE_VOTING_SLA_HOURS', 24)
+            return timezone.now() + timedelta(hours=hours)
+        elif phase == 'appeal':
+            if self.appeal_deadline:
+                return self.appeal_deadline
+            from django.conf import settings
+            from datetime import timedelta
+            hours = getattr(settings, 'DISPUTE_APPEAL_SLA_HOURS', 24)
+            return timezone.now() + timedelta(hours=hours)
+        return None
+
+    def is_phase_expired(self):
+        deadline = self.get_current_deadline()
+        if deadline and timezone.now() >= deadline:
+            return True
+        return False
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:

@@ -4,6 +4,7 @@ from django.utils import timezone
 from django.db import transaction
 from django.urls import reverse
 from basic.models import Dispute, RewardLedger, Notification
+from basic.services.sla_engine import SLATimerEngine
 
 class Command(BaseCommand):
     help = 'Resolves expired open disputes, refunds/forfeits escrowed bonds, and settles task points.'
@@ -17,6 +18,9 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        # Process multi-phase SLA timer transitions first
+        sla_counts = SLATimerEngine.process_dispute_sla_transitions()
+
         days = options['days']
         now = timezone.now()
         expiry_threshold = now - timedelta(days=days)

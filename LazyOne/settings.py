@@ -130,4 +130,10 @@ print("MEDIA_FILES: OK")
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 print("DEFAULT_AUTO_FIELD: OK")
 
+# Dispute SLA Durations (in hours)
+DISPUTE_EVIDENCE_SLA_HOURS = int(os.getenv('DISPUTE_EVIDENCE_SLA_HOURS', 24))
+DISPUTE_VOTING_SLA_HOURS = int(os.getenv('DISPUTE_VOTING_SLA_HOURS', 24))
+DISPUTE_APPEAL_SLA_HOURS = int(os.getenv('DISPUTE_APPEAL_SLA_HOURS', 24))
+DISPUTE_EXPIRATION_HOURS = int(os.getenv('DISPUTE_EXPIRATION_HOURS', 72))
+
 print("--- settings.py loaded successfully ---")
