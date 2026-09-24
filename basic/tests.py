@@ -113,7 +113,7 @@ class DisputeDepositBondTests(TestCase):
 
         dispute.refresh_from_db()
         self.assertEqual(dispute.escrow_status, 'refunded')
-        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.status, 'withdrawn')
 
         # Balance restored: 40 + 60 = 100
         self.taker_profile.refresh_from_db()
@@ -181,4 +181,75 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+    def test_poster_raise_and_withdraw_dispute(self):
+        # Poster raises dispute on task
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work not submitted as expected'}
+        )
+
+        # Poster initial balance: 1000. Deposit bond = 60. New balance = 940
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 940)
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertEqual(dispute.deposit_amount, 60)
+        self.assertEqual(dispute.escrow_status, 'held')
+        self.assertEqual(dispute.status, 'open')
+        self.assertEqual(dispute.raised_by, self.poster)
+
+        # Check ledger
+        ledger = RewardLedger.objects.filter(user=self.poster, transaction_type='dispute_deposit').first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, -60)
+
+        # Now poster withdraws dispute
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'in_progress')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.escrow_status, 'refunded')
+        self.assertEqual(dispute.status, 'withdrawn')
+
+        # Poster balance restored: 940 + 60 = 1000
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1000)
+
+    def test_unauthorized_user_cannot_raise_or_withdraw_dispute(self):
+        third_party = User.objects.create_user(username='thirdparty', password='password123')
+        UserProfile.objects.create(user=third_party, rewards=500)
+
+        # Third party tries to raise dispute
+        self.client.login(username='thirdparty', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Interference'}
+        )
+        self.assertRedirects(response, reverse('my_tasks'))
+        self.assertFalse(Dispute.objects.filter(task=self.task).exists())
+
+        # Taker raises dispute
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Valid taker dispute'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+
+        # Poster (who did not raise it) tries to withdraw taker's dispute -> 404
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+        self.assertEqual(response.status_code, 404)
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'open')
+
 
