@@ -14,7 +14,8 @@
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
             <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
+            <p><strong>Poster Security Deposit Bond:</strong> {{ dispute.poster_deposit_amount|default:dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_poster_escrow_status_display }}</span>)</p>
+            <p><strong>Worker Security Deposit Bond:</strong> {{ dispute.worker_deposit_amount|default:dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_worker_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
         </div>
@@ -22,6 +23,70 @@
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+        </div>
+
+        <!-- Juror Voting & Consensus Section -->
+        <div class="bg-gray-800/80 p-6 rounded-xl border border-gray-700 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Juror Panel & Consensus</h3>
+            <div class="flex items-center space-x-6 text-sm text-gray-300">
+                <p><strong>Poster Votes:</strong> <span class="text-green-400 font-bold">{{ poster_votes }}</span></p>
+                <p><strong>Worker Votes:</strong> <span class="text-cyan-400 font-bold">{{ worker_votes }}</span></p>
+                <p><strong>Total Votes:</strong> {{ total_votes }}</p>
+            </div>
+
+            {% if can_vote %}
+                <div class="mt-4 pt-4 border-t border-gray-700">
+                    <h4 class="text-md font-medium text-white mb-2">Cast Your Juror Vote (50 Stake Points Required)</h4>
+                    <form action="{% url 'cast_juror_vote' dispute.id %}" method="post" class="space-y-3">
+                        {% csrf_token %}
+                        <div class="flex items-center space-x-4">
+                            <label class="inline-flex items-center cursor-pointer">
+                                <input type="radio" name="vote" value="poster" required class="text-cyan-600 focus:ring-cyan-500">
+                                <span class="ml-2 text-gray-200">Side with Poster ({{ task.posted_by.username }})</span>
+                            </label>
+                            <label class="inline-flex items-center cursor-pointer">
+                                <input type="radio" name="vote" value="worker" required class="text-cyan-600 focus:ring-cyan-500">
+                                <span class="ml-2 text-gray-200">Side with Worker ({{ task.taken_by.username }})</span>
+                            </label>
+                        </div>
+                        <button type="submit" class="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold px-5 py-2 rounded-lg transition-colors text-sm">
+                            Submit Vote (Lock 50 Stake Points)
+                        </button>
+                    </form>
+                </div>
+            {% elif has_voted %}
+                <div class="mt-2 text-sm text-cyan-300">
+                    You have cast a juror vote for: <strong>{{ user_vote.vote|capfirst }}</strong> (50 points locked stake).
+                </div>
+            {% elif is_participant %}
+                <div class="mt-2 text-sm text-gray-400 italic">
+                    Task participants cannot vote as jurors on their own dispute.
+                </div>
+            {% endif %}
+
+            {% if dispute.status == 'open' %}
+                {% if is_participant or user.is_staff or user.is_superuser %}
+                    <div class="mt-6 pt-4 border-t border-gray-700">
+                        <h4 class="text-md font-medium text-white mb-2">Resolve Dispute</h4>
+                        <div class="flex space-x-4">
+                            <form action="{% url 'resolve_dispute' dispute.id %}" method="post">
+                                {% csrf_token %}
+                                <input type="hidden" name="winner" value="poster">
+                                <button type="submit" class="bg-green-600 hover:bg-green-700 text-white text-sm font-medium px-4 py-2 rounded-lg">
+                                    Resolve for Poster
+                                </button>
+                            </form>
+                            <form action="{% url 'resolve_dispute' dispute.id %}" method="post">
+                                {% csrf_token %}
+                                <input type="hidden" name="winner" value="worker">
+                                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg">
+                                    Resolve for Worker
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                {% endif %}
+            {% endif %}
         </div>
     </div>
 

@@ -66,13 +66,18 @@ class RewardLedger(models.Model):
         ('task_cancellation', 'Task Cancellation (Points Refunded)'),
         ('initial_points', 'Initial Points'),
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
+        ('poster_dispute_deposit', 'Poster Security Deposit Bond Held'),
+        ('worker_dispute_deposit', 'Worker Security Deposit Bond Held'),
+        ('juror_stake_lock', 'Juror Stake Locked'),
+        ('juror_vote_slash', 'Juror Stake Slashed'),
+        ('juror_reward', 'Juror Reward Payout'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=50, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -94,19 +99,52 @@ class Dispute(models.Model):
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
+    poster_deposit_amount = models.PositiveIntegerField(default=0)
+    worker_deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    poster_escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    worker_escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
 
     def refund_deposit(self, reason_description=None):
-        if self.escrow_status == 'held' and self.deposit_amount > 0:
+        desc = reason_description or f"Security deposit bond refunded for dispute on task: '{self.task.title}'"
+
+        # Symmetrical refund for poster
+        if self.poster_escrow_status == 'held' and self.poster_deposit_amount > 0:
+            poster_profile = self.task.posted_by.userprofile
+            poster_profile.rewards += self.poster_deposit_amount
+            poster_profile.save()
+            RewardLedger.objects.create(
+                user=self.task.posted_by,
+                task=self.task,
+                amount=self.poster_deposit_amount,
+                transaction_type='dispute_refund',
+                description=desc
+            )
+            self.poster_escrow_status = 'refunded'
+
+        # Symmetrical refund for worker
+        if self.worker_escrow_status == 'held' and self.worker_deposit_amount > 0 and self.task.taken_by:
+            worker_profile = self.task.taken_by.userprofile
+            worker_profile.rewards += self.worker_deposit_amount
+            worker_profile.save()
+            RewardLedger.objects.create(
+                user=self.task.taken_by,
+                task=self.task,
+                amount=self.worker_deposit_amount,
+                transaction_type='dispute_refund',
+                description=desc
+            )
+            self.worker_escrow_status = 'refunded'
+
+        # Fallback for single deposit if legacy single-deposit recorded
+        if self.escrow_status == 'held' and self.poster_deposit_amount == 0 and self.worker_deposit_amount == 0 and self.deposit_amount > 0:
             user_profile = self.raised_by.userprofile
             user_profile.rewards += self.deposit_amount
             user_profile.save()
-
-            desc = reason_description or f"Security deposit bond refunded for dispute on task: '{self.task.title}'"
             RewardLedger.objects.create(
                 user=self.raised_by,
                 task=self.task,
@@ -114,8 +152,9 @@ class Dispute(models.Model):
                 transaction_type='dispute_refund',
                 description=desc
             )
-            self.escrow_status = 'refunded'
-            self.save()
+
+        self.escrow_status = 'refunded'
+        self.save()
 
     def forfeit_deposit(self, beneficiary=None, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -141,6 +180,23 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class JurorVote(models.Model):
+    VOTE_CHOICES = (
+        ('poster', 'Poster'),
+        ('worker', 'Worker'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='juror_votes')
+    vote = models.CharField(max_length=10, choices=VOTE_CHOICES)
+    staked_amount = models.PositiveIntegerField(default=50)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"JurorVote by {self.juror.username} on Dispute {self.dispute.id}: {self.vote}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
