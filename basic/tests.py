@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, DisputeVote
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +181,229 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class JurorVotingAndFallbackTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        self.juror1 = User.objects.create_user(username='juror1', password='password123')
+        self.juror1_profile = UserProfile.objects.create(user=self.juror1, rewards=500)
+
+        self.juror2 = User.objects.create_user(username='juror2', password='password123')
+        self.juror2_profile = UserProfile.objects.create(user=self.juror2, rewards=500)
+
+        self.juror3 = User.objects.create_user(username='juror3', password='password123')
+        self.juror3_profile = UserProfile.objects.create(user=self.juror3, rewards=500)
+
+        self.task = Task.objects.create(
+            title="Voting Test Task",
+            description="Testing juror voting and fallback",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=timezone.now() + timedelta(days=2)
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_dispute_creation_sets_voting_deadline(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Incomplete work claim'}
+        )
+        self.assertEqual(response.status_code, 302)
+
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertIsNotNone(dispute.voting_deadline)
+        self.assertTrue(dispute.is_voting_active)
+        # Check deadline is approx 48 hours in future
+        expected_min = timezone.now() + timedelta(hours=47)
+        expected_max = timezone.now() + timedelta(hours=49)
+        self.assertTrue(expected_min <= dispute.voting_deadline <= expected_max)
+
+    def test_juror_vote_success(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Disagreement',
+            deposit_amount=50,
+            escrow_status='held'
+        )
+
+        self.client.login(username='juror1', password='password123')
+        response = self.client.post(
+            reverse('cast_dispute_vote', args=[dispute.id]),
+            {'vote': 'favor_poster', 'comment': 'Poster provided valid proof.'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+        self.assertEqual(dispute.votes.count(), 1)
+        vote = dispute.votes.first()
+        self.assertEqual(vote.voter, self.juror1)
+        self.assertEqual(vote.voted_for, self.poster)
+        self.assertEqual(vote.vote, 'favor_poster')
+        self.assertEqual(vote.comment, 'Poster provided valid proof.')
+
+        summary = dispute.vote_summary
+        self.assertEqual(summary['total'], 1)
+        self.assertEqual(summary['poster_votes'], 1)
+        self.assertEqual(summary['taker_votes'], 0)
+
+    def test_participant_cannot_vote(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Disagreement',
+            deposit_amount=50,
+            escrow_status='held'
+        )
+
+        # Poster attempts to vote
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('cast_dispute_vote', args=[dispute.id]),
+            {'vote': 'favor_poster', 'comment': 'Self vote'}
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(dispute.votes.count(), 0)
+
+        # Taker attempts to vote
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(
+            reverse('cast_dispute_vote', args=[dispute.id]),
+            {'vote': 'favor_taker', 'comment': 'Self vote'}
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(dispute.votes.count(), 0)
+
+    def test_duplicate_vote_rejected(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Disagreement',
+            deposit_amount=50,
+            escrow_status='held'
+        )
+
+        self.client.login(username='juror1', password='password123')
+        self.client.post(
+            reverse('cast_dispute_vote', args=[dispute.id]),
+            {'vote': 'favor_poster', 'comment': 'First vote'}
+        )
+        self.assertEqual(dispute.votes.count(), 1)
+
+        # Second vote by same juror
+        response = self.client.post(
+            reverse('cast_dispute_vote', args=[dispute.id]),
+            {'vote': 'favor_taker', 'comment': 'Second vote'}
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(dispute.votes.count(), 1)
+
+    def test_vote_after_deadline_rejected(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Disagreement',
+            deposit_amount=50,
+            escrow_status='held',
+            voting_deadline=timezone.now() - timedelta(hours=1)
+        )
+        self.assertFalse(dispute.is_voting_active)
+
+        self.client.login(username='juror1', password='password123')
+        response = self.client.post(
+            reverse('cast_dispute_vote', args=[dispute.id]),
+            {'vote': 'favor_poster', 'comment': 'Late vote'}
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(dispute.votes.count(), 0)
+
+    def test_background_resolution_majority_poster(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Disagreement',
+            deposit_amount=50,
+            escrow_status='held',
+            voting_deadline=timezone.now() - timedelta(minutes=5)
+        )
+        # Juror 1 and 2 vote Poster, Juror 3 votes Taker
+        DisputeVote.objects.create(dispute=dispute, voter=self.juror1, voted_for=self.poster, vote='favor_poster')
+        DisputeVote.objects.create(dispute=dispute, voter=self.juror2, voted_for=self.poster, vote='favor_poster')
+        DisputeVote.objects.create(dispute=dispute, voter=self.juror3, voted_for=self.taker, vote='favor_taker')
+
+        from django.core.management import call_command
+        call_command('resolve_expired_disputes')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'cancelled')
+
+        # Poster gets task reward refunded (1000 + 200 = 1200) plus forfeited deposit bond (50) = 1250 total
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1250)
+        self.assertEqual(dispute.escrow_status, 'forfeited')
+
+    def test_background_resolution_majority_taker(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Disagreement',
+            deposit_amount=50,
+            escrow_status='held',
+            voting_deadline=timezone.now() - timedelta(minutes=5)
+        )
+        # Juror 1 and 2 vote Taker
+        DisputeVote.objects.create(dispute=dispute, voter=self.juror1, voted_for=self.taker, vote='favor_taker')
+        DisputeVote.objects.create(dispute=dispute, voter=self.juror2, voted_for=self.taker, vote='favor_taker')
+
+        from django.core.management import call_command
+        call_command('resolve_expired_disputes')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+
+        # Taker gets task reward (500 + 200 = 700) and deposit refunded (700 + 50 = 750)
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 750)
+        self.assertEqual(dispute.escrow_status, 'refunded')
+
+    def test_background_resolution_tied_or_unvoted_fallback(self):
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Disagreement',
+            deposit_amount=50,
+            escrow_status='held',
+            voting_deadline=timezone.now() - timedelta(minutes=5)
+        )
+
+        from django.core.management import call_command
+        call_command('resolve_expired_disputes')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+
+        # Fallback for taker-raised dispute: completes task, awards reward (500 + 200 = 700) and refunds deposit (700 + 50 = 750)
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 750)
+        self.assertEqual(dispute.escrow_status, 'refunded')
+
 

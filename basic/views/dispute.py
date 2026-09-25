@@ -1,8 +1,11 @@
+from datetime import timedelta
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from django.utils import timezone
+from django.conf import settings
+from ..models import Dispute, Task, Notification, RewardLedger, DisputeVote
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,12 +13,19 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
-        messages.error(request, "You are not authorized to view this dispute.")
-        return redirect('home')
+    
+    is_participant = (request.user == task.posted_by or request.user == task.taken_by)
+    user_vote = dispute.votes.filter(voter=request.user).first()
+    can_vote = (not is_participant) and dispute.is_voting_active and (user_vote is None)
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'is_participant': is_participant,
+        'can_vote': can_vote,
+        'user_vote': user_vote,
+        'vote_summary': dispute.vote_summary,
+        'votes': dispute.votes.select_related('voter', 'voted_for').order_by('-created_at')
     }
     return render(request, 'dispute_detail.html', context)
 
@@ -46,6 +56,9 @@ def raise_dispute(request, task_id):
             user_profile.rewards -= deposit_amount
             user_profile.save()
 
+            hours = getattr(settings, 'DISPUTE_VOTING_WINDOW_HOURS', 48)
+            voting_deadline = timezone.now() + timedelta(hours=hours)
+
             if hasattr(task, 'dispute'):
                 dispute = task.dispute
                 dispute.raised_by = request.user
@@ -53,6 +66,7 @@ def raise_dispute(request, task_id):
                 dispute.status = 'open'
                 dispute.deposit_amount = deposit_amount
                 dispute.escrow_status = 'held'
+                dispute.voting_deadline = voting_deadline
                 dispute.save()
             else:
                 dispute = Dispute.objects.create(
@@ -60,7 +74,8 @@ def raise_dispute(request, task_id):
                     raised_by=request.user,
                     reason=reason,
                     deposit_amount=deposit_amount,
-                    escrow_status='held'
+                    escrow_status='held',
+                    voting_deadline=voting_deadline
                 )
 
             RewardLedger.objects.create(
@@ -105,3 +120,56 @@ def withdraw_dispute(request, dispute_id):
         )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def cast_dispute_vote(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+
+    if dispute.status != 'open':
+        messages.error(request, "This dispute is no longer open for voting.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if not dispute.is_voting_active:
+        messages.error(request, "The voting deadline for this dispute has passed.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if request.user == task.posted_by or request.user == task.taken_by:
+        messages.error(request, "Task posters and task takers cannot vote on their own dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if DisputeVote.objects.filter(dispute=dispute, voter=request.user).exists():
+        messages.error(request, "You have already voted on this dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    vote_choice = request.POST.get('vote') or request.POST.get('voted_for')
+    comment = request.POST.get('comment', '').strip()
+
+    if not vote_choice:
+        messages.error(request, "Please select a vote option.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    voted_for_user = None
+    normalized_choice = ''
+    if str(vote_choice) == str(task.posted_by.id) or vote_choice in ['favor_poster', 'poster']:
+        voted_for_user = task.posted_by
+        normalized_choice = 'favor_poster'
+    elif str(vote_choice) == str(task.taken_by.id) or vote_choice in ['favor_taker', 'taker']:
+        voted_for_user = task.taken_by
+        normalized_choice = 'favor_taker'
+    else:
+        messages.error(request, "Invalid vote selection.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    DisputeVote.objects.create(
+        dispute=dispute,
+        voter=request.user,
+        voted_for=voted_for_user,
+        vote=normalized_choice,
+        comment=comment
+    )
+
+    messages.success(request, "Your vote has been submitted successfully.")
+    return redirect('dispute_detail', dispute_id=dispute.id)
+
