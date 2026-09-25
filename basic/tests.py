@@ -182,3 +182,101 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class JurorChatAndDeliberationTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        self.juror = User.objects.create_user(username='juror', password='password123')
+        self.juror_profile = UserProfile.objects.create(user=self.juror, rewards=1000)
+
+        self.staff_user = User.objects.create_user(username='staff', password='password123', is_staff=True)
+
+        self.random_user = User.objects.create_user(username='random_user', password='password123')
+        UserProfile.objects.create(user=self.random_user, rewards=1000)
+
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="Disputed Task",
+            description="Task with dispute",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=self.deadline
+        )
+        self.task_chat = Conversation.objects.create(task=self.task)
+        self.task_chat.participants.add(self.poster, self.taker)
+
+    def test_read_only_transcript_and_messaging_guard_for_disputed_tasks(self):
+        # 1. Non-disputed task chat guard
+        self.client.login(username='random_user', password='password123')
+        res = self.client.get(reverse('chat_view', args=[self.task_chat.id]))
+        self.assertRedirects(res, reverse('home'))
+
+        # 2. Raise dispute
+        self.client.login(username='taker', password='password123')
+        res = self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Issue with deliverable'})
+        self.assertEqual(res.status_code, 302)
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'disputed')
+        dispute = self.task.dispute
+        dispute.jurors.add(self.juror)
+
+        # 3. Juror and Random Community Member can view transcript read-only
+        for username in ['juror', 'random_user', 'poster', 'taker']:
+            self.client.login(username=username, password='password123')
+            res = self.client.get(reverse('chat_view', args=[self.task_chat.id]))
+            self.assertEqual(res.status_code, 200)
+            self.assertTrue(res.context['is_read_only'])
+
+        # 4. Attempting to send message in main task chat during dispute is forbidden for everyone
+        for username in ['juror', 'random_user', 'poster', 'taker']:
+            self.client.login(username=username, password='password123')
+            res = self.client.post(reverse('send_message', args=[self.task_chat.id]), {'content': 'Hello'})
+            self.assertEqual(res.status_code, 403)
+
+    def test_deliberation_channel_creation_and_permissions(self):
+        # Raise dispute to auto-create deliberation channel
+        self.client.login(username='taker', password='password123')
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Deliberation test'})
+
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertIsNotNone(dispute.deliberation_channel)
+        delib_id = dispute.deliberation_channel.id
+
+        dispute.jurors.add(self.juror)
+
+        # Task participants (poster & taker) are excluded from deliberation channel while open
+        for username in ['poster', 'taker', 'random_user']:
+            self.client.login(username=username, password='password123')
+            res = self.client.get(reverse('chat_view', args=[delib_id]))
+            self.assertRedirects(res, reverse('home'))
+
+            res_post = self.client.post(reverse('send_message', args=[delib_id]), {'content': 'Unauthorized note'})
+            self.assertEqual(res_post.status_code, 403)
+
+        # Assigned juror can view and send messages in deliberation channel
+        self.client.login(username='juror', password='password123')
+        res_juror_view = self.client.get(reverse('chat_view', args=[delib_id]))
+        self.assertEqual(res_juror_view.status_code, 200)
+        self.assertFalse(res_juror_view.context['is_read_only'])
+
+        res_juror_msg = self.client.post(reverse('send_message', args=[delib_id]), {'content': 'Juror note on evidence'})
+        self.assertEqual(res_juror_msg.status_code, 200)
+
+        # Staff can view and send messages in deliberation channel
+        self.client.login(username='staff', password='password123')
+        res_staff_view = self.client.get(reverse('chat_view', args=[delib_id]))
+        self.assertEqual(res_staff_view.status_code, 200)
+
+        res_staff_msg = self.client.post(reverse('send_message', args=[delib_id]), {'content': 'Staff note on evidence'})
+        self.assertEqual(res_staff_msg.status_code, 200)
+

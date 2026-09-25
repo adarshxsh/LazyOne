@@ -95,6 +95,8 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    jurors = models.ManyToManyField(User, related_name='assigned_disputes', blank=True)
+    deliberation_channel = models.OneToOneField('Conversation', on_delete=models.SET_NULL, null=True, blank=True, related_name='deliberation_dispute')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -162,6 +164,8 @@ class Conversation(models.Model):
     last_message_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self):
+        if hasattr(self, 'deliberation_dispute') and self.deliberation_dispute:
+            return f"Juror Deliberation for dispute: {self.deliberation_dispute.task.title}"
         if self.task:
             return f"Chat for task: {self.task.title}"
         participant_names = [user.username for user in self.participants.all()]

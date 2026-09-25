@@ -2,7 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, Task, Notification, RewardLedger, Conversation
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,12 +10,17 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+    is_juror = dispute.jurors.filter(id=request.user.id).exists()
+    is_participant = (request.user == task.posted_by or request.user == task.taken_by)
+    if not is_participant and not request.user.is_staff and not is_juror:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+
+    is_juror_or_staff = request.user.is_staff or is_juror
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'is_juror_or_staff': is_juror_or_staff,
     }
     return render(request, 'dispute_detail.html', context)
 
@@ -62,6 +67,17 @@ def raise_dispute(request, task_id):
                     deposit_amount=deposit_amount,
                     escrow_status='held'
                 )
+
+            # Ensure task main conversation exists
+            task_conv, _ = Conversation.objects.get_or_create(task=task)
+            if task.posted_by and task.taken_by:
+                task_conv.participants.add(task.posted_by, task.taken_by)
+
+            # Ensure deliberation channel exists for dispute
+            if not dispute.deliberation_channel:
+                deliberation_conv = Conversation.objects.create()
+                dispute.deliberation_channel = deliberation_conv
+                dispute.save()
 
             RewardLedger.objects.create(
                 user=request.user,
