@@ -182,3 +182,135 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class DisputeVotingTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=100)
+
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="Voting Task",
+            description="Task for testing voting",
+            reward=300,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=self.deadline
+        )
+        Conversation.objects.create(task=self.task)
+
+        # Raise dispute by taker
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work submitted but not accepted'}
+        )
+        self.dispute = Dispute.objects.get(task=self.task)
+
+        # Create 5 community jurors
+        self.jurors = []
+        for i in range(1, 6):
+            juror = User.objects.create_user(username=f'juror{i}', password='password123')
+            UserProfile.objects.create(user=juror, rewards=500)
+            self.jurors.append(juror)
+
+    def test_non_participant_can_view_open_dispute_detail(self):
+        self.client.login(username='juror1', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Voting Task")
+        self.assertContains(response, "Juror Voting")
+
+    def test_cast_vote_persists_vote_and_prevents_duplicate(self):
+        self.client.login(username='juror1', password='password123')
+        response = self.client.post(
+            reverse('vote_dispute', args=[self.dispute.id]),
+            {'voted_for': self.poster.id, 'comment': 'Poster seems right'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+
+        self.assertEqual(self.dispute.votes.count(), 1)
+        vote = self.dispute.votes.first()
+        self.assertEqual(vote.voter, self.jurors[0])
+        self.assertEqual(vote.voted_for, self.poster)
+        self.assertEqual(vote.comment, 'Poster seems right')
+
+        # Duplicate vote attempt
+        response2 = self.client.post(
+            reverse('vote_dispute', args=[self.dispute.id]),
+            {'voted_for': self.taker.id, 'comment': 'Changing my mind'}
+        )
+        self.assertEqual(self.dispute.votes.count(), 1)
+
+    def test_participant_cannot_vote_on_own_dispute(self):
+        # Poster attempts to vote
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('vote_dispute', args=[self.dispute.id]),
+            {'voted_for': self.poster.id}
+        )
+        self.assertEqual(self.dispute.votes.count(), 0)
+
+        # Taker attempts to vote
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(
+            reverse('vote_dispute', args=[self.dispute.id]),
+            {'voted_for': self.taker.id}
+        )
+        self.assertEqual(self.dispute.votes.count(), 0)
+
+    def test_realtime_consensus_settlement_worker_wins(self):
+        # Jurors 1, 2, 3 vote for Worker (taker)
+        # Jurors 4, 5 vote for Poster (poster)
+        vote_choices = [self.taker, self.taker, self.taker, self.poster, self.poster]
+
+        for i, juror in enumerate(self.jurors):
+            self.client.login(username=juror.username, password='password123')
+            self.client.post(
+                reverse('vote_dispute', args=[self.dispute.id]),
+                {'voted_for': vote_choices[i].id, 'comment': f'Vote by {juror.username}'}
+            )
+
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.dispute.escrow_status, 'refunded')
+        self.assertEqual(self.task.status, 'completed')
+
+        # Taker starting rewards = 100, minus deposit 60 = 40.
+        # Plus reward 300 + deposit refund 60 = 400.
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 400)
+
+    def test_realtime_consensus_settlement_poster_wins(self):
+        # Jurors 1, 2, 3 vote for Poster
+        # Jurors 4, 5 vote for Worker
+        vote_choices = [self.poster, self.poster, self.poster, self.taker, self.taker]
+
+        for i, juror in enumerate(self.jurors):
+            self.client.login(username=juror.username, password='password123')
+            self.client.post(
+                reverse('vote_dispute', args=[self.dispute.id]),
+                {'voted_for': vote_choices[i].id, 'comment': f'Vote by {juror.username}'}
+            )
+
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.dispute.escrow_status, 'forfeited')
+        self.assertEqual(self.task.status, 'cancelled')
+
+        # Poster starting rewards = 1000.
+        # Refund reward 300 + forfeited deposit 60 = 1360.
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1360)
+
+
