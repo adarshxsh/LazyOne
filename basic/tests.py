@@ -182,3 +182,198 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class TwoTierJuryGovernanceTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Create Poster & Taker
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        # Create 5 Neutral Jurors
+        self.jurors = []
+        for i in range(1, 6):
+            juror = User.objects.create_user(username=f'juror{i}', password='password123')
+            UserProfile.objects.create(user=juror, rewards=500)
+            self.jurors.append(juror)
+
+        # Create Task (Reward = 300)
+        self.task = Task.objects.create(
+            title="Governance Task",
+            description="Task to test dispute escalation",
+            reward=300,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress'
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_primary_voting_quorum_and_consensus(self):
+        # Taker raises dispute
+        self.client.login(username='taker', password='password123')
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Unfair rejection'})
+        dispute = Dispute.objects.get(task=self.task)
+
+        # Juror 1 votes 'poster'
+        self.client.login(username='juror1', password='password123')
+        self.client.post(reverse('vote_dispute', args=[dispute.id]), {'tier': 'primary', 'vote': 'poster'})
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'open') # Only 1 vote, quorum (3) not met
+
+        # Juror 2 votes 'taker'
+        self.client.login(username='juror2', password='password123')
+        self.client.post(reverse('vote_dispute', args=[dispute.id]), {'tier': 'primary', 'vote': 'taker'})
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'open') # 2 votes, quorum (3) not met
+
+        # Juror 3 votes 'poster' (2 out of 3 = 66.67% >= 66% supermajority)
+        self.client.login(username='juror3', password='password123')
+        self.client.post(reverse('vote_dispute', args=[dispute.id]), {'tier': 'primary', 'vote': 'poster'})
+        dispute.refresh_from_db()
+
+        self.assertEqual(dispute.status, 'primary_resolved')
+        self.assertEqual(dispute.primary_outcome, 'poster')
+        self.assertTrue(dispute.is_in_appeal_window)
+
+    def test_litigant_cannot_vote_as_juror(self):
+        self.client.login(username='taker', password='password123')
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Dispute reason'})
+        dispute = Dispute.objects.get(task=self.task)
+
+        # Poster attempts to vote
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(reverse('vote_dispute', args=[dispute.id]), {'tier': 'primary', 'vote': 'poster'})
+        self.assertEqual(dispute.votes.count(), 0)
+
+    def test_appeal_submission_requires_100_percent_reward_bond(self):
+        # Raise dispute and trigger primary resolution favoring poster
+        self.client.login(username='taker', password='password123')
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Dispute reason'})
+        dispute = Dispute.objects.get(task=self.task)
+
+        for i in [1, 2, 3]:
+            self.client.login(username=f'juror{i}', password='password123')
+            self.client.post(reverse('vote_dispute', args=[dispute.id]), {'tier': 'primary', 'vote': 'poster'})
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'primary_resolved')
+
+        # Taker profile balance initially: 500 - 60 (deposit) = 440
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 440)
+
+        # Taker submits appeal (task reward = 300)
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(reverse('appeal_dispute', args=[dispute.id]), {'reason': 'Evidence attached'})
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'appealed')
+
+        # Balance debited 300 -> 140 left
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 140)
+
+        # Check appeal bond held in ledger
+        ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='appeal_bond_held').first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, -300)
+
+    def test_appeal_upheld_slashes_bad_faith_primary_juror(self):
+        # Setup dispute with primary outcome = 'poster' (Juror 1 & 2 voted 'poster', Juror 3 voted 'taker')
+        self.client.login(username='taker', password='password123')
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Dispute reason'})
+        dispute = Dispute.objects.get(task=self.task)
+
+        self.client.login(username='juror1', password='password123')
+        self.client.post(reverse('vote_dispute', args=[dispute.id]), {'tier': 'primary', 'vote': 'poster'})
+        self.client.login(username='juror2', password='password123')
+        self.client.post(reverse('vote_dispute', args=[dispute.id]), {'tier': 'primary', 'vote': 'poster'})
+        self.client.login(username='juror3', password='password123')
+        self.client.post(reverse('vote_dispute', args=[dispute.id]), {'tier': 'primary', 'vote': 'taker'})
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.primary_outcome, 'poster')
+
+        # Taker appeals
+        self.client.login(username='taker', password='password123')
+        self.client.post(reverse('appeal_dispute', args=[dispute.id]), {'reason': 'Valid grounds'})
+
+        # Senior panel (Juror 3, 4, 5) votes 'taker' -> Overturns primary decision!
+        for i in [3, 4, 5]:
+            self.client.login(username=f'juror{i}', password='password123')
+            self.client.post(reverse('vote_dispute', args=[dispute.id]), {'tier': 'senior', 'vote': 'taker'})
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.final_winner, 'taker')
+
+        # Primary Jurors 1 & 2 voted 'poster' against final consensus 'taker' -> Slashed 100 points!
+        j1_profile = self.jurors[0].userprofile
+        j1_profile.refresh_from_db()
+        self.assertEqual(j1_profile.rewards, 400) # 500 - 100 = 400
+
+        # Check juror slash ledger
+        slash_ledger = RewardLedger.objects.filter(user=self.jurors[0], transaction_type='juror_slash').first()
+        self.assertIsNotNone(slash_ledger)
+        self.assertEqual(slash_ledger.amount, -100)
+
+    def test_appeal_rejected_forfeits_bond_to_winner(self):
+        # Primary outcome = 'poster'
+        self.client.login(username='taker', password='password123')
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Dispute reason'})
+        dispute = Dispute.objects.get(task=self.task)
+
+        for i in [1, 2, 3]:
+            self.client.login(username=f'juror{i}', password='password123')
+            self.client.post(reverse('vote_dispute', args=[dispute.id]), {'tier': 'primary', 'vote': 'poster'})
+
+        # Taker appeals (300 bond held)
+        self.client.login(username='taker', password='password123')
+        self.client.post(reverse('appeal_dispute', args=[dispute.id]), {'reason': 'Frivolous appeal'})
+
+        # Senior panel votes 'poster' -> Appeal Rejected!
+        for i in [3, 4, 5]:
+            self.client.login(username=f'juror{i}', password='password123')
+            self.client.post(reverse('vote_dispute', args=[dispute.id]), {'tier': 'senior', 'vote': 'poster'})
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.final_winner, 'poster')
+
+        # Poster receives 80% of forfeited 300 bond (240 points) + task cancellation refund
+        poster_forfeit_ledger = RewardLedger.objects.filter(user=self.poster, transaction_type='appeal_bond_forfeit').first()
+        self.assertIsNotNone(poster_forfeit_ledger)
+        self.assertEqual(poster_forfeit_ledger.amount, 240)
+
+    def test_resolve_expired_disputes_command_applies_penalties(self):
+        from django.core.management import call_command
+
+        self.client.login(username='taker', password='password123')
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Expired dispute'})
+        dispute = Dispute.objects.get(task=self.task)
+
+        # Juror 1 voted, Jurors 2-5 did not vote
+        self.client.login(username='juror1', password='password123')
+        self.client.post(reverse('vote_dispute', args=[dispute.id]), {'tier': 'primary', 'vote': 'poster'})
+
+        # Backdate dispute created_at by 3 days
+        dispute.created_at = timezone.now() - timedelta(days=3)
+        dispute.save()
+
+        # Run resolution job
+        call_command('resolve_expired_disputes', days=2)
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+
+        # Non-voting assigned juror (Juror 2) gets 30-day juror ineligibility penalty
+        j2_profile = self.jurors[1].userprofile
+        j2_profile.refresh_from_db()
+        self.assertIsNotNone(j2_profile.juror_ineligible_until)
+        self.assertFalse(j2_profile.is_juror_eligible)
+
+

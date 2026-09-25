@@ -4,86 +4,95 @@ from django.utils import timezone
 from django.db import transaction
 from django.urls import reverse
 from basic.models import Dispute, RewardLedger, Notification
+from basic.views.dispute import finalize_dispute_resolution
+
 
 class Command(BaseCommand):
-    help = 'Resolves expired open disputes, refunds/forfeits escrowed bonds, and settles task points.'
+    help = 'Verifies quorum, appeal windows, applies juror penalties, and auto-resolves expired disputes.'
 
     def add_arguments(self, parser):
         parser.add_argument(
             '--days',
             type=int,
-            default=7,
-            help='Number of days after dispute creation before considering it expired (default: 7)'
+            default=2,
+            help='Number of days for voting SLA / appeal window threshold (default: 2 days / 48 hours)'
         )
 
     def handle(self, *args, **options):
         days = options['days']
         now = timezone.now()
-        expiry_threshold = now - timedelta(days=days)
+        voting_threshold = now - timedelta(days=days)
 
-        # Find open disputes created before the expiration window
-        expired_disputes = Dispute.objects.filter(status='open', created_at__lte=expiry_threshold)
+        processed_count = 0
 
-        count = 0
-        for dispute in expired_disputes:
+        # Phase 1: Open Disputes (Primary Jury Voting)
+        open_disputes = Dispute.objects.filter(status='open')
+        for dispute in open_disputes:
             task = dispute.task
             with transaction.atomic():
-                dispute.status = 'resolved'
-                dispute.save()
+                # First check if primary consensus is already met
+                if dispute.check_primary_consensus():
+                    self.stdout.write(self.style.SUCCESS(f"Dispute {dispute.id} reached primary consensus."))
+                    processed_count += 1
+                    continue
 
-                if dispute.raised_by == task.posted_by:
-                    # Poster challenged an unresponsive taker: cancel task, refund task reward, forfeit bond
-                    poster_profile = task.posted_by.userprofile
-                    poster_profile.rewards += task.reward
-                    poster_profile.save()
+                # If voting window (48h) has expired
+                if dispute.created_at <= voting_threshold:
+                    # Guardrail 3: Jurors who fail to cast a vote within 48 hours lose juror eligibility for 30 days
+                    primary_voted_juror_ids = dispute.votes.filter(tier='primary').values_list('juror_id', flat=True)
+                    for assigned_juror in dispute.assigned_jurors.all():
+                        if assigned_juror.id not in primary_voted_juror_ids:
+                            profile = assigned_juror.userprofile
+                            profile.juror_ineligible_until = now + timedelta(days=30)
+                            profile.save()
 
-                    task.status = 'cancelled'
-                    task.save()
+                    # Resolve by majority vote if available, or fallback
+                    p_votes = dispute.votes.filter(tier='primary')
+                    poster_count = p_votes.filter(vote='poster').count()
+                    taker_count = p_votes.filter(vote='taker').count()
 
-                    RewardLedger.objects.create(
-                        user=task.posted_by,
-                        task=task,
-                        amount=task.reward,
-                        transaction_type='task_cancellation',
-                        description=f"Refund for expired dispute on task: '{task.title}'"
-                    )
+                    if poster_count > taker_count:
+                        winner = 'poster'
+                    elif taker_count > poster_count:
+                        winner = 'taker'
+                    else:
+                        # Default fallback: poster if raised by poster, taker if raised by taker
+                        winner = 'poster' if dispute.raised_by == task.posted_by else 'taker'
 
-                    # Handle escrow bond refund / forfeiture
-                    if dispute.escrow_status == 'held':
-                        dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
-                else:
-                    # Taker raised dispute: award reward to taker, complete task, and refund bond
-                    if task.taken_by:
-                        taker_profile = task.taken_by.userprofile
-                        taker_profile.rewards += task.reward
-                        taker_profile.save()
+                    finalize_dispute_resolution(dispute, winner, is_appeal_outcome=False)
+                    processed_count += 1
+                    self.stdout.write(self.style.SUCCESS(f"Dispute {dispute.id} expired without quorum/consensus; auto-resolved for {winner}."))
 
-                        RewardLedger.objects.create(
-                            user=task.taken_by,
-                            task=task,
-                            amount=task.reward,
-                            transaction_type='task_completion',
-                            description=f"Awarded reward for auto-resolved expired dispute on task: '{task.title}'"
-                        )
-                    task.status = 'completed'
-                    task.save()
+        # Phase 2: Primary Resolved Disputes (Checking 48-hour Appeal Window)
+        primary_resolved_disputes = Dispute.objects.filter(status='primary_resolved')
+        for dispute in primary_resolved_disputes:
+            if dispute.primary_resolved_at and now >= dispute.primary_resolved_at + timedelta(hours=48):
+                if not hasattr(dispute, 'appeal'):
+                    # Appeal window expired without appeal -> finalize primary decision
+                    with transaction.atomic():
+                        winner = dispute.primary_outcome or ('poster' if dispute.raised_by == dispute.task.posted_by else 'taker')
+                        finalize_dispute_resolution(dispute, winner, is_appeal_outcome=False)
+                        processed_count += 1
+                        self.stdout.write(self.style.SUCCESS(f"Dispute {dispute.id} appeal window expired. Finalized primary outcome: {winner}."))
 
-                    if dispute.escrow_status == 'held':
-                        dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
+        # Phase 3: Appealed Disputes (Senior Panel Review)
+        appealed_disputes = Dispute.objects.filter(status='appealed')
+        for dispute in appealed_disputes:
+            if dispute.created_at <= voting_threshold or (hasattr(dispute, 'appeal') and dispute.appeal.created_at <= voting_threshold):
+                with transaction.atomic():
+                    s_votes = dispute.votes.filter(tier='senior')
+                    poster_count = s_votes.filter(vote='poster').count()
+                    taker_count = s_votes.filter(vote='taker').count()
 
-                # Notify participants
-                participants = [task.posted_by]
-                if task.taken_by and task.taken_by not in participants:
-                    participants.append(task.taken_by)
+                    if poster_count > taker_count:
+                        winner = 'poster'
+                    elif taker_count > poster_count:
+                        winner = 'taker'
+                    else:
+                        winner = dispute.primary_outcome or 'poster'
 
-                dispute_link = reverse('dispute_detail', args=[dispute.id])
-                for participant in participants:
-                    Notification.objects.create(
-                        recipient=participant,
-                        message=f"Dispute for task '{task.title}' has expired ({days}d SLA) and was automatically resolved.",
-                        link=dispute_link
-                    )
+                    finalize_dispute_resolution(dispute, winner, is_appeal_outcome=True)
+                    processed_count += 1
+                    self.stdout.write(self.style.SUCCESS(f"Dispute {dispute.id} senior appeal panel review completed/expired; auto-resolved for {winner}."))
 
-                count += 1
-
-        self.stdout.write(self.style.SUCCESS(f"Successfully processed {count} expired dispute(s)."))
+        self.stdout.write(self.style.SUCCESS(f"Successfully processed {processed_count} dispute action(s)."))
