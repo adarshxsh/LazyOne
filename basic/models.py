@@ -81,8 +81,10 @@ class RewardLedger(models.Model):
 
 class Dispute(models.Model):
     STATUS_CHOICES = (
-        ('open', 'Open'),
+        ('evidence_submission', 'Evidence Submission'),
+        ('voting', 'Peer Voting'),
         ('resolved', 'Resolved'),
+        ('withdrawn', 'Withdrawn'),
     )
     ESCROW_STATUS_CHOICES = (
         ('held', 'Held in Escrow'),
@@ -92,7 +94,7 @@ class Dispute(models.Model):
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='evidence_submission')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -141,6 +143,100 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+    def resolve_dispute(self, winner, reason_description=None):
+        from django.db import transaction
+        from django.urls import reverse
+
+        if self.status in ['resolved', 'withdrawn']:
+            return
+
+        task = self.task
+        with transaction.atomic():
+            self.status = 'resolved'
+            self.save()
+
+            if winner == task.taken_by:
+                if task.taken_by:
+                    taker_profile = task.taken_by.userprofile
+                    taker_profile.rewards += task.reward
+                    taker_profile.save()
+
+                    RewardLedger.objects.create(
+                        user=task.taken_by,
+                        task=task,
+                        amount=task.reward,
+                        transaction_type='task_completion',
+                        description=reason_description or f"Awarded reward for resolved dispute on task: '{task.title}'"
+                    )
+
+                task.status = 'completed'
+                task.save()
+
+                if self.escrow_status == 'held':
+                    if self.raised_by == task.taken_by:
+                        self.refund_deposit(reason_description=f"Deposit bond refunded for won dispute on task '{task.title}'")
+                    else:
+                        self.forfeit_deposit(beneficiary=task.taken_by, reason_description=f"Deposit bond forfeited to taker for resolved dispute on task '{task.title}'")
+
+            elif winner == task.posted_by:
+                poster_profile = task.posted_by.userprofile
+                poster_profile.rewards += task.reward
+                poster_profile.save()
+
+                RewardLedger.objects.create(
+                    user=task.posted_by,
+                    task=task,
+                    amount=task.reward,
+                    transaction_type='task_cancellation',
+                    description=reason_description or f"Refunded reward for resolved dispute on task: '{task.title}'"
+                )
+
+                task.status = 'cancelled'
+                task.save()
+
+                if self.escrow_status == 'held':
+                    if self.raised_by == task.posted_by:
+                        self.refund_deposit(reason_description=f"Deposit bond refunded for won dispute on task '{task.title}'")
+                    else:
+                        self.forfeit_deposit(beneficiary=task.posted_by, reason_description=f"Deposit bond forfeited to poster for resolved dispute on task '{task.title}'")
+
+            dispute_link = reverse('dispute_detail', args=[self.id])
+            participants = [task.posted_by]
+            if task.taken_by and task.taken_by not in participants:
+                participants.append(task.taken_by)
+
+            for participant in participants:
+                win_text = f"in favor of {winner.username}" if winner else "automatically"
+                Notification.objects.create(
+                    recipient=participant,
+                    message=f"Dispute for task '{task.title}' has been resolved {win_text}.",
+                    link=dispute_link
+                )
+
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidence_records')
+    submitted_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_evidences')
+    title = models.CharField(max_length=200, blank=True)
+    description = models.TextField()
+    file_attachment = models.FileField(upload_to='dispute_evidence/', blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Evidence by {self.submitted_by.username} for Dispute {self.dispute.id}"
+
+class DisputeVote(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    voted_for = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes_received')
+    reason = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'voter')
+
+    def __str__(self):
+        return f"Vote by {self.voter.username} for {self.voted_for.username} on Dispute {self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
