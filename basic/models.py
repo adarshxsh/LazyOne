@@ -21,6 +21,7 @@ class UserProfile(models.Model):
     is_phone_verified = models.BooleanField(default=False)
     instagram_username = models.CharField(max_length=100, blank=True)
     is_instagram_verified = models.BooleanField(default=False)
+    juror_ineligible_until = models.DateTimeField(null=True, blank=True)
     
     # Fields for Email OTP Verification
     email_otp = models.CharField(max_length=6, blank=True, null=True)
@@ -28,6 +29,12 @@ class UserProfile(models.Model):
 
     def __str__(self):
         return self.user.username
+
+    @property
+    def is_juror_eligible(self):
+        if self.juror_ineligible_until and timezone.now() < self.juror_ineligible_until:
+            return False
+        return True
 
 class Task(models.Model):
     STATUS_CHOICES = (
@@ -68,11 +75,16 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('appeal_bond_held', 'Appeal Bond Escrow Held'),
+        ('appeal_bond_refund', 'Appeal Bond Refunded'),
+        ('appeal_bond_forfeit', 'Appeal Bond Forfeited'),
+        ('juror_slash', 'Bad-Faith Juror Slashed'),
+        ('juror_reward', 'Honest Juror Reward'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
     amount = models.IntegerField()
-    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    transaction_type = models.CharField(max_length=30, choices=TRANSACTION_TYPES)
     description = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -81,7 +93,9 @@ class RewardLedger(models.Model):
 
 class Dispute(models.Model):
     STATUS_CHOICES = (
-        ('open', 'Open'),
+        ('open', 'Open / Primary Voting'),
+        ('primary_resolved', 'Primary Resolved (Appeal Window)'),
+        ('appealed', 'Appealed / Senior Review'),
         ('resolved', 'Resolved'),
     )
     ESCROW_STATUS_CHOICES = (
@@ -92,13 +106,45 @@ class Dispute(models.Model):
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    assigned_jurors = models.ManyToManyField(User, related_name='assigned_disputes', blank=True)
+    primary_outcome = models.CharField(max_length=10, choices=(('poster', 'Poster Wins'), ('taker', 'Taker Wins')), null=True, blank=True)
+    primary_resolved_at = models.DateTimeField(null=True, blank=True)
+    senior_outcome = models.CharField(max_length=10, choices=(('poster', 'Poster Wins'), ('taker', 'Taker Wins')), null=True, blank=True)
+    final_winner = models.CharField(max_length=10, choices=(('poster', 'Poster Wins'), ('taker', 'Taker Wins')), null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def check_primary_consensus(self):
+        if self.status != 'open':
+            return False
+        primary_votes = self.votes.filter(tier='primary')
+        total_votes = primary_votes.count()
+        if total_votes < 3:
+            return False
+
+        poster_votes = primary_votes.filter(vote='poster').count()
+        taker_votes = primary_votes.filter(vote='taker').count()
+        max_votes = max(poster_votes, taker_votes)
+
+        if total_votes > 0 and (max_votes / total_votes) >= 0.66:
+            winner = 'poster' if poster_votes > taker_votes else 'taker'
+            self.primary_outcome = winner
+            self.status = 'primary_resolved'
+            self.primary_resolved_at = timezone.now()
+            self.save()
+            return True
+        return False
+
+    @property
+    def is_in_appeal_window(self):
+        if self.status == 'primary_resolved' and self.primary_resolved_at:
+            return timezone.now() <= self.primary_resolved_at + timezone.timedelta(hours=48)
+        return False
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -141,6 +187,46 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class DisputeVote(models.Model):
+    TIER_CHOICES = (
+        ('primary', 'Primary Jury'),
+        ('senior', 'Senior Appeal Panel'),
+    )
+    VOTE_CHOICES = (
+        ('poster', 'Poster Wins'),
+        ('taker', 'Taker Wins'),
+    )
+
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    tier = models.CharField(max_length=10, choices=TIER_CHOICES, default='primary')
+    vote = models.CharField(max_length=10, choices=VOTE_CHOICES)
+    reason = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror', 'tier')
+
+    def __str__(self):
+        return f"{self.juror.username} voted {self.vote} on dispute {self.dispute.id} ({self.tier})"
+
+class DisputeAppeal(models.Model):
+    STATUS_CHOICES = (
+        ('pending', 'Pending Senior Panel'),
+        ('upheld', 'Appeal Upheld'),
+        ('rejected', 'Appeal Rejected'),
+    )
+
+    dispute = models.OneToOneField(Dispute, on_delete=models.CASCADE, related_name='appeal')
+    appellant = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_appeals')
+    bond_amount = models.PositiveIntegerField()
+    reason = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Appeal by {self.appellant.username} for Dispute {self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
