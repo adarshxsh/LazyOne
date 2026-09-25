@@ -3,7 +3,8 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from django.core.management import call_command
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, DisputeVote
 
 
 class DisputeDepositBondTests(TestCase):
@@ -17,6 +18,13 @@ class DisputeDepositBondTests(TestCase):
         # Task taker
         self.taker = User.objects.create_user(username='taker', password='password123')
         self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=100)
+
+        # Juror 1 & Juror 2
+        self.juror1 = User.objects.create_user(username='juror1', password='password123')
+        self.juror1_profile = UserProfile.objects.create(user=self.juror1, rewards=500)
+
+        self.juror2 = User.objects.create_user(username='juror2', password='password123')
+        self.juror2_profile = UserProfile.objects.create(user=self.juror2, rewards=500)
 
         # Create task: reward = 300, 20% = 60 (> 50 minimum)
         self.deadline = timezone.now() + timedelta(days=2)
@@ -124,7 +132,7 @@ class DisputeDepositBondTests(TestCase):
         self.assertIsNotNone(ledger)
         self.assertEqual(ledger.amount, 60)
 
-    def test_complete_disputed_task_refunds_deposit(self):
+    def test_complete_disputed_task_blocked(self):
         # Taker raises dispute (deposit 60 deducted from 100 -> 40 left)
         self.client.login(username='taker', password='password123')
         self.client.post(
@@ -132,26 +140,18 @@ class DisputeDepositBondTests(TestCase):
             {'reason': 'Dispute reason'}
         )
 
-        # Poster marks task as completed
+        # Poster attempts to mark task as completed
         self.client.login(username='poster', password='password123')
         response = self.client.get(reverse('complete_task', args=[self.task.id]))
         self.assertRedirects(response, reverse('my_tasks'))
 
+        # Task MUST remain in disputed status
         self.task.refresh_from_db()
-        self.assertEqual(self.task.status, 'completed')
+        self.assertEqual(self.task.status, 'disputed')
 
         dispute = Dispute.objects.get(task=self.task)
-        self.assertEqual(dispute.escrow_status, 'refunded')
-        self.assertEqual(dispute.status, 'resolved')
-
-        # Taker balance: 40 + 300 (task reward) + 60 (deposit refund) = 400
-        self.taker_profile.refresh_from_db()
-        self.assertEqual(self.taker_profile.rewards, 400)
-
-        # Check ledger entries for taker
-        refund_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_refund').first()
-        self.assertIsNotNone(refund_ledger)
-        self.assertEqual(refund_ledger.amount, 60)
+        self.assertEqual(dispute.escrow_status, 'held')
+        self.assertEqual(dispute.status, 'open')
 
     def test_forfeit_deposit_method(self):
         dispute = Dispute.objects.create(
@@ -182,3 +182,103 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+    def test_jury_voting_neutral_users_and_duplicate_prevention(self):
+        # Raise dispute
+        self.client.login(username='taker', password='password123')
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Unfinished task'})
+        dispute = Dispute.objects.get(task=self.task)
+
+        # Neutral user (juror1) casts vote
+        self.client.login(username='juror1', password='password123')
+        response = self.client.post(reverse('vote_dispute', args=[dispute.id]), {'vote': 'poster'})
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+        self.assertTrue(DisputeVote.objects.filter(dispute=dispute, voter=self.juror1, vote='poster').exists())
+
+        # Duplicate vote attempt by juror1 should fail
+        response_dup = self.client.post(reverse('vote_dispute', args=[dispute.id]), {'vote': 'taker'})
+        self.assertEqual(DisputeVote.objects.filter(dispute=dispute, voter=self.juror1).count(), 1)
+
+    def test_jury_voting_participant_blocked(self):
+        # Raise dispute
+        self.client.login(username='taker', password='password123')
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Unfinished task'})
+        dispute = Dispute.objects.get(task=self.task)
+
+        # Poster attempts to vote as juror -> should be blocked
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(reverse('vote_dispute', args=[dispute.id]), {'vote': 'poster'})
+        self.assertFalse(DisputeVote.objects.filter(dispute=dispute, voter=self.poster).exists())
+
+        # Taker attempts to vote as juror -> should be blocked
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(reverse('vote_dispute', args=[dispute.id]), {'vote': 'taker'})
+        self.assertFalse(DisputeVote.objects.filter(dispute=dispute, voter=self.taker).exists())
+
+    def test_dispute_resolution_and_bond_redistribution_to_jurors(self):
+        # Taker raises dispute (deposit 60 held)
+        self.client.login(username='taker', password='password123')
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Unfinished task'})
+        dispute = Dispute.objects.get(task=self.task)
+
+        # Juror 1 & Juror 2 vote for Poster
+        self.client.login(username='juror1', password='password123')
+        self.client.post(reverse('vote_dispute', args=[dispute.id]), {'vote': 'poster'})
+
+        self.client.login(username='juror2', password='password123')
+        self.client.post(reverse('vote_dispute', args=[dispute.id]), {'vote': 'poster'})
+
+        # Resolve dispute via POST
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(reverse('resolve_dispute', args=[dispute.id]), {'winner': 'poster'})
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.escrow_status, 'forfeited')
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'cancelled')
+
+        # Juror 1 and Juror 2 each receive 60 // 2 = 30 points
+        self.juror1_profile.refresh_from_db()
+        self.assertEqual(self.juror1_profile.rewards, 530)
+
+        self.juror2_profile.refresh_from_db()
+        self.assertEqual(self.juror2_profile.rewards, 530)
+
+        # Check ledger
+        j1_ledger = RewardLedger.objects.filter(user=self.juror1, transaction_type='juror_reward').first()
+        self.assertIsNotNone(j1_ledger)
+        self.assertEqual(j1_ledger.amount, 30)
+
+    def test_resolve_expired_disputes_command_with_juror_incentives(self):
+        # Create an expired dispute
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Expired dispute test',
+            deposit_amount=60,
+            escrow_status='held',
+            status='open'
+        )
+        self.task.status = 'disputed'
+        self.task.save()
+
+        # Set dispute creation to 10 days ago
+        dispute.created_at = timezone.now() - timedelta(days=10)
+        dispute.save()
+
+        # Juror1 votes for poster
+        DisputeVote.objects.create(dispute=dispute, voter=self.juror1, vote='poster')
+
+        # Run command
+        call_command('resolve_expired_disputes')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.escrow_status, 'forfeited')
+
+        # Juror1 receives full 60 points bond since juror1 is sole majority juror
+        self.juror1_profile.refresh_from_db()
+        self.assertEqual(self.juror1_profile.rewards, 560)

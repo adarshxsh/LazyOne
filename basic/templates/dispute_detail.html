@@ -3,12 +3,18 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
+<div class="max-w-3xl mx-auto bg-gray-800 text-gray-200 p-6 rounded-xl shadow-lg border border-gray-700">
+    <h2 class="text-3xl font-bold text-white mb-6">Dispute Details</h2>
 
-    <div class="space-y-6 text-gray-300">
+    <div class="space-y-6">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg font-medium text-white">{{ dispute.task.title }}</p>
+            <p class="text-sm text-gray-400 mt-1">
+                Posted by: <span class="text-gray-200">{{ dispute.task.posted_by.username }}</span> | 
+                Taken by: <span class="text-gray-200">{{ dispute.task.taken_by.username }}</span> | 
+                Reward: <span class="text-cyan-300 font-bold">{{ dispute.task.reward }} points</span>
+            </p>
         </div>
 
         <div>
@@ -21,8 +27,55 @@
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
-            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 mt-1">{{ dispute.reason|linebreaksbr }}</p>
+        </div>
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Peer Jury Votes Tally</h3>
+            <div class="flex items-center space-x-6 bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+                <div class="text-center">
+                    <p class="text-2xl font-bold text-cyan-400">{{ poster_votes }}</p>
+                    <p class="text-xs text-gray-400">Poster ({{ dispute.task.posted_by.username }})</p>
+                </div>
+                <div class="text-center">
+                    <p class="text-2xl font-bold text-green-400">{{ taker_votes }}</p>
+                    <p class="text-xs text-gray-400">Taker ({{ dispute.task.taken_by.username }})</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Jury Voting Section -->
+        <div class="border-t border-gray-700 pt-6">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-3">Cast Jury Vote</h3>
+            {% if dispute.status == 'open' %}
+                {% if is_participant %}
+                    <p class="text-yellow-400 text-sm bg-yellow-900/30 p-3 rounded-lg border border-yellow-700/50">
+                        As a task participant (poster or taker), you are excluded from voting on this dispute. Neutral community jurors will resolve it.
+                    </p>
+                {% elif has_voted %}
+                    <p class="text-green-400 text-sm bg-green-900/30 p-3 rounded-lg border border-green-700/50">
+                        You have cast your jury vote in favor of <strong>{{ user_vote|capfirst }}</strong>. Thank you for participating!
+                    </p>
+                {% else %}
+                    <p class="text-sm text-gray-300 mb-4">
+                        Review the dispute details above. As a neutral community juror, cast your vote to help resolve this dispute. Winning jurors receive a share of the forfeited deposit bond.
+                    </p>
+                    <form action="{% url 'vote_dispute' dispute.id %}" method="post" class="flex space-x-4">
+                        {% csrf_token %}
+                        <button type="submit" name="vote" value="poster" class="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-lg transition-colors text-sm">
+                            Vote for Poster ({{ dispute.task.posted_by.username }})
+                        </button>
+                        <button type="submit" name="vote" value="taker" class="px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors text-sm">
+                            Vote for Taker ({{ dispute.task.taken_by.username }})
+                        </button>
+                    </form>
+                {% endif %}
+            {% else %}
+                <p class="text-gray-400 text-sm bg-gray-900/50 p-3 rounded-lg border border-gray-700">
+                    Jury voting is closed for this dispute as it has been resolved.
+                </p>
+            {% endif %}
         </div>
     </div>
-
+</div>
 {% endblock %}

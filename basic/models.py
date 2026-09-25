@@ -68,6 +68,7 @@ class RewardLedger(models.Model):
         ('dispute_deposit', 'Dispute Deposit Bond Held'),
         ('dispute_refund', 'Dispute Deposit Bond Refunded'),
         ('dispute_forfeit', 'Dispute Deposit Bond Forfeited'),
+        ('juror_reward', 'Juror Reward Payout'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reward_transactions')
     task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True)
@@ -117,9 +118,24 @@ class Dispute(models.Model):
             self.escrow_status = 'refunded'
             self.save()
 
-    def forfeit_deposit(self, beneficiary=None, reason_description=None):
+    def forfeit_deposit(self, beneficiary=None, jurors=None, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
-            if beneficiary:
+            if jurors:
+                num_jurors = len(jurors)
+                if num_jurors > 0:
+                    share = self.deposit_amount // num_jurors
+                    for juror in jurors:
+                        juror_profile = juror.userprofile
+                        juror_profile.rewards += share
+                        juror_profile.save()
+                        RewardLedger.objects.create(
+                            user=juror,
+                            task=self.task,
+                            amount=share,
+                            transaction_type='juror_reward',
+                            description=f"Juror reward payout for dispute on task: '{self.task.title}'"
+                        )
+            elif beneficiary:
                 beneficiary_profile = beneficiary.userprofile
                 beneficiary_profile.rewards += self.deposit_amount
                 beneficiary_profile.save()
@@ -141,6 +157,22 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class DisputeVote(models.Model):
+    VOTE_CHOICES = (
+        ('poster', 'Poster'),
+        ('taker', 'Taker'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    vote = models.CharField(max_length=10, choices=VOTE_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'voter')
+
+    def __str__(self):
+        return f"{self.voter.username} voted {self.vote} on dispute for task '{self.dispute.task.title}'"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
