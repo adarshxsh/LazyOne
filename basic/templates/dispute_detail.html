@@ -16,12 +16,120 @@
             <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
             <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y, P" }}</p>
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+        </div>
+
+        <!-- Peer Juror Voting Section -->
+        <div class="bg-gray-800/80 p-6 rounded-lg border border-gray-700 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Peer Juror Voting</h3>
+            <div class="flex flex-wrap items-center gap-4 text-sm">
+                <p><strong>Voting Status:</strong> 
+                    {% if dispute.status != 'open' %}
+                        <span class="px-2 py-1 text-xs rounded bg-gray-600/30 text-gray-300">Resolved</span>
+                    {% elif dispute.is_voting_active %}
+                        <span class="px-2 py-1 text-xs rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Active Voting Window</span>
+                    {% else %}
+                        <span class="px-2 py-1 text-xs rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">Voting Deadline Expired</span>
+                    {% endif %}
+                </p>
+                {% if dispute.voting_deadline %}
+                    <p><strong>Voting Deadline:</strong> {{ dispute.voting_deadline|date:"F d, Y, P" }}</p>
+                    {% if dispute.is_voting_active %}
+                        <p class="text-amber-400 font-medium"><strong>Time Remaining:</strong> {{ dispute.time_remaining }}</p>
+                    {% endif %}
+                {% endif %}
+            </div>
+
+            <!-- Vote Summary Metrics -->
+            <div class="grid grid-cols-3 gap-4 pt-2">
+                <div class="bg-gray-900/60 p-3 rounded text-center border border-gray-700/60">
+                    <span class="block text-2xl font-bold text-white">{{ vote_summary.total }}</span>
+                    <span class="text-xs text-gray-400">Total Votes Cast</span>
+                </div>
+                <div class="bg-gray-900/60 p-3 rounded text-center border border-gray-700/60">
+                    <span class="block text-2xl font-bold text-cyan-400">{{ vote_summary.poster_votes }}</span>
+                    <span class="text-xs text-gray-400">Votes for Poster ({{ task.posted_by.username }})</span>
+                </div>
+                <div class="bg-gray-900/60 p-3 rounded text-center border border-gray-700/60">
+                    <span class="block text-2xl font-bold text-indigo-400">{{ vote_summary.taker_votes }}</span>
+                    <span class="text-xs text-gray-400">Votes for Taker ({{ task.taken_by.username }})</span>
+                </div>
+            </div>
+
+            <!-- Juror Voting Form -->
+            {% if can_vote %}
+                <div class="mt-6 pt-4 border-t border-gray-700">
+                    <h4 class="text-lg font-medium text-white mb-3">Cast Your Juror Vote</h4>
+                    <form action="{% url 'cast_dispute_vote' dispute.id %}" method="POST" class="space-y-4">
+                        {% csrf_token %}
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-300">Select Resolution Outcome:</label>
+                            <div class="flex items-center gap-6">
+                                <label class="inline-flex items-center text-sm cursor-pointer">
+                                    <input type="radio" name="vote" value="favor_poster" class="form-radio text-cyan-500" required>
+                                    <span class="ml-2">In favor of Task Poster ({{ task.posted_by.username }})</span>
+                                </label>
+                                <label class="inline-flex items-center text-sm cursor-pointer">
+                                    <input type="radio" name="vote" value="favor_taker" class="form-radio text-indigo-500" required>
+                                    <span class="ml-2">In favor of Task Taker ({{ task.taken_by.username }})</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label for="comment" class="block text-sm font-medium text-gray-300">Juror Comments / Justification:</label>
+                            <textarea id="comment" name="comment" rows="3" class="mt-1 block w-full bg-gray-900 border border-gray-700 rounded-md p-2 text-gray-200 text-sm focus:ring-cyan-500 focus:border-cyan-500" placeholder="Provide reasoning for your vote..."></textarea>
+                        </div>
+
+                        <button type="submit" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-medium rounded-md text-sm transition-colors">
+                            Submit Juror Vote
+                        </button>
+                    </form>
+                </div>
+            {% elif is_participant %}
+                <p class="text-sm text-gray-400 italic pt-2">As a direct participant (Poster or Taker) in this dispute, you are not eligible to vote as a juror.</p>
+            {% elif user_vote %}
+                <p class="text-sm text-emerald-400 font-medium pt-2">You have cast your vote on this dispute as a juror ({{ user_vote.get_vote_display }}).</p>
+            {% elif dispute.status != 'open' %}
+                <p class="text-sm text-gray-400 italic pt-2">This dispute has been resolved. Voting is closed.</p>
+            {% elif not dispute.is_voting_active %}
+                <p class="text-sm text-amber-400 italic pt-2">The voting deadline for this dispute has passed. Pending automated resolution.</p>
+            {% endif %}
+        </div>
+
+        <!-- Cast Votes Breakdown List -->
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-3">Juror Votes Breakdown</h3>
+            {% if votes %}
+                <div class="space-y-3">
+                    {% for v in votes %}
+                        <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 flex flex-col space-y-1 text-sm">
+                            <div class="flex justify-between items-center">
+                                <span class="font-semibold text-white">{{ v.voter.username }}</span>
+                                <span class="text-xs text-gray-400">{{ v.created_at|date:"F d, Y, P" }}</span>
+                            </div>
+                            <p class="text-xs">
+                                <strong>Vote:</strong> 
+                                {% if v.vote == 'favor_poster' or v.voted_for == task.posted_by %}
+                                    <span class="text-cyan-400 font-medium">In favor of Poster ({{ task.posted_by.username }})</span>
+                                {% else %}
+                                    <span class="text-indigo-400 font-medium">In favor of Taker ({{ task.taken_by.username }})</span>
+                                {% endif %}
+                            </p>
+                            {% if v.comment %}
+                                <p class="text-gray-300 text-xs italic bg-gray-800/60 p-2 rounded mt-1 border border-gray-700/40">"{{ v.comment }}"</p>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-gray-400 text-sm italic">No juror votes have been cast yet.</p>
+            {% endif %}
         </div>
     </div>
 

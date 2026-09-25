@@ -1,4 +1,6 @@
 import math
+from datetime import timedelta
+from django.conf import settings
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -95,10 +97,48 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    voting_deadline = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def save(self, *args, **kwargs):
+        if not self.voting_deadline:
+            hours = getattr(settings, 'DISPUTE_VOTING_WINDOW_HOURS', 48)
+            self.voting_deadline = timezone.now() + timedelta(hours=hours)
+        super().save(*args, **kwargs)
+
+    @property
+    def is_voting_active(self):
+        if self.status != 'open':
+            return False
+        if not self.voting_deadline:
+            return True
+        return timezone.now() <= self.voting_deadline
+
+    @property
+    def time_remaining(self):
+        if not self.voting_deadline:
+            return None
+        now = timezone.now()
+        if now >= self.voting_deadline:
+            return timedelta(0)
+        return self.voting_deadline - now
+
+    @property
+    def vote_summary(self):
+        poster_votes = self.votes.filter(
+            models.Q(vote='favor_poster') | models.Q(voted_for=self.task.posted_by)
+        ).count()
+        taker_votes = self.votes.filter(
+            models.Q(vote='favor_taker') | models.Q(voted_for=self.task.taken_by)
+        ).count()
+        return {
+            'total': self.votes.count(),
+            'poster_votes': poster_votes,
+            'taker_votes': taker_votes,
+        }
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -141,6 +181,29 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+
+class DisputeVote(models.Model):
+    VOTE_CHOICES = (
+        ('favor_poster', 'Favor Task Poster'),
+        ('favor_taker', 'Favor Task Taker'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    voted_for = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes_received', null=True, blank=True)
+    vote = models.CharField(max_length=20, choices=VOTE_CHOICES, blank=True)
+    comment = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'voter')
+
+    def __str__(self):
+        return f"Vote by {self.voter.username} on dispute #{self.dispute.id}"
+
+    @property
+    def juror(self):
+        return self.voter
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
