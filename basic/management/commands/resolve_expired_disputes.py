@@ -6,7 +6,7 @@ from django.urls import reverse
 from basic.models import Dispute, RewardLedger, Notification
 
 class Command(BaseCommand):
-    help = 'Resolves expired open disputes, refunds/forfeits escrowed bonds, and settles task points.'
+    help = 'Resolves expired disputes based on active lifecycle phase (evidence submission, peer voting).'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -21,69 +21,60 @@ class Command(BaseCommand):
         now = timezone.now()
         expiry_threshold = now - timedelta(days=days)
 
-        # Find open disputes created before the expiration window
-        expired_disputes = Dispute.objects.filter(status='open', created_at__lte=expiry_threshold)
+        active_disputes = Dispute.objects.filter(
+            status__in=['evidence_submission', 'voting', 'open'],
+            created_at__lte=expiry_threshold
+        )
 
-        count = 0
-        for dispute in expired_disputes:
+        processed_count = 0
+        for dispute in active_disputes:
             task = dispute.task
             with transaction.atomic():
-                dispute.status = 'resolved'
-                dispute.save()
+                if dispute.status == 'evidence_submission':
+                    poster_has_ev = dispute.evidence_records.filter(submitted_by=task.posted_by).exists()
+                    taker_has_ev = dispute.evidence_records.filter(submitted_by=task.taken_by).exists() if task.taken_by else False
 
-                if dispute.raised_by == task.posted_by:
-                    # Poster challenged an unresponsive taker: cancel task, refund task reward, forfeit bond
-                    poster_profile = task.posted_by.userprofile
-                    poster_profile.rewards += task.reward
-                    poster_profile.save()
-
-                    task.status = 'cancelled'
-                    task.save()
-
-                    RewardLedger.objects.create(
-                        user=task.posted_by,
-                        task=task,
-                        amount=task.reward,
-                        transaction_type='task_cancellation',
-                        description=f"Refund for expired dispute on task: '{task.title}'"
-                    )
-
-                    # Handle escrow bond refund / forfeiture
-                    if dispute.escrow_status == 'held':
-                        dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
-                else:
-                    # Taker raised dispute: award reward to taker, complete task, and refund bond
-                    if task.taken_by:
-                        taker_profile = task.taken_by.userprofile
-                        taker_profile.rewards += task.reward
-                        taker_profile.save()
-
-                        RewardLedger.objects.create(
-                            user=task.taken_by,
-                            task=task,
-                            amount=task.reward,
-                            transaction_type='task_completion',
-                            description=f"Awarded reward for auto-resolved expired dispute on task: '{task.title}'"
+                    if poster_has_ev and not taker_has_ev:
+                        dispute.resolve_dispute(
+                            winner=task.posted_by,
+                            reason_description=f"SLA expired: Auto-resolved in favor of active poster for task '{task.title}'"
                         )
-                    task.status = 'completed'
-                    task.save()
+                        processed_count += 1
+                    elif taker_has_ev and not poster_has_ev:
+                        dispute.resolve_dispute(
+                            winner=task.taken_by,
+                            reason_description=f"SLA expired: Auto-resolved in favor of active taker for task '{task.title}'"
+                        )
+                        processed_count += 1
+                    else:
+                        # Advance to voting phase if both or neither submitted counter-proof
+                        dispute.status = 'voting'
+                        dispute.save()
+                        processed_count += 1
 
-                    if dispute.escrow_status == 'held':
-                        dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
+                elif dispute.status == 'voting':
+                    poster_votes = dispute.votes.filter(voted_for=task.posted_by).count()
+                    taker_votes = dispute.votes.filter(voted_for=task.taken_by).count() if task.taken_by else 0
 
-                # Notify participants
-                participants = [task.posted_by]
-                if task.taken_by and task.taken_by not in participants:
-                    participants.append(task.taken_by)
+                    if poster_votes > taker_votes:
+                        winner = task.posted_by
+                    elif taker_votes > poster_votes:
+                        winner = task.taken_by
+                    else:
+                        winner = dispute.raised_by
 
-                dispute_link = reverse('dispute_detail', args=[dispute.id])
-                for participant in participants:
-                    Notification.objects.create(
-                        recipient=participant,
-                        message=f"Dispute for task '{task.title}' has expired ({days}d SLA) and was automatically resolved.",
-                        link=dispute_link
+                    dispute.resolve_dispute(
+                        winner=winner,
+                        reason_description=f"SLA expired in voting phase: Auto-resolved in favor of {winner.username} for task '{task.title}'"
                     )
+                    processed_count += 1
 
-                count += 1
+                elif dispute.status == 'open':
+                    winner = task.posted_by if dispute.raised_by == task.posted_by else task.taken_by
+                    dispute.resolve_dispute(
+                        winner=winner,
+                        reason_description=f"SLA expired: Auto-resolved open dispute for task '{task.title}'"
+                    )
+                    processed_count += 1
 
-        self.stdout.write(self.style.SUCCESS(f"Successfully processed {count} expired dispute(s)."))
+        self.stdout.write(self.style.SUCCESS(f"Successfully processed {processed_count} expired dispute(s)."))
