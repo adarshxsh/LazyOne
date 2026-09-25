@@ -182,3 +182,129 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class DisputeAuditAndLifecycleServiceTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.poster = User.objects.create_user(username='poster_audit', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker_audit', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=200)
+
+        self.task = Task.objects.create(
+            title="Audit Task",
+            description="Task for testing dispute audit lifecycle",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=timezone.now() + timedelta(days=3)
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_raise_dispute_creates_audit_event_and_notifications(self):
+        self.client.login(username='taker_audit', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work not clear'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+        audit_events = dispute.audit_events.all()
+        self.assertEqual(audit_events.count(), 1)
+        event = audit_events.first()
+        self.assertEqual(event.event_type, 'raised')
+        self.assertEqual(event.actor, self.taker)
+        self.assertEqual(event.state_after, 'open')
+        self.assertIn('deposit_amount', event.metadata)
+
+        # Multi-party notification checks for participants
+        self.assertTrue(self.poster.notifications.exists())
+        self.assertTrue(self.taker.notifications.exists())
+
+    def test_withdraw_dispute_creates_audit_event(self):
+        self.client.login(username='taker_audit', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work not clear'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+
+        response = self.client.post(reverse('withdraw_dispute', args=[dispute.id]))
+        self.assertRedirects(response, reverse('my_tasks'))
+
+        audit_events = dispute.audit_events.all().order_by('timestamp')
+        self.assertEqual(audit_events.count(), 2)
+
+        withdraw_event = audit_events.last()
+        self.assertEqual(withdraw_event.event_type, 'withdrawn')
+        self.assertEqual(withdraw_event.actor, self.taker)
+        self.assertEqual(withdraw_event.state_before, 'open')
+        self.assertEqual(withdraw_event.state_after, 'resolved')
+
+    def test_task_completion_creates_resolution_audit_event(self):
+        self.client.login(username='taker_audit', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work not clear'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+
+        self.client.login(username='poster_audit', password='password123')
+        self.client.get(reverse('complete_task', args=[self.task.id]))
+
+        audit_events = dispute.audit_events.all().order_by('timestamp')
+        self.assertEqual(audit_events.count(), 2)
+
+        completion_event = audit_events.last()
+        self.assertEqual(completion_event.event_type, 'resolved_on_task_completion')
+        self.assertEqual(completion_event.actor, self.poster)
+        self.assertEqual(completion_event.state_after, 'resolved')
+
+    def test_sla_command_creates_system_audit_event(self):
+        from basic.models import DisputeAuditEvent
+        from django.core.management import call_command
+
+        self.client.login(username='taker_audit', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work not clear'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        dispute.created_at = timezone.now() - timedelta(days=10)
+        dispute.save()
+
+        call_command('resolve_expired_disputes', days=7)
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+
+        audit_events = dispute.audit_events.all().order_by('timestamp')
+        self.assertEqual(audit_events.count(), 2)
+
+        sla_event = audit_events.last()
+        self.assertEqual(sla_event.event_type, 'sla_auto_resolved')
+        self.assertIsNone(sla_event.actor)
+        self.assertTrue(sla_event.metadata.get('system'))
+
+    def test_audit_event_immutability(self):
+        self.client.login(username='taker_audit', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work not clear'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        event = dispute.audit_events.first()
+
+        # Update attempt must raise ValueError
+        event.event_type = 'tampered'
+        with self.assertRaises(ValueError):
+            event.save()
+
+        # Delete attempt must raise ValueError
+        with self.assertRaises(ValueError):
+            event.delete()
+
+

@@ -142,6 +142,29 @@ class Dispute(models.Model):
             self.escrow_status = 'forfeited'
             self.save()
 
+class DisputeAuditEvent(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='audit_events')
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='dispute_audit_events')
+    event_type = models.CharField(max_length=50)
+    state_before = models.CharField(max_length=50, blank=True, null=True)
+    state_after = models.CharField(max_length=50, blank=True, null=True)
+    timestamp = models.DateTimeField(auto_now_add=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ['timestamp']
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValueError("DisputeAuditEvent records are immutable and cannot be updated.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("DisputeAuditEvent records are immutable and cannot be deleted.")
+
+    def __str__(self):
+        return f"Audit {self.event_type} on dispute {self.dispute_id} at {self.timestamp}"
+
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
     to_user = models.ForeignKey(User, related_name='to_user', on_delete=models.CASCADE)
