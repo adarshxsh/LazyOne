@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
 from ..models import Dispute, Task, Notification, RewardLedger
+from ..services.juror_service import assign_jurors_for_dispute
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,7 +11,8 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+    is_assigned_juror = dispute.juror_assignments.filter(juror=request.user).exists()
+    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff and not is_assigned_juror:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
     context = {
@@ -62,6 +64,8 @@ def raise_dispute(request, task_id):
                     deposit_amount=deposit_amount,
                     escrow_status='held'
                 )
+
+            assign_jurors_for_dispute(dispute)
 
             RewardLedger.objects.create(
                 user=request.user,
