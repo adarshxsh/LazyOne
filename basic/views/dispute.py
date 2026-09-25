@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
 from ..models import Dispute, Task, Notification, RewardLedger
+from ..services import DisputeLifecycleService
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -33,54 +34,14 @@ def raise_dispute(request, task_id):
             messages.error(request, "A reason is required to raise a dispute.")
             return redirect('my_tasks')
 
-        deposit_amount = task.deposit_bond_amount
-        user_profile = request.user.userprofile
-        if user_profile.rewards < deposit_amount:
-            messages.error(
-                request,
-                f"Insufficient reward points balance. You need at least {deposit_amount} points as a deposit bond to raise a dispute, but you only have {user_profile.rewards} points."
-            )
+        try:
+            dispute = DisputeLifecycleService.raise_dispute(task=task, actor=request.user, reason=reason)
+            messages.success(request, f"Dispute raised successfully. {dispute.deposit_amount} points held as deposit bond.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+        except ValueError as e:
+            messages.error(request, str(e))
             return redirect('my_tasks')
 
-        with transaction.atomic():
-            user_profile.rewards -= deposit_amount
-            user_profile.save()
-
-            if hasattr(task, 'dispute'):
-                dispute = task.dispute
-                dispute.raised_by = request.user
-                dispute.reason = reason
-                dispute.status = 'open'
-                dispute.deposit_amount = deposit_amount
-                dispute.escrow_status = 'held'
-                dispute.save()
-            else:
-                dispute = Dispute.objects.create(
-                    task=task,
-                    raised_by=request.user,
-                    reason=reason,
-                    deposit_amount=deposit_amount,
-                    escrow_status='held'
-                )
-
-            RewardLedger.objects.create(
-                user=request.user,
-                task=task,
-                amount=-deposit_amount,
-                transaction_type='dispute_deposit',
-                description=f"Security deposit bond held for dispute on task: '{task.title}'"
-            )
-
-            task.status = 'disputed'
-            task.save()
-
-            Notification.objects.create(
-                recipient=task.posted_by,
-                message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
-                link=reverse('dispute_detail', args=[dispute.id])
-            )
-        messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
-        return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
 
 @login_required(login_url='/login/')
@@ -88,20 +49,10 @@ def raise_dispute(request, task_id):
 def withdraw_dispute(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id, raised_by=request.user)
     task = dispute.task
-    with transaction.atomic():
-        dispute.refund_deposit(
-            reason_description=f"Security deposit bond refunded for withdrawn dispute on task: '{task.title}'"
-        )
-        dispute.status = 'resolved'
-        dispute.save()
+    try:
+        DisputeLifecycleService.withdraw_dispute(dispute=dispute, actor=request.user)
+        messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
+    except ValueError as e:
+        messages.error(request, str(e))
 
-        task.status = 'in_progress'
-        task.save()
-
-        Notification.objects.create(
-            recipient=task.posted_by,
-            message=f"{request.user.username} has withdrawn the dispute for '{task.title}'. The task is now in progress.",
-            link=reverse('my_tasks')
-        )
-    messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')

@@ -23,6 +23,28 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Audit Log History</h3>
+            {% if dispute.audit_events.all %}
+                <ul class="space-y-3 bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+                {% for event in dispute.audit_events.all %}
+                    <li class="border-b border-gray-800 pb-2 last:border-0 last:pb-0">
+                        <div class="flex justify-between text-sm">
+                            <span class="font-bold text-white">{{ event.event_type|title }}</span>
+                            <span class="text-gray-400">{{ event.timestamp|date:"M d, Y H:i" }}</span>
+                        </div>
+                        <div class="text-xs text-gray-300">
+                            Actor: {% if event.actor %}{{ event.actor.username }}{% else %}System{% endif %} |
+                            State: {{ event.state_before|default:"None" }} &rarr; {{ event.state_after }}
+                        </div>
+                    </li>
+                {% endfor %}
+                </ul>
+            {% else %}
+                <p class="text-gray-400 text-sm bg-gray-900/50 p-4 rounded-lg border border-gray-700">No audit history recorded.</p>
+            {% endif %}
+        </div>
     </div>
 
 {% endblock %}
