@@ -8,7 +8,12 @@
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg font-medium text-white">{{ dispute.task.title }}</p>
+            <p class="text-sm text-gray-400">
+                Posted by: <strong>{{ task.posted_by.username }}</strong>
+                {% if task.taken_by %} | Taker: <strong>{{ task.taken_by.username }}</strong>{% endif %}
+                | Reward: <strong>{{ task.reward }} pts</strong>
+            </p>
         </div>
 
         <div>
@@ -23,6 +28,96 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <!-- Community Vote Tallies Section -->
+        <div class="bg-gray-800/60 p-6 rounded-xl border border-gray-700 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Community Jury Vote Tallies</h3>
+            <div class="grid grid-cols-3 gap-4 text-center">
+                <div class="bg-gray-900/50 p-3 rounded-lg border border-gray-700">
+                    <p class="text-sm text-gray-400">Total Votes</p>
+                    <p class="text-2xl font-bold text-white">{{ total_votes }} / 5 (Quorum)</p>
+                </div>
+                <div class="bg-gray-900/50 p-3 rounded-lg border border-gray-700">
+                    <p class="text-sm text-gray-400">Favor Poster ({{ task.posted_by.username }})</p>
+                    <p class="text-2xl font-bold text-cyan-400">{{ poster_votes }}</p>
+                </div>
+                <div class="bg-gray-900/50 p-3 rounded-lg border border-gray-700">
+                    <p class="text-sm text-gray-400">Favor Worker ({% if task.taken_by %}{{ task.taken_by.username }}{% else %}Worker{% endif %})</p>
+                    <p class="text-2xl font-bold text-green-400">{{ worker_votes }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Cast Juror Vote Section -->
+        <div class="bg-gray-800/60 p-6 rounded-xl border border-gray-700 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Juror Voting</h3>
+
+            {% if can_vote %}
+                <form method="post" action="{% url 'vote_dispute' dispute.id %}" class="space-y-4">
+                    {% csrf_token %}
+                    <p class="text-sm text-gray-300">Select which party you favor based on the task description and dispute evidence:</p>
+                    
+                    <div class="space-y-2">
+                        <label class="flex items-center space-x-3 p-3 bg-gray-900/50 rounded-lg border border-gray-700 cursor-pointer hover:border-cyan-500">
+                            <input type="radio" name="voted_for" value="{{ task.posted_by.id }}" required class="text-cyan-500 focus:ring-cyan-400">
+                            <span>In favor of Task Poster: <strong>{{ task.posted_by.username }}</strong></span>
+                        </label>
+
+                        {% if task.taken_by %}
+                            <label class="flex items-center space-x-3 p-3 bg-gray-900/50 rounded-lg border border-gray-700 cursor-pointer hover:border-cyan-500">
+                                <input type="radio" name="voted_for" value="{{ task.taken_by.id }}" required class="text-cyan-500 focus:ring-cyan-400">
+                                <span>In favor of Task Worker: <strong>{{ task.taken_by.username }}</strong></span>
+                            </label>
+                        {% endif %}
+                    </div>
+
+                    <div>
+                        <label for="comment" class="block text-sm font-medium text-gray-300 mb-1">Optional Note / Reason for Vote:</label>
+                        <textarea id="comment" name="comment" rows="3" class="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-cyan-500" placeholder="Explain your decision..."></textarea>
+                    </div>
+
+                    <button type="submit" class="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-6 rounded-lg transition-colors">
+                        Submit Juror Vote
+                    </button>
+                </form>
+            {% elif is_participant %}
+                <p class="text-yellow-400 italic bg-yellow-500/10 p-3 rounded-lg border border-yellow-500/20">
+                    As a participant in this task, you cannot vote on this dispute.
+                </p>
+            {% elif user_vote %}
+                <p class="text-green-400 bg-green-500/10 p-3 rounded-lg border border-green-500/20">
+                    You cast your vote for <strong>{{ user_vote.voted_for.username }}</strong> on {{ user_vote.created_at|date:"F d, Y H:i" }}.
+                    {% if user_vote.comment %}<br><em class="text-gray-300">"{{ user_vote.comment }}"</em>{% endif %}
+                </p>
+            {% elif dispute.status == 'resolved' %}
+                <p class="text-gray-400 italic bg-gray-700/20 p-3 rounded-lg border border-gray-700">
+                    This dispute has been resolved and voting is closed.
+                </p>
+            {% endif %}
+        </div>
+
+        <!-- Vote History Section -->
+        {% if vote_history %}
+            <div class="bg-gray-800/60 p-6 rounded-xl border border-gray-700 space-y-4">
+                <h3 class="text-xl font-semibold text-cyan-400">Juror Vote History</h3>
+                <div class="space-y-3">
+                    {% for v in vote_history %}
+                        <div class="p-3 bg-gray-900/50 rounded-lg border border-gray-700 flex justify-between items-start">
+                            <div>
+                                <p class="text-sm text-white">
+                                    <strong>{{ v.voter.username }}</strong> voted in favor of <strong>{{ v.voted_for.username }}</strong>
+                                </p>
+                                {% if v.comment %}
+                                    <p class="text-xs text-gray-400 mt-1">"{{ v.comment }}"</p>
+                                {% endif %}
+                            </div>
+                            <span class="text-xs text-gray-500">{{ v.created_at|date:"M d, H:i" }}</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+
     </div>
 
 {% endblock %}
