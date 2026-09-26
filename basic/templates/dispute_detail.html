@@ -14,7 +14,9 @@
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
             <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
+            <p><strong>Deposit Bond:</strong> {{ dispute.deposit_amount }} points per party (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
+            <p><strong>Worker Deposited:</strong> {% if dispute.worker_deposited %}<span class="text-green-400">Yes</span>{% else %}<span class="text-red-400">Pending</span>{% endif %}</p>
+            <p><strong>Poster Deposited:</strong> {% if dispute.poster_deposited %}<span class="text-green-400">Yes</span>{% else %}<span class="text-red-400">Pending</span>{% endif %}</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
         </div>
@@ -23,6 +25,57 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if needs_counter_bond %}
+        <div class="bg-yellow-900/30 border border-yellow-600 p-4 rounded-lg">
+            <h3 class="text-lg font-semibold text-yellow-300 mb-2">Deposit Counter-Bond Required</h3>
+            <p class="mb-3 text-sm">A matching deposit bond of {{ dispute.task.deposit_bond_amount }} points is required within 24 hours of dispute creation.</p>
+            <form action="{% url 'deposit_counter_bond' dispute.id %}" method="post">
+                {% csrf_token %}
+                <button type="submit" class="bg-yellow-600 hover:bg-yellow-700 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-colors">
+                    Deposit {{ dispute.task.deposit_bond_amount }} Points Matching Bond
+                </button>
+            </form>
+        </div>
+        {% endif %}
+
+        {% if can_vote %}
+        <div class="bg-gray-800/80 border border-cyan-600/50 p-4 rounded-lg">
+            <h3 class="text-lg font-semibold text-cyan-300 mb-2">Community Juror Voting</h3>
+            <p class="mb-3 text-sm">Cast your vote on this dispute. A fixed stake of 50 reward points will be locked from your balance.</p>
+            <form action="{% url 'cast_juror_vote' dispute.id %}" method="post" class="space-y-3">
+                {% csrf_token %}
+                <div class="flex items-center space-x-4">
+                    <label class="inline-flex items-center cursor-pointer">
+                        <input type="radio" name="voted_for" value="{{ dispute.task.taken_by.id }}" required class="form-radio text-cyan-600">
+                        <span class="ml-2 text-sm text-gray-200">Vote for Worker ({{ dispute.task.taken_by.username }})</span>
+                    </label>
+                    <label class="inline-flex items-center cursor-pointer">
+                        <input type="radio" name="voted_for" value="{{ dispute.task.posted_by.id }}" required class="form-radio text-cyan-600">
+                        <span class="ml-2 text-sm text-gray-200">Vote for Poster ({{ dispute.task.posted_by.username }})</span>
+                    </label>
+                </div>
+                <button type="submit" class="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-colors">
+                    Submit Juror Vote (Stake 50 Points)
+                </button>
+            </form>
+        </div>
+        {% elif user_has_voted %}
+        <div class="bg-cyan-900/30 border border-cyan-600/50 p-3 rounded-lg text-cyan-200 text-sm">
+            You have cast a juror vote on this dispute. 50 reward points are currently locked in stake.
+        </div>
+        {% endif %}
+
+        {% if dispute.raised_by == request.user and dispute.status == 'open' and not dispute.votes.exists %}
+        <div class="pt-2">
+            <form action="{% url 'withdraw_dispute' dispute.id %}" method="post">
+                {% csrf_token %}
+                <button type="submit" class="bg-red-600 hover:bg-red-700 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-colors">
+                    Withdraw Dispute & Refund Deposit Bonds
+                </button>
+            </form>
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}
