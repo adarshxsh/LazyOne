@@ -95,6 +95,7 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    jurors = models.ManyToManyField(User, related_name='juror_disputes', blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
