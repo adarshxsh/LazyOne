@@ -22,27 +22,59 @@
 
 <div class="chat-container">
     <div class="border-b border-gray-700/50 pb-4 mb-4">
-        <h2 class="text-xl font-bold text-white">Chat for: {{ conversation.task.title|default:"Direct Message" }}</h2>
-        <p class="text-sm text-gray-400">
-            With:
-            {% for participant in conversation.participants.all %}
-                {% if participant.id != request.user.id %}
-                    {{ participant.username }}
-                {% endif %}
-            {% endfor %}
-        </p>
+        {% if is_deliberation %}
+            <h2 class="text-xl font-bold text-indigo-300 flex items-center">
+                <svg class="w-6 h-6 mr-2 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"></path></svg>
+                Jury Deliberation Room: {{ dispute.task.title }}
+            </h2>
+            <p class="text-sm text-indigo-200/80">Private discussion channel for assigned dispute jurors.</p>
+        {% elif is_evidence_portal %}
+            <h2 class="text-xl font-bold text-cyan-300 flex items-center">
+                <svg class="w-6 h-6 mr-2 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                Read-Only Evidence Portal: {{ conversation.task.title }}
+            </h2>
+            <p class="text-sm text-gray-400">Inspecting original task chat history as dispute evidence.</p>
+        {% else %}
+            <h2 class="text-xl font-bold text-white">Chat for: {{ conversation.task.title|default:"Direct Message" }}</h2>
+            <p class="text-sm text-gray-400">
+                With:
+                {% for participant in conversation.participants.all %}
+                    {% if participant.id != request.user.id %}
+                        {{ participant.username }}
+                    {% endif %}
+                {% endfor %}
+            </p>
+        {% endif %}
     </div>
 
     <div class="message-list" id="message-list">
-        <p id="loading-messages" class="text-center text-gray-400">Loading chat...</p>
+        {% for msg in messages %}
+            <div class="message-wrapper {% if msg.sender.id == request.user.id %}me{% else %}other{% endif %}">
+                <img src="https://ui-avatars.com/api/?name={{ msg.sender.username|urlencode }}&background=random" alt="{{ msg.sender.username }}" class="avatar">
+                <div class="message {% if msg.sender.id == request.user.id %}me{% else %}other{% endif %}">
+                    <p class="message-author">{{ msg.sender.username }}</p>
+                    <p class="message-content">{{ msg.content }}</p>
+                    <p class="message-timestamp">{{ msg.timestamp|date:"M d, H:i" }}</p>
+                </div>
+            </div>
+        {% empty %}
+            <p id="loading-messages" class="text-center text-gray-400">No messages in this channel yet.</p>
+        {% endfor %}
     </div>
 
-    <form class="mt-4 flex items-center space-x-3" id="message-form">
-        <input type="text" id="message-input" placeholder="Type your message..." autocomplete="off" required class="flex-grow w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-full text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
-        <button type="submit" id="message-submit" title="Send Message" class="flex-shrink-0 bg-cyan-500 hover:bg-cyan-600 text-white font-bold rounded-full h-12 w-12 flex items-center justify-center transition-colors">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-        </button>
-    </form>
+    {% if is_read_only %}
+        <div class="mt-4 p-4 bg-yellow-500/20 border border-yellow-500/30 rounded-xl text-yellow-300 text-center font-medium text-sm flex items-center justify-center">
+            <svg class="w-5 h-5 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m0 0v2m0-2h2m-2 0H10m10-5V6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2h12a2 2 0 002-2z"></path></svg>
+            Read-Only Mode: You are inspecting task evidence. Jurors cannot send messages in original task chats.
+        </div>
+    {% else %}
+        <form class="mt-4 flex items-center space-x-3" id="message-form">
+            <input type="text" id="message-input" placeholder="Type your message..." autocomplete="off" required class="flex-grow w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-full text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
+            <button type="submit" id="message-submit" title="Send Message" class="flex-shrink-0 bg-cyan-500 hover:bg-cyan-600 text-white font-bold rounded-full h-12 w-12 flex items-center justify-center transition-colors">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+            </button>
+        </form>
+    {% endif %}
 </div>
 
 <!-- Firebase SDKs -->
@@ -75,32 +107,38 @@
         const messageSubmitButton = document.getElementById('message-submit');
         const loadingIndicator = document.getElementById('loading-messages');
 
-        messageInput.focus();
+        if (messageInput) {
+            messageInput.focus();
+        }
 
         // --- Firestore Real-Time Listener ---
-        const messagesRef = db.collection('conversations').doc(conversationId).collection('messages').orderBy('timestamp');
-        messagesRef.onSnapshot(snapshot => {
-            loadingIndicator.style.display = 'none';
-            snapshot.docChanges().forEach(change => {
-                if (change.type === 'added') {
-                    renderMessage(change.doc.data());
-                }
+        if (db && firebase.apps.length) {
+            const messagesRef = db.collection('conversations').doc(conversationId).collection('messages').orderBy('timestamp');
+            messagesRef.onSnapshot(snapshot => {
+                if (loadingIndicator) loadingIndicator.style.display = 'none';
+                snapshot.docChanges().forEach(change => {
+                    if (change.type === 'added') {
+                        renderMessage(change.doc.data());
+                    }
+                });
+                scrollToBottom();
+            }, error => {
+                console.error("Error listening for messages: ", error);
+                if (loadingIndicator) loadingIndicator.textContent = "Error loading chat. Please refresh.";
             });
-            scrollToBottom();
-        }, error => {
-            console.error("Error listening for messages: ", error);
-            loadingIndicator.textContent = "Error loading chat. Please refresh.";
-        });
+        }
 
         // --- Form Submission ---
-        messageForm.addEventListener('submit', e => {
-            e.preventDefault();
-            const messageContent = messageInput.value;
-            if (messageContent.trim() === '' || messageSubmitButton.disabled) return;
-            
-            sendMessage(messageContent);
-            messageInput.value = '';
-        });
+        if (messageForm && messageInput) {
+            messageForm.addEventListener('submit', e => {
+                e.preventDefault();
+                const messageContent = messageInput.value;
+                if (messageContent.trim() === '' || (messageSubmitButton && messageSubmitButton.disabled)) return;
+                
+                sendMessage(messageContent);
+                messageInput.value = '';
+            });
+        }
 
         function sendMessage(content) {
             messageSubmitButton.disabled = true;

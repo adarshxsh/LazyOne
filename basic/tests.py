@@ -182,3 +182,129 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class JuryDeliberationAndEvidencePortalTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Create users
+        self.poster = User.objects.create_user(username='poster_user', password='password123')
+        UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker_user', password='password123')
+        UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        self.juror1 = User.objects.create_user(username='juror1', password='password123')
+        UserProfile.objects.create(user=self.juror1, rewards=1000)
+
+        self.juror2 = User.objects.create_user(username='juror2', password='password123')
+        UserProfile.objects.create(user=self.juror2, rewards=1000)
+
+        self.unassigned = User.objects.create_user(username='unassigned', password='password123')
+        UserProfile.objects.create(user=self.unassigned, rewards=1000)
+
+        # Create task and conversation
+        self.task = Task.objects.create(
+            title="Disputed Task",
+            description="Task with dispute",
+            reward=500,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed'
+        )
+        self.task_conv = Conversation.objects.create(task=self.task)
+        self.task_conv.participants.add(self.poster, self.taker)
+
+        # Create dispute and assign jurors
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Unclear requirements",
+            deposit_amount=100,
+            status='open'
+        )
+        self.dispute.jurors.add(self.juror1, self.juror2)
+
+    def test_assigned_juror_access_dispute_detail(self):
+        self.client.login(username='juror1', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Disputed Task")
+        self.assertContains(response, "Evidence Portal")
+        self.assertContains(response, "Jury Deliberation Room")
+
+    def test_unassigned_user_blocked_from_dispute_detail(self):
+        self.client.login(username='unassigned', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertRedirects(response, reverse('home'))
+
+    def test_assigned_juror_view_task_chat_read_only(self):
+        self.client.login(username='juror1', password='password123')
+        response = self.client.get(reverse('chat_view', args=[self.task_conv.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['is_read_only'])
+        self.assertTrue(response.context['is_evidence_portal'])
+
+        # Juror attempting to send message in task chat gets 403 Forbidden
+        post_res = self.client.post(
+            reverse('send_message', args=[self.task_conv.id]),
+            {'content': 'Unauthorized message'}
+        )
+        self.assertEqual(post_res.status_code, 403)
+
+    def test_assigned_juror_deliberation_room(self):
+        self.client.login(username='juror1', password='password123')
+
+        # Access deliberation room URL
+        response = self.client.get(reverse('deliberation_room', args=[self.dispute.id]), follow=True)
+        self.assertEqual(response.status_code, 200)
+        deliberation_conv = self.dispute.get_or_create_deliberation_room()
+
+        # Send message in deliberation room
+        post_res = self.client.post(
+            reverse('send_message', args=[deliberation_conv.id]),
+            {'content': 'Hello co-jurors, let us evaluate the evidence.'}
+        )
+        self.assertEqual(post_res.status_code, 200)
+
+        # Check co-juror view
+        self.client.login(username='juror2', password='password123')
+        view_res = self.client.get(reverse('chat_view', args=[deliberation_conv.id]))
+        self.assertEqual(view_res.status_code, 200)
+        self.assertContains(view_res, "Hello co-jurors, let us evaluate the evidence.")
+
+    def test_task_participants_blocked_from_deliberation_room(self):
+        deliberation_conv = self.dispute.get_or_create_deliberation_room()
+
+        # Poster blocked
+        self.client.login(username='poster_user', password='password123')
+        res_poster = self.client.get(reverse('deliberation_room', args=[self.dispute.id]))
+        self.assertEqual(res_poster.status_code, 403)
+
+        res_poster_chat = self.client.get(reverse('chat_view', args=[deliberation_conv.id]))
+        self.assertEqual(res_poster_chat.status_code, 403)
+
+        res_poster_send = self.client.post(reverse('send_message', args=[deliberation_conv.id]), {'content': 'Sneak in'})
+        self.assertEqual(res_poster_send.status_code, 403)
+
+        # Taker blocked
+        self.client.login(username='taker_user', password='password123')
+        res_taker = self.client.get(reverse('deliberation_room', args=[self.dispute.id]))
+        self.assertEqual(res_taker.status_code, 403)
+
+    def test_unassigned_user_blocked_from_deliberation_and_evidence(self):
+        deliberation_conv = self.dispute.get_or_create_deliberation_room()
+        self.client.login(username='unassigned', password='password123')
+
+        # Deliberation room blocked with 403
+        delib_res = self.client.get(reverse('deliberation_room', args=[self.dispute.id]))
+        self.assertEqual(delib_res.status_code, 403)
+
+        delib_chat_res = self.client.get(reverse('chat_view', args=[deliberation_conv.id]))
+        self.assertEqual(delib_chat_res.status_code, 403)
+
+        # Task chat blocked with redirect
+        task_chat_res = self.client.get(reverse('chat_view', args=[self.task_conv.id]))
+        self.assertRedirects(task_chat_res, reverse('home'))
+
+
