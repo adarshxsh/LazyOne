@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, DisputeVote
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +181,144 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class DisputeVotingTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        self.voter1 = User.objects.create_user(username='voter1', password='password123')
+        UserProfile.objects.create(user=self.voter1, rewards=100)
+
+        self.voter2 = User.objects.create_user(username='voter2', password='password123')
+        UserProfile.objects.create(user=self.voter2, rewards=100)
+
+        self.voter3 = User.objects.create_user(username='voter3', password='password123')
+        UserProfile.objects.create(user=self.voter3, rewards=100)
+
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="Disputed Task",
+            description="Task undergoing dispute",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed',
+            deadline=self.deadline
+        )
+        Conversation.objects.create(task=self.task)
+
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Quality dispute",
+            deposit_amount=50,
+            escrow_status='held',
+            status='open'
+        )
+
+    def test_uninvolved_user_can_view_dispute_detail(self):
+        self.client.login(username='voter1', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Disputed Task")
+        self.assertContains(response, "Quality dispute")
+
+    def test_party_cannot_vote_on_own_dispute(self):
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('vote_dispute', args=[self.dispute.id]),
+            {'voted_for': self.poster.id},
+            follow=True
+        )
+        self.assertContains(response, "cannot vote on your own dispute")
+        self.assertFalse(DisputeVote.objects.filter(dispute=self.dispute).exists())
+
+    def test_uninvolved_user_can_vote(self):
+        self.client.login(username='voter1', password='password123')
+        response = self.client.post(
+            reverse('vote_dispute', args=[self.dispute.id]),
+            {'voted_for': self.taker.id},
+            follow=True
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(DisputeVote.objects.filter(dispute=self.dispute, voter=self.voter1, voted_for=self.taker).exists())
+
+    def test_double_voting_prevented(self):
+        self.client.login(username='voter1', password='password123')
+        self.client.post(
+            reverse('vote_dispute', args=[self.dispute.id]),
+            {'voted_for': self.taker.id}
+        )
+        response = self.client.post(
+            reverse('vote_dispute', args=[self.dispute.id]),
+            {'voted_for': self.poster.id},
+            follow=True
+        )
+        self.assertContains(response, "already voted")
+        self.assertEqual(DisputeVote.objects.filter(dispute=self.dispute).count(), 1)
+
+    def test_quorum_majority_resolution_taker_wins(self):
+        # Voter 1 votes for Taker
+        c1 = Client()
+        c1.login(username='voter1', password='password123')
+        c1.post(reverse('vote_dispute', args=[self.dispute.id]), {'voted_for': self.taker.id})
+
+        # Voter 2 votes for Poster
+        c2 = Client()
+        c2.login(username='voter2', password='password123')
+        c2.post(reverse('vote_dispute', args=[self.dispute.id]), {'voted_for': self.poster.id})
+
+        # Dispute should still be open (2 votes < 3 quorum)
+        self.dispute.refresh_from_db()
+        self.assertEqual(self.dispute.status, 'open')
+
+        # Voter 3 votes for Taker (Quorum 3 reached, Taker wins 2-1)
+        c3 = Client()
+        c3.login(username='voter3', password='password123')
+        c3.post(reverse('vote_dispute', args=[self.dispute.id]), {'voted_for': self.taker.id})
+
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.task.status, 'completed')
+
+        # Taker raised dispute -> deposit 50 refunded, plus reward 200 awarded
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 500 + 200 + 50)
+
+    def test_quorum_majority_resolution_poster_wins(self):
+        # Voter 1 votes for Poster
+        c1 = Client()
+        c1.login(username='voter1', password='password123')
+        c1.post(reverse('vote_dispute', args=[self.dispute.id]), {'voted_for': self.poster.id})
+
+        # Voter 2 votes for Taker
+        c2 = Client()
+        c2.login(username='voter2', password='password123')
+        c2.post(reverse('vote_dispute', args=[self.dispute.id]), {'voted_for': self.taker.id})
+
+        # Voter 3 votes for Poster (Quorum 3 reached, Poster wins 2-1)
+        c3 = Client()
+        c3.login(username='voter3', password='password123')
+        c3.post(reverse('vote_dispute', args=[self.dispute.id]), {'voted_for': self.poster.id})
+
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.task.status, 'cancelled')
+
+        # Taker raised dispute and lost -> deposit 50 forfeited to Poster
+        # Poster gets task reward 200 refunded + 50 forfeited deposit
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1000 + 200 + 50)
+
 
