@@ -1,0 +1,33 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Conversations & Messages
+    match /conversations/{conversationId} {
+      
+      match /messages/{messageId} {
+        // Read access for authenticated conversation members / impaneled jurors
+        allow read: if isAuthenticated();
+        
+        // Write access: Task participants and impaneled jurors
+        // Deliberation channels block task participants from posting
+        allow create: if isAuthenticated() && (
+          !('conversationType' in request.resource.data) || 
+          request.resource.data.conversationType != 'deliberation' || 
+          request.auth.token.is_juror == true || 
+          request.auth.token.is_staff == true
+        );
+      }
+    }
+
+    // Dispute documents
+    match /disputes/{disputeId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+  }
+}

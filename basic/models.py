@@ -52,8 +52,12 @@ class Task(models.Model):
         return self.title
 
     @property
+    def conversation(self):
+        return self.conversations.filter(conversation_type='task').first() or self.conversations.first()
+
+    @property
     def main_chat(self):
-        return self.conversations.first()
+        return self.conversation
 
     @property
     def deposit_bond_amount(self):
@@ -79,6 +83,21 @@ class RewardLedger(models.Model):
     def __str__(self):
         return f"{self.user.username}: {self.amount} points for {self.description}"
 
+class JurorAssignment(models.Model):
+    dispute = models.ForeignKey('Dispute', on_delete=models.CASCADE, related_name='juror_assignments')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='juror_assignments')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    @property
+    def user(self):
+        return self.juror
+
+    def __str__(self):
+        return f"Juror {self.juror.username} for Dispute {self.dispute.id}"
+
 class Dispute(models.Model):
     STATUS_CHOICES = (
         ('open', 'Open'),
@@ -96,9 +115,33 @@ class Dispute(models.Model):
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
+    jurors = models.ManyToManyField(User, through=JurorAssignment, related_name='assigned_disputes', blank=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def is_juror(self, user):
+        if not user or not user.is_authenticated:
+            return False
+        return self.jurors.filter(id=user.id).exists() or JurorAssignment.objects.filter(dispute=self, juror=user).exists()
+
+    @property
+    def deliberation_conversation(self):
+        conv = Conversation.objects.filter(
+            dispute=self,
+            conversation_type='deliberation'
+        ).first()
+        if not conv:
+            conv = Conversation.objects.create(
+                dispute=self,
+                task=self.task,
+                conversation_type='deliberation'
+            )
+        # Ensure assigned jurors are in conversation participants
+        for j in self.jurors.all():
+            if j not in conv.participants.all():
+                conv.participants.add(j)
+        return conv
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -142,6 +185,20 @@ class Dispute(models.Model):
             self.escrow_status = 'forfeited'
             self.save()
 
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidence_entries')
+    submitted_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='submitted_evidence')
+    description = models.TextField(blank=True)
+    evidence_url = models.URLField(max_length=500, blank=True, null=True)
+    file = models.FileField(upload_to='dispute_evidence/', blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Evidence by {self.submitted_by.username} for Dispute {self.dispute.id}"
+
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
     to_user = models.ForeignKey(User, related_name='to_user', on_delete=models.CASCADE)
@@ -157,11 +214,19 @@ class Friendship(models.Model):
     closeness = models.IntegerField(default=50)
 
 class Conversation(models.Model):
-    task = models.OneToOneField(Task, on_delete=models.CASCADE, null=True, blank=True, related_name='conversation')
+    CONVERSATION_TYPE_CHOICES = (
+        ('task', 'Task Chat'),
+        ('deliberation', 'Deliberation Chat'),
+    )
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, null=True, blank=True, related_name='conversations')
+    dispute = models.ForeignKey('Dispute', on_delete=models.CASCADE, null=True, blank=True, related_name='deliberation_conversations')
     participants = models.ManyToManyField(User, related_name='conversations')
+    conversation_type = models.CharField(max_length=20, choices=CONVERSATION_TYPE_CHOICES, default='task')
     last_message_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self):
+        if self.conversation_type == 'deliberation' and self.dispute:
+            return f"Juror Deliberation for Dispute {self.dispute.id}"
         if self.task:
             return f"Chat for task: {self.task.title}"
         participant_names = [user.username for user in self.participants.all()]

@@ -3,7 +3,153 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, JurorAssignment, DisputeEvidence
+
+
+class JurorPrivateDeliberationTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Users
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        self.juror = User.objects.create_user(username='juror1', password='password123')
+        self.juror_profile = UserProfile.objects.create(user=self.juror, rewards=1000)
+
+        self.outsider = User.objects.create_user(username='outsider', password='password123')
+        self.outsider_profile = UserProfile.objects.create(user=self.outsider, rewards=1000)
+
+        # Task and Task Conversation
+        self.task = Task.objects.create(
+            title="Disputed Delivery Task",
+            description="Task for testing dispute deliberation",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed'
+        )
+        self.task_conv = Conversation.objects.create(
+            task=self.task,
+            conversation_type='task'
+        )
+        self.task_conv.participants.add(self.poster, self.taker)
+
+        # Dispute and Juror Assignment
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Item was damaged upon delivery",
+            deposit_amount=50,
+            escrow_status='held',
+            status='open'
+        )
+        JurorAssignment.objects.create(dispute=self.dispute, juror=self.juror)
+
+    def test_impaneled_juror_can_view_dispute_detail(self):
+        self.client.login(username='juror1', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Disputed Delivery Task")
+        self.assertContains(response, "Item was damaged upon delivery")
+        self.assertContains(response, "Task Chat History")
+        self.assertContains(response, "Private Deliberation Room")
+
+    def test_unauthorized_user_blocked_from_dispute_detail(self):
+        self.client.login(username='outsider', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertRedirects(response, reverse('home'))
+
+    def test_juror_read_only_access_to_task_chat(self):
+        # View task chat
+        self.client.login(username='juror1', password='password123')
+        response = self.client.get(reverse('chat_view', args=[self.task_conv.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context.get('is_read_only'))
+
+        # Juror attempting to post message in task chat gets HTTP 403 Forbidden
+        send_resp = self.client.post(
+            reverse('send_message', args=[self.task_conv.id]),
+            {'content': 'Juror trying to send message to task chat'}
+        )
+        self.assertEqual(send_resp.status_code, 403)
+
+    def test_task_participants_can_submit_evidence(self):
+        self.client.login(username='taker', password='password123')
+        resp = self.client.post(
+            reverse('submit_evidence', args=[self.dispute.id]),
+            {
+                'description': 'Photos showing package damage on arrival',
+                'evidence_url': 'https://example.com/proof.jpg'
+            }
+        )
+        self.assertRedirects(resp, reverse('dispute_detail', args=[self.dispute.id]))
+
+        evidence = DisputeEvidence.objects.filter(dispute=self.dispute).first()
+        self.assertIsNotNone(evidence)
+        self.assertEqual(evidence.submitted_by, self.taker)
+        self.assertEqual(evidence.description, 'Photos showing package damage on arrival')
+        self.assertEqual(evidence.evidence_url, 'https://example.com/proof.jpg')
+
+        # Verify evidence displays on dispute detail page
+        detail_resp = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertContains(detail_resp, 'Photos showing package damage on arrival')
+
+    def test_unauthorized_user_cannot_submit_evidence(self):
+        self.client.login(username='juror1', password='password123')
+        resp = self.client.post(
+            reverse('submit_evidence', args=[self.dispute.id]),
+            {'description': 'Juror statement'}
+        )
+        self.assertRedirects(resp, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertFalse(DisputeEvidence.objects.filter(dispute=self.dispute).exists())
+
+    def test_juror_private_deliberation_chat(self):
+        delib_conv = self.dispute.deliberation_conversation
+        self.assertEqual(delib_conv.conversation_type, 'deliberation')
+
+        # Impaneled juror can view deliberation chat
+        self.client.login(username='juror1', password='password123')
+        view_resp = self.client.get(reverse('chat_view', args=[delib_conv.id]))
+        self.assertEqual(view_resp.status_code, 200)
+
+        # Impaneled juror can post deliberation message
+        post_resp = self.client.post(
+            reverse('send_message', args=[delib_conv.id]),
+            {'content': 'I agree the package was damaged prior to handover.'}
+        )
+        self.assertEqual(post_resp.status_code, 200)
+
+    def test_task_participants_blocked_from_deliberation_chat(self):
+        delib_conv = self.dispute.deliberation_conversation
+
+        # Task poster blocked from viewing deliberation chat
+        self.client.login(username='poster', password='password123')
+        poster_view = self.client.get(reverse('chat_view', args=[delib_conv.id]))
+        self.assertEqual(poster_view.status_code, 403)
+
+        # Task poster blocked from sending deliberation message
+        poster_post = self.client.post(
+            reverse('send_message', args=[delib_conv.id]),
+            {'content': 'Poster trying to join deliberation'}
+        )
+        self.assertEqual(poster_post.status_code, 403)
+
+        # Task taker blocked from viewing deliberation chat
+        self.client.login(username='taker', password='password123')
+        taker_view = self.client.get(reverse('chat_view', args=[delib_conv.id]))
+        self.assertEqual(taker_view.status_code, 403)
+
+        # Task taker blocked from sending deliberation message
+        taker_post = self.client.post(
+            reverse('send_message', args=[delib_conv.id]),
+            {'content': 'Taker trying to join deliberation'}
+        )
+        self.assertEqual(taker_post.status_code, 403)
+
 
 
 class DisputeDepositBondTests(TestCase):
