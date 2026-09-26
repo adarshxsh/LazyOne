@@ -142,6 +142,25 @@ class Dispute(models.Model):
             self.escrow_status = 'forfeited'
             self.save()
 
+class DisputeJuror(models.Model):
+    VOTE_CHOICES = (
+        ('pending', 'Pending'),
+        ('poster', 'Poster'),
+        ('taker', 'Taker'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='jurors')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='juror_assignments')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    vote = models.CharField(max_length=20, choices=VOTE_CHOICES, default='pending')
+    reasoning = models.TextField(blank=True, null=True)
+    voted_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        unique_together = ('dispute', 'user')
+
+    def __str__(self):
+        return f"Juror {self.user.username} for Dispute {self.dispute.id} (Vote: {self.vote})"
+
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
     to_user = models.ForeignKey(User, related_name='to_user', on_delete=models.CASCADE)

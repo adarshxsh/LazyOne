@@ -23,6 +23,93 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if conversation %}
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Task Conversation Logs</h3>
+            <a href="{% url 'chat_view' conversation.id %}" class="inline-block px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg transition font-medium">
+                View Chat Logs
+            </a>
+        </div>
+        {% endif %}
+
+        {% if can_vote %}
+        <div class="bg-gray-800 p-6 rounded-xl border border-cyan-500/30">
+            <h3 class="text-2xl font-bold text-cyan-300 mb-4">Juror Peer Arbitration</h3>
+            <p class="text-sm text-gray-300 mb-4">Review the task details and conversation logs above before casting your unbiased vote. Votes are final and cannot be changed once submitted.</p>
+            <form action="{% url 'submit_vote' dispute.id %}" method="POST" class="space-y-4">
+                {% csrf_token %}
+                <div>
+                    <label class="block text-sm font-medium text-gray-200 mb-2">Your Verdict Vote:</label>
+                    <div class="space-y-2">
+                        <label class="flex items-center space-x-3 cursor-pointer p-3 rounded-lg bg-gray-900/60 border border-gray-700 hover:border-cyan-500">
+                            <input type="radio" name="vote" value="poster" required class="form-radio text-cyan-500">
+                            <span class="text-white">In favor of Task Poster ({{ task.posted_by.username }})</span>
+                        </label>
+                        <label class="flex items-center space-x-3 cursor-pointer p-3 rounded-lg bg-gray-900/60 border border-gray-700 hover:border-cyan-500">
+                            <input type="radio" name="vote" value="taker" required class="form-radio text-cyan-500">
+                            <span class="text-white">In favor of Task Taker ({{ task.taken_by.username }})</span>
+                        </label>
+                    </div>
+                </div>
+                <div>
+                    <label for="reasoning" class="block text-sm font-medium text-gray-200 mb-1">Reasoning / Explanation:</label>
+                    <textarea id="reasoning" name="reasoning" rows="3" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-cyan-500" placeholder="Provide reasoning for your verdict..."></textarea>
+                </div>
+                <button type="submit" class="px-6 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-semibold rounded-lg hover:from-cyan-400 hover:to-blue-500 transition">
+                    Submit Verdict Vote
+                </button>
+            </form>
+        </div>
+        {% elif is_juror and juror_assignment %}
+        <div class="bg-gray-800/80 p-6 rounded-xl border border-gray-700">
+            <h3 class="text-xl font-bold text-cyan-300 mb-2">Your Juror Submission</h3>
+            <p><strong>Your Vote:</strong> <span class="capitalize text-cyan-400">{{ juror_assignment.get_vote_display }}</span></p>
+            {% if juror_assignment.reasoning %}
+            <p class="mt-2"><strong>Reasoning:</strong> {{ juror_assignment.reasoning }}</p>
+            {% endif %}
+            <p class="text-xs text-gray-400 mt-2">Your vote has been recorded and cannot be changed.</p>
+        </div>
+        {% endif %}
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-3">Community Juror Panel</h3>
+            {% if is_disputant and dispute.status == 'open' %}
+                <p class="text-xs text-gray-400 mb-2">Juror identities remain anonymous to task disputants during active voting.</p>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {% for juror in anonymized_jurors %}
+                    <div class="bg-gray-900/60 border border-gray-700 p-3 rounded-lg text-center">
+                        <span class="font-medium text-gray-200">{{ juror.label }}</span>
+                        <div class="mt-1">
+                            <span class="text-xs px-2 py-0.5 rounded-full {% if juror.status == 'Voted' %}bg-green-500/20 text-green-300{% else %}bg-yellow-500/20 text-yellow-300{% endif %}">
+                                {{ juror.status }}
+                            </span>
+                        </div>
+                    </div>
+                    {% empty %}
+                    <p class="text-sm text-gray-400">No neutral jurors assigned yet (staff review pending).</p>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="space-y-2">
+                    {% for juror in jurors %}
+                    <div class="bg-gray-900/60 border border-gray-700 p-3 rounded-lg flex justify-between items-center">
+                        <div>
+                            <span class="font-medium text-gray-200">{{ juror.user.username }}</span>
+                            {% if juror.reasoning %}
+                            <p class="text-xs text-gray-400 mt-1">"{{ juror.reasoning }}"</p>
+                            {% endif %}
+                        </div>
+                        <span class="text-xs px-2 py-1 rounded-full {% if juror.vote != 'pending' %}bg-green-500/20 text-green-300{% else %}bg-yellow-500/20 text-yellow-300{% endif %}">
+                            {{ juror.get_vote_display }}
+                        </span>
+                    </div>
+                    {% empty %}
+                    <p class="text-sm text-gray-400">No community jurors assigned.</p>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
     </div>
 
 {% endblock %}

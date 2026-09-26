@@ -5,17 +5,50 @@ from django.db import transaction
 from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+from ..services.juror import (
+    select_and_assign_jurors,
+    check_and_replace_expired_jurors,
+    process_juror_vote
+)
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+
+    is_disputant = (request.user == task.posted_by or request.user == task.taken_by)
+    is_juror = dispute.jurors.filter(user=request.user).exists()
+
+    if not is_disputant and not request.user.is_staff and not is_juror:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+
+    check_and_replace_expired_jurors(dispute)
+
+    is_juror = dispute.jurors.filter(user=request.user).exists()
+    juror_assignment = dispute.jurors.filter(user=request.user).first() if is_juror else None
+    can_vote = bool(is_juror and juror_assignment and juror_assignment.vote == 'pending' and dispute.status == 'open')
+
+    conversation = getattr(task, 'conversation', None)
+
+    anonymized_jurors = []
+    if is_disputant and dispute.status == 'open':
+        for i, j in enumerate(dispute.jurors.all()):
+            anonymized_jurors.append({
+                'label': f"Juror {i+1}",
+                'status': 'Voted' if j.vote != 'pending' else 'Pending'
+            })
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'is_disputant': is_disputant,
+        'is_juror': is_juror,
+        'juror_assignment': juror_assignment,
+        'can_vote': can_vote,
+        'conversation': conversation,
+        'jurors': dispute.jurors.all(),
+        'anonymized_jurors': anonymized_jurors,
     }
     return render(request, 'dispute_detail.html', context)
 
@@ -79,7 +112,16 @@ def raise_dispute(request, task_id):
                 message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
                 link=reverse('dispute_detail', args=[dispute.id])
             )
-        messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
+
+        assigned_jurors = select_and_assign_jurors(dispute)
+        if not assigned_jurors:
+            messages.warning(
+                request,
+                f"Dispute raised successfully. {deposit_amount} points held as deposit bond. Notice: Insufficient neutral community members were available for auto-assignment. Dispute queued for staff review."
+            )
+        else:
+            messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond. 3 neutral community jurors assigned.")
+
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')
 
@@ -105,3 +147,32 @@ def withdraw_dispute(request, dispute_id):
         )
     messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'. Your deposit bond has been refunded.")
     return redirect('my_tasks')
+
+@login_required(login_url='/login/')
+@require_POST
+def submit_vote(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    juror_assignment = dispute.jurors.filter(user=request.user).first()
+    if not juror_assignment:
+        messages.error(request, "You are not an assigned juror for this dispute.")
+        return redirect('home')
+
+    if juror_assignment.vote != 'pending':
+        messages.error(request, "You have already submitted your vote. Votes cannot be changed once submitted.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    vote_choice = request.POST.get('vote')
+    reasoning = request.POST.get('reasoning', '').strip()
+
+    if vote_choice not in ['poster', 'taker']:
+        messages.error(request, "Invalid vote option selected.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    try:
+        process_juror_vote(juror_assignment, vote_choice, reasoning)
+        messages.success(request, "Your vote has been submitted successfully.")
+    except Exception as e:
+        messages.error(request, f"Error submitting vote: {str(e)}")
+
+    return redirect('dispute_detail', dispute_id=dispute.id)
+
