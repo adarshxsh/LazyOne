@@ -12,16 +12,69 @@
         </div>
 
         <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
+            <h3 class="text-xl font-semibold text-cyan-400">Dispute & Symmetrical Bonding Information</h3>
             <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
+            <p><strong>Worker Security Deposit Bond:</strong> {{ dispute.worker_deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_worker_escrow_status_display }}</span>)</p>
+            <p><strong>Poster Counter-Bond:</strong> {{ dispute.poster_deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_poster_escrow_status_display }}</span>)</p>
+            {% if dispute.poster_escrow_status == 'pending' and dispute.counter_bond_deadline %}
+                <p><strong>Poster Counter-Bond SLA Deadline:</strong> <span class="text-yellow-400">{{ dispute.counter_bond_deadline|date:"F d, Y H:i" }} UTC</span></p>
+            {% endif %}
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            {% if dispute.consensus_outcome %}
+                <p><strong>Consensus Outcome:</strong> <span class="font-bold text-green-400">{{ dispute.consensus_outcome|title }}</span></p>
+            {% endif %}
         </div>
+
+        {% if is_poster and dispute.status == 'open' and dispute.poster_escrow_status == 'pending' %}
+            <div class="bg-yellow-900/30 border border-yellow-600/50 p-4 rounded-lg">
+                <h3 class="text-lg font-semibold text-yellow-300 mb-2">Poster Action Required: Match Worker Deposit Bond</h3>
+                <p class="text-sm text-gray-300 mb-4">To proceed with jury review, you must post a matching deposit bond of {{ dispute.poster_deposit_amount }} points.</p>
+                <form action="{% url 'post_counter_bond' dispute.id %}" method="POST">
+                    {% csrf_token %}
+                    <button type="submit" class="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold rounded-lg transition-colors">
+                        Post Matching Deposit Bond ({{ dispute.poster_deposit_amount }} Points)
+                    </button>
+                </form>
+            </div>
+        {% endif %}
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+        </div>
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400">Jury Voting & Consensus Status</h3>
+            <p><strong>Current Votes:</strong> Poster: {{ poster_votes }} | Worker/Taker: {{ taker_votes }} (Total: {{ total_votes }})</p>
+
+            {% if can_vote %}
+                <div class="bg-gray-800/80 p-4 rounded-lg border border-gray-700 mt-3 space-y-3">
+                    <p class="font-medium text-white">Cast Your Vote as a Juror (Requires Locking {{ juror_stake_amount }} Points Stake):</p>
+                    <div class="flex space-x-4">
+                        <form action="{% url 'cast_juror_vote' dispute.id %}" method="POST">
+                            {% csrf_token %}
+                            <input type="hidden" name="vote_choice" value="poster">
+                            <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg">
+                                Vote for Task Poster
+                            </button>
+                        </form>
+                        <form action="{% url 'cast_juror_vote' dispute.id %}" method="POST">
+                            {% csrf_token %}
+                            <input type="hidden" name="vote_choice" value="taker">
+                            <button type="submit" class="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white font-semibold rounded-lg">
+                                Vote for Task Taker/Worker
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            {% elif has_voted %}
+                <p class="text-green-400 mt-2 font-medium">✓ You have cast your vote on this dispute (Stake locked: {{ juror_stake_amount }} points).</p>
+            {% elif is_participant %}
+                <p class="text-gray-400 mt-2 italic">Task participants cannot vote as jurors.</p>
+            {% elif dispute.poster_escrow_status == 'pending' %}
+                <p class="text-yellow-400 mt-2 italic">Waiting for task poster to post matching deposit bond before jury voting opens.</p>
+            {% endif %}
         </div>
     </div>
 
