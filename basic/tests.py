@@ -182,3 +182,157 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class DisputeVotingTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=200)
+
+        self.jurors = []
+        for i in range(1, 6):
+            juror = User.objects.create_user(username=f'juror{i}', password='password123')
+            UserProfile.objects.create(user=juror, rewards=100)
+            self.jurors.append(juror)
+
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="Voting Task",
+            description="Task for voting test",
+            reward=300,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed',
+            deadline=self.deadline
+        )
+        Conversation.objects.create(task=self.task)
+
+        # Dispute raised by taker (deposit bond = 60 held from taker)
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Taker raised dispute',
+            deposit_amount=60,
+            escrow_status='held',
+            status='open'
+        )
+        # Deduct deposit bond from taker profile as done when raised
+        self.taker_profile.rewards = 140
+        self.taker_profile.save()
+
+    def test_non_participant_can_view_open_dispute(self):
+        self.client.login(username='juror1', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Voting Task")
+        self.assertContains(response, "Community Jury Voting")
+
+    def test_task_participants_cannot_vote(self):
+        # Poster attempts to vote
+        self.client.login(username='poster', password='password123')
+        response = self.client.post(
+            reverse('dispute_detail', args=[self.dispute.id]),
+            {'voted_for': self.poster.id}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(self.dispute.votes.count(), 0)
+
+        # Taker attempts to vote
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(
+            reverse('dispute_detail', args=[self.dispute.id]),
+            {'voted_for': self.taker.id}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(self.dispute.votes.count(), 0)
+
+    def test_duplicate_voting_prevented(self):
+        self.client.login(username='juror1', password='password123')
+        # First vote
+        response = self.client.post(
+            reverse('dispute_detail', args=[self.dispute.id]),
+            {'voted_for': self.poster.id}
+        )
+        self.assertEqual(self.dispute.votes.count(), 1)
+
+        # Duplicate vote attempt
+        response = self.client.post(
+            reverse('dispute_detail', args=[self.dispute.id]),
+            {'voted_for': self.poster.id}
+        )
+        self.assertEqual(self.dispute.votes.count(), 1)
+
+    def test_quorum_majority_poster_wins(self):
+        # 3 votes for Poster, 2 votes for Taker
+        votes_plan = [
+            (self.jurors[0], self.poster.id),
+            (self.jurors[1], self.poster.id),
+            (self.jurors[2], self.taker.id),
+            (self.jurors[3], self.taker.id),
+            (self.jurors[4], self.poster.id),
+        ]
+
+        for juror, voted_for_id in votes_plan:
+            self.client.login(username=juror.username, password='password123')
+            self.client.post(
+                reverse('dispute_detail', args=[self.dispute.id]),
+                {'voted_for': voted_for_id}
+            )
+
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.task.status, 'cancelled')
+
+        # Poster gets task reward refunded (1000 + 300) + forfeited deposit bond from taker (60) = 1360
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1360)
+
+        # Deposit bond forfeited by taker (raised by taker, lost dispute)
+        self.assertEqual(self.dispute.escrow_status, 'forfeited')
+
+        # Notifications sent
+        from .models import Notification
+        self.assertTrue(Notification.objects.filter(recipient=self.poster).exists())
+        self.assertTrue(Notification.objects.filter(recipient=self.taker).exists())
+
+    def test_quorum_majority_taker_wins(self):
+        # 3 votes for Taker, 2 votes for Poster
+        votes_plan = [
+            (self.jurors[0], self.taker.id),
+            (self.jurors[1], self.taker.id),
+            (self.jurors[2], self.poster.id),
+            (self.jurors[3], self.poster.id),
+            (self.jurors[4], self.taker.id),
+        ]
+
+        for juror, voted_for_id in votes_plan:
+            self.client.login(username=juror.username, password='password123')
+            self.client.post(
+                reverse('dispute_detail', args=[self.dispute.id]),
+                {'voted_for': voted_for_id}
+            )
+
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.task.status, 'completed')
+
+        # Taker gets task reward (300) + deposit bond refund (60). Initial profile rewards was 140 -> 140 + 300 + 60 = 500
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 500)
+
+        self.assertEqual(self.dispute.escrow_status, 'refunded')
+
+        # Notifications sent
+        from .models import Notification
+        self.assertTrue(Notification.objects.filter(recipient=self.poster).exists())
+        self.assertTrue(Notification.objects.filter(recipient=self.taker).exists())
+
+
