@@ -21,6 +21,16 @@ class Command(BaseCommand):
         now = timezone.now()
         expiry_threshold = now - timedelta(days=days)
 
+        # First, process counter-bond SLA expirations
+        pending_counter_bond_disputes = Dispute.objects.filter(
+            status='open',
+            poster_escrow_status='pending',
+            counter_bond_deadline__isnull=False
+        )
+        for dispute in pending_counter_bond_disputes:
+            if dispute.check_counter_bond_sla():
+                count += 1
+
         # Find open disputes created before the expiration window
         expired_disputes = Dispute.objects.filter(status='open', created_at__lte=expiry_threshold)
 
