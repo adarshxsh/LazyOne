@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, Friendship, FriendRequest, Notification
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +181,156 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class AutoJurySelectionTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Task poster & taker
+        self.poster = User.objects.create_user(username='poster_user', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker_user', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        # Friends of poster and taker
+        self.poster_friend = User.objects.create_user(username='poster_friend', password='password123')
+        self.poster_friend_profile = UserProfile.objects.create(user=self.poster_friend, rewards=500)
+        self.poster_profile.friends.add(self.poster_friend_profile)
+
+        self.taker_friend = User.objects.create_user(username='taker_friend', password='password123')
+        self.taker_friend_profile = UserProfile.objects.create(user=self.taker_friend, rewards=500)
+        Friendship.objects.create(from_user=self.taker_profile, to_user=self.taker_friend_profile)
+
+        # Neutral community members
+        self.neutrals = []
+        for i in range(1, 5):
+            u = User.objects.create_user(username=f'neutral_{i}', password='password123')
+            UserProfile.objects.create(user=u, rewards=500)
+            self.neutrals.append(u)
+
+        # Non-impaneled outsider and staff
+        self.outsider = User.objects.create_user(username='outsider_user', password='password123')
+        UserProfile.objects.create(user=self.outsider, rewards=500)
+
+        self.staff_user = User.objects.create_user(username='staff_user', password='password123', is_staff=True)
+        UserProfile.objects.create(user=self.staff_user, rewards=500)
+
+        # Task
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="Disputed Jury Task",
+            description="Task for jury testing",
+            reward=300,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=self.deadline
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_jury_selection_filters_participants_and_friends(self):
+        self.client.login(username='taker_user', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work not satisfactory'}
+        )
+
+        dispute = Dispute.objects.get(task=self.task)
+        selected_jurors = list(dispute.jurors.all())
+
+        self.assertEqual(len(selected_jurors), 3)
+
+        # Ensure participants and direct friends are NOT impaneled
+        selected_ids = [u.id for u in selected_jurors]
+        self.assertNotIn(self.poster.id, selected_ids)
+        self.assertNotIn(self.taker.id, selected_ids)
+        self.assertNotIn(self.poster_friend.id, selected_ids)
+        self.assertNotIn(self.taker_friend.id, selected_ids)
+
+        # Ensure selected jurors are neutral non-excluded community members
+        excluded_ids = {self.poster.id, self.taker.id, self.poster_friend.id, self.taker_friend.id}
+        for juror in selected_jurors:
+            self.assertNotIn(juror.id, excluded_ids)
+
+    def test_juror_notifications_created(self):
+        self.client.login(username='taker_user', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work issue'}
+        )
+
+        dispute = Dispute.objects.get(task=self.task)
+        selected_jurors = dispute.jurors.all()
+        dispute_link = reverse('dispute_detail', args=[dispute.id])
+
+        for juror in selected_jurors:
+            notif = Notification.objects.filter(recipient=juror).first()
+            self.assertIsNotNone(notif)
+            self.assertEqual(notif.link, dispute_link)
+            self.assertIn("assigned as a juror", notif.message)
+
+    def test_dispute_detail_access_control(self):
+        # Raise dispute
+        self.client.login(username='taker_user', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Access check reason'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        dispute_url = reverse('dispute_detail', args=[dispute.id])
+
+        # Impaneled juror should be allowed access
+        impaneled_juror = dispute.jurors.first()
+        self.client.login(username=impaneled_juror.username, password='password123')
+        response = self.client.get(dispute_url)
+        self.assertEqual(response.status_code, 200)
+
+        # Non-impaneled third party (poster_friend) should be denied access and redirected
+        self.client.login(username='poster_friend', password='password123')
+        response = self.client.get(dispute_url, follow=False)
+        self.assertRedirects(response, reverse('home'))
+
+        # Staff user should be allowed access
+        self.client.login(username='staff_user', password='password123')
+        response = self.client.get(dispute_url)
+        self.assertEqual(response.status_code, 200)
+
+    def test_accepted_friend_request_filtered(self):
+        # Create an accepted friend request between taker and a neutral user
+        neutral_friend_req = self.neutrals[0]
+        FriendRequest.objects.create(from_user=self.taker, to_user=neutral_friend_req, is_accepted=True)
+
+        self.client.login(username='taker_user', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Testing friend request filter'}
+        )
+
+        dispute = Dispute.objects.get(task=self.task)
+        selected_ids = [u.id for u in dispute.jurors.all()]
+        self.assertNotIn(neutral_friend_req.id, selected_ids)
+
+    def test_small_candidate_pool(self):
+        # Deactivate all neutral community members except 1
+        for u in self.neutrals[1:]:
+            u.is_active = False
+            u.save()
+        self.outsider.is_active = False
+        self.outsider.save()
+        self.staff_user.is_active = False
+        self.staff_user.save()
+
+        self.client.login(username='taker_user', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Small candidate pool test'}
+        )
+
+        dispute = Dispute.objects.get(task=self.task)
+        selected_jurors = list(dispute.jurors.all())
+        self.assertEqual(len(selected_jurors), 1)
+        self.assertEqual(selected_jurors[0].id, self.neutrals[0].id)
+
 
