@@ -91,6 +91,8 @@ class Dispute(models.Model):
     )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
+    jurors = models.ManyToManyField(User, related_name='assigned_disputes', blank=True)
+    deliberation_room = models.OneToOneField('Conversation', on_delete=models.SET_NULL, null=True, blank=True, related_name='deliberation_dispute')
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
@@ -99,6 +101,16 @@ class Dispute(models.Model):
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def get_or_create_deliberation_room(self):
+        if not self.deliberation_room:
+            conv = Conversation.objects.create(is_deliberation=True)
+            conv.participants.set(self.jurors.all())
+            self.deliberation_room = conv
+            self.save(update_fields=['deliberation_room'])
+        else:
+            self.deliberation_room.participants.set(self.jurors.all())
+        return self.deliberation_room
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -159,9 +171,12 @@ class Friendship(models.Model):
 class Conversation(models.Model):
     task = models.OneToOneField(Task, on_delete=models.CASCADE, null=True, blank=True, related_name='conversation')
     participants = models.ManyToManyField(User, related_name='conversations')
+    is_deliberation = models.BooleanField(default=False)
     last_message_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self):
+        if hasattr(self, 'deliberation_dispute') and self.deliberation_dispute:
+            return f"Jury Deliberation for task: {self.deliberation_dispute.task.title}"
         if self.task:
             return f"Chat for task: {self.task.title}"
         participant_names = [user.username for user in self.participants.all()]

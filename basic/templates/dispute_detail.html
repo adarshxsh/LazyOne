@@ -23,6 +23,43 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <!-- Task Chat History / Evidence Portal -->
+        {% if task.conversation %}
+        <div class="bg-gray-800/60 p-5 rounded-lg border border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Evidence Portal</h3>
+            <p class="text-sm text-gray-400 mb-3">
+                {% if is_assigned_juror or is_staff %}
+                    Inspect original task chat history in read-only mode to evaluate dispute evidence.
+                {% else %}
+                    View the full task conversation history associated with this dispute.
+                {% endif %}
+            </p>
+            <a href="{% url 'chat_view' task.conversation.id %}" class="inline-flex items-center px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-medium rounded-md transition-colors">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
+                View Task Chat History (Evidence Portal)
+            </a>
+        </div>
+        {% endif %}
+
+        <!-- Jury Deliberation Room -->
+        {% if is_assigned_juror or is_staff %}
+        <div class="bg-indigo-900/40 p-5 rounded-lg border border-indigo-700/50">
+            <h3 class="text-xl font-semibold text-indigo-300 mb-2">Jury Deliberation Room</h3>
+            <p class="text-sm text-gray-300 mb-4">
+                Enter the isolated private room to discuss evidence and deliberate real-time with co-jurors.
+            </p>
+            <a href="{% url 'deliberation_room' dispute.id %}" class="inline-flex items-center px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-md transition-colors shadow">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"></path></svg>
+                Enter Jury Deliberation Room
+            </a>
+        </div>
+        {% elif is_participant %}
+        <div class="bg-gray-800/40 p-4 rounded-lg border border-gray-700 text-sm text-gray-400 flex items-center">
+            <svg class="w-5 h-5 mr-2 text-yellow-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m0 0v2m0-2h2m-2 0H10m10-5V6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2h12a2 2 0 002-2z"></path></svg>
+            Jury Deliberation Channel: Private to assigned jurors only. Task participants cannot access juror discussions.
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}

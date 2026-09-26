@@ -19,37 +19,68 @@ def chat_view(request, conversation_id):
         logger.info("Step 1: Conversation object found.")
     except Exception as e:
         logger.error(f"FATAL ERROR at Step 1 (get_object_or_404): {e}")
-        # If conversation not found, redirect to home with an error
         messages.error(request, "Chat not found.")
         return redirect('home')
 
-    if request.user not in conversation.participants.all():
-        logger.warning("Step 2: User is not a participant. Redirecting to home.")
-        messages.error(request, "You are not authorized to view this chat.")
-        return redirect('home') # Redirect to home page
-    logger.info("Step 2: User is a valid participant.")
+    # Check conversation type
+    deliberation_dispute = getattr(conversation, 'deliberation_dispute', None)
+    if not deliberation_dispute and hasattr(conversation, 'dispute_deliberation'):
+        deliberation_dispute = conversation.dispute_deliberation
+
+    is_read_only = False
+    is_evidence_portal = False
+
+    if deliberation_dispute:
+        task = deliberation_dispute.task
+        # Requirement 4: Block task posters and takers from entering or reading jury deliberation channels
+        if request.user == task.posted_by or request.user == task.taken_by:
+            return HttpResponseForbidden("You are not authorized to access the jury deliberation channel.")
+        
+        is_assigned_juror = deliberation_dispute.jurors.filter(id=request.user.id).exists()
+        if not is_assigned_juror and not request.user.is_staff:
+            return HttpResponseForbidden("You are not authorized to access this jury deliberation room.")
+
+    elif conversation.task:
+        task = conversation.task
+        is_participant = request.user in conversation.participants.all()
+        is_assigned_juror = hasattr(task, 'dispute') and task.dispute.jurors.filter(id=request.user.id).exists()
+        is_staff = request.user.is_staff
+
+        if not is_participant and not is_assigned_juror and not is_staff:
+            messages.error(request, "You are not authorized to view this chat.")
+            return redirect('home')
+
+        if not is_participant:
+            is_read_only = True
+            if is_assigned_juror:
+                is_evidence_portal = True
+
+    else:
+        # Direct message conversation
+        if request.user not in conversation.participants.all() and not request.user.is_staff:
+            messages.error(request, "You are not authorized to view this chat.")
+            return redirect('home')
+
+    messages_list = list(conversation.messages.all())
 
     try:
-        # This is for the Django-based message system, which we are bypassing for Firestore.
-        # We will pass an empty list to the template.
-        messages_list = [] # Renamed to avoid conflict with django.contrib.messages
-        logger.info("Step 3: Bypassing Django message fetching for Firestore.")
-    except Exception as e:
-        logger.error(f"ERROR at Step 3 (Message Handling): {e}")
-
-    try:
-        # Mark related notifications as read
         notification_link = reverse('chat_view', args=[conversation_id])
-        updated_count = Notification.objects.filter(
+        Notification.objects.filter(
             recipient=request.user, 
             link=notification_link, 
             is_read=False
         ).update(is_read=True)
-        logger.info(f"Step 4: Marked {updated_count} related notifications as read.")
     except Exception as e:
         logger.error(f"ERROR at Step 4 (Marking notifications): {e}")
 
-    context = {'conversation': conversation, 'messages': messages_list}
+    context = {
+        'conversation': conversation,
+        'messages': messages_list,
+        'is_read_only': is_read_only,
+        'is_evidence_portal': is_evidence_portal,
+        'is_deliberation': bool(deliberation_dispute),
+        'dispute': deliberation_dispute if deliberation_dispute else (conversation.task.dispute if conversation.task and hasattr(conversation.task, 'dispute') else None)
+    }
     
     logger.info(f"--- CHAT_VIEW END: Successfully rendering template. ---")
     return render(request, 'chat.html', context)
@@ -59,18 +90,38 @@ def chat_view(request, conversation_id):
 def send_message(request, conversation_id):
     if request.method == 'POST':
         conversation = get_object_or_404(Conversation, id=conversation_id)
-        if request.user not in conversation.participants.all():
-            return HttpResponseForbidden("You are not authorized to send messages in this chat.")
-        
+
+        deliberation_dispute = getattr(conversation, 'deliberation_dispute', None)
+        if not deliberation_dispute and hasattr(conversation, 'dispute_deliberation'):
+            deliberation_dispute = conversation.dispute_deliberation
+
+        if deliberation_dispute:
+            task = deliberation_dispute.task
+            if request.user == task.posted_by or request.user == task.taken_by:
+                return HttpResponseForbidden("You are not authorized to send messages in the jury deliberation room.")
+            
+            is_assigned_juror = deliberation_dispute.jurors.filter(id=request.user.id).exists()
+            if not is_assigned_juror and not request.user.is_staff:
+                return HttpResponseForbidden("You are not authorized to send messages in this jury deliberation room.")
+
+        elif conversation.task:
+            if request.user not in conversation.participants.all():
+                return HttpResponseForbidden("You are not authorized to send messages in this task chat.")
+
+        else:
+            if request.user not in conversation.participants.all():
+                return HttpResponseForbidden("You are not authorized to send messages in this chat.")
+
         content = request.POST.get('content')
         if content:
-            Message.objects.create(
+            msg = Message.objects.create(
                 conversation=conversation,
                 sender=request.user,
                 content=content
             )
             conversation.last_message_at = timezone.now()
             conversation.save()
+
             for participant in conversation.participants.all():
                 if participant != request.user:
                     Notification.objects.create(
@@ -78,7 +129,15 @@ def send_message(request, conversation_id):
                         message=f"New message from {request.user.username}",
                         link=reverse('chat_view', args=[conversation_id])
                     )
-            return JsonResponse({'status': 'success'})
+            return JsonResponse({
+                'status': 'success',
+                'message': {
+                    'id': msg.id,
+                    'sender': msg.sender.username,
+                    'content': msg.content,
+                    'timestamp': msg.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+                }
+            })
     return JsonResponse({'status': 'error'}, status=400)
 
 @login_required(login_url='/login/')
