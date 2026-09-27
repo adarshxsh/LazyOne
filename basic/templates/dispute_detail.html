@@ -8,7 +8,12 @@
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg font-medium text-white mb-2">{{ dispute.task.title }}</p>
+            {% if dispute.task.main_chat %}
+                <a href="{% url 'chat_view' dispute.task.main_chat.id %}" class="inline-block bg-cyan-600 hover:bg-cyan-700 text-white px-4 py-2 rounded-lg font-semibold text-sm transition-colors">
+                    View Task Chat History
+                </a>
+            {% endif %}
         </div>
 
         <div>
@@ -22,6 +27,60 @@
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+        </div>
+
+        <!-- Juror Section & Deliberation Controls -->
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Assigned Dispute Jurors</h3>
+            <ul class="list-disc list-inside bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-1 mb-3">
+                {% for juror in dispute.jurors.all %}
+                    <li class="text-gray-200">{{ juror.username }}</li>
+                {% empty %}
+                    <li class="text-gray-400 italic">No jurors assigned yet.</li>
+                {% endfor %}
+            </ul>
+            {% if is_juror or is_staff %}
+                <a href="{% url 'chat_view' dispute.deliberation_chat.id %}" class="inline-block bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-semibold text-sm transition-colors">
+                    Enter Juror Deliberation Channel
+                </a>
+            {% endif %}
+        </div>
+
+        <!-- Evidence Section -->
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Dispute Evidence & Proof</h3>
+            <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-3 mb-4">
+                {% for evidence in dispute.evidences.all %}
+                    <div class="flex items-center justify-between border-b border-gray-800 pb-2 last:border-0 last:pb-0">
+                        <div>
+                            <p class="font-semibold text-white">{{ evidence.title }}</p>
+                            <p class="text-xs text-gray-400">Uploaded by {{ evidence.uploaded_by.username }} on {{ evidence.uploaded_at|date:"F d, Y H:i" }}</p>
+                        </div>
+                        <a href="{{ evidence.file.url }}" target="_blank" class="bg-gray-800 hover:bg-gray-700 text-cyan-400 border border-gray-600 px-3 py-1 rounded text-xs font-medium transition-colors">
+                            Download / View Attachment
+                        </a>
+                    </div>
+                {% empty %}
+                    <p class="text-gray-400 italic">No evidence attachments uploaded yet.</p>
+                {% endfor %}
+            </div>
+
+            <!-- Upload Evidence Form -->
+            <form action="{% url 'upload_evidence' dispute.id %}" method="POST" enctype="multipart/form-data" class="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-3">
+                {% csrf_token %}
+                <h4 class="text-md font-semibold text-gray-200">Submit Evidence Attachment</h4>
+                <div>
+                    <label class="block text-xs font-medium text-gray-400 mb-1">Evidence Title</label>
+                    <input type="text" name="title" required placeholder="e.g., Deliverable Screenshot, Code File" class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-cyan-400">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-400 mb-1">File Attachment (PNG, JPG, PDF, TXT under 10 MB)</label>
+                    <input type="file" name="file" required class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-cyan-600 file:text-white hover:file:bg-cyan-700 cursor-pointer">
+                </div>
+                <button type="submit" class="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-colors">
+                    Upload Evidence
+                </button>
+            </form>
         </div>
     </div>
 
