@@ -3,26 +3,152 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
-
-    <div class="space-y-6 text-gray-300">
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+    <div class="max-w-4xl mx-auto space-y-8 text-gray-300 py-6">
+        <div class="flex justify-between items-center border-b border-gray-700 pb-4">
+            <h2 class="text-3xl font-bold text-white">Dispute Details</h2>
+            <span class="px-3 py-1 text-sm font-semibold rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300 border border-yellow-500/30{% else %}bg-green-500/20 text-green-300 border border-green-500/30{% endif %}">
+                {{ dispute.get_status_display }}
+            </span>
         </div>
 
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
-            <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+        <!-- Task & Dispute Core Info -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-800/50 p-6 rounded-xl border border-gray-700">
+            <div>
+                <h3 class="text-xl font-semibold text-cyan-400 mb-2">Task in Question</h3>
+                <p class="text-lg font-medium text-white mb-1">{{ dispute.task.title }}</p>
+                <p class="text-sm text-gray-400 mb-3">Reward: <span class="text-yellow-400 font-semibold">{{ dispute.task.reward }} points</span></p>
+                {% if task.conversation %}
+                <a href="{% url 'chat_view' task.conversation.id %}" class="inline-block bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors">
+                    View Task Chat
+                </a>
+                {% endif %}
+            </div>
+
+            <div>
+                <h3 class="text-xl font-semibold text-cyan-400 mb-2">Dispute Information</h3>
+                <p class="text-sm mb-1"><strong class="text-gray-200">Poster:</strong> {{ task.posted_by.username }}</p>
+                <p class="text-sm mb-1"><strong class="text-gray-200">Taker:</strong> {{ task.taken_by.username }}</p>
+                <p class="text-sm mb-1"><strong class="text-gray-200">Raised By:</strong> {{ dispute.raised_by.username }}</p>
+                <p class="text-sm mb-1"><strong class="text-gray-200">Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="text-cyan-300 font-medium">{{ dispute.get_escrow_status_display }}</span>)</p>
+                <p class="text-sm"><strong class="text-gray-200">Date Raised:</strong> {{ dispute.created_at|date:"F d, Y H:i" }}</p>
+            </div>
         </div>
 
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
-            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+        <!-- Reason for Dispute -->
+        <div class="bg-gray-800/50 p-6 rounded-xl border border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-3">Reason for Dispute</h3>
+            <p class="bg-gray-900/70 p-4 rounded-lg border border-gray-700 text-gray-200 whitespace-pre-wrap">{{ dispute.reason }}</p>
         </div>
+
+        <!-- Community Peer Voting & Quorum Progress -->
+        <div class="bg-gray-800/50 p-6 rounded-xl border border-gray-700 space-y-6">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-gray-700 pb-4">
+                <div>
+                    <h3 class="text-xl font-semibold text-cyan-400">Community Peer Voting Consensus</h3>
+                    <p class="text-xs text-gray-400 mt-1">Automatic settlement triggers immediately when 5 peer votes are reached.</p>
+                </div>
+                <div class="mt-2 sm:mt-0 text-right">
+                    <span class="text-2xl font-bold text-white">{{ total_votes }}</span>
+                    <span class="text-sm text-gray-400">/ {{ quorum_threshold }} votes</span>
+                </div>
+            </div>
+
+            <!-- Quorum Progress Bar -->
+            <div>
+                <div class="flex justify-between text-xs font-semibold mb-1 text-gray-300">
+                    <span>Quorum Progress</span>
+                    <span>{{ quorum_progress }}%</span>
+                </div>
+                <div class="w-full bg-gray-900 h-4 rounded-full overflow-hidden border border-gray-700">
+                    <div class="bg-gradient-to-r from-cyan-500 to-blue-500 h-full transition-all duration-300" style="width: {{ quorum_progress }}%;"></div>
+                </div>
+            </div>
+
+            <!-- Vote Counts Breakdown -->
+            <div class="grid grid-cols-2 gap-4 text-center">
+                <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700">
+                    <p class="text-xs text-gray-400 mb-1">Votes for Poster ({{ task.posted_by.username }})</p>
+                    <p class="text-2xl font-bold text-blue-400">{{ poster_votes }}</p>
+                </div>
+                <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700">
+                    <p class="text-xs text-gray-400 mb-1">Votes for Taker ({{ task.taken_by.username }})</p>
+                    <p class="text-2xl font-bold text-green-400">{{ taker_votes }}</p>
+                </div>
+            </div>
+
+            <!-- Vote Form / Status Section -->
+            <div class="pt-4 border-t border-gray-700">
+                {% if can_vote %}
+                    <h4 class="text-lg font-semibold text-white mb-4">Cast Your Peer Vote</h4>
+                    <form action="{% url 'cast_dispute_vote' dispute.id %}" method="post" class="space-y-4">
+                        {% csrf_token %}
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <label class="flex items-center space-x-3 bg-gray-900/80 p-4 rounded-lg border border-gray-700 cursor-pointer hover:border-cyan-500 transition-colors">
+                                <input type="radio" name="vote" value="poster" required class="text-cyan-500 focus:ring-cyan-500 h-4 w-4">
+                                <div>
+                                    <span class="block text-sm font-semibold text-white">Poster: {{ task.posted_by.username }}</span>
+                                    <span class="block text-xs text-gray-400">Task Poster</span>
+                                </div>
+                            </label>
+                            <label class="flex items-center space-x-3 bg-gray-900/80 p-4 rounded-lg border border-gray-700 cursor-pointer hover:border-cyan-500 transition-colors">
+                                <input type="radio" name="vote" value="taker" required class="text-cyan-500 focus:ring-cyan-500 h-4 w-4">
+                                <div>
+                                    <span class="block text-sm font-semibold text-white">Taker: {{ task.taken_by.username }}</span>
+                                    <span class="block text-xs text-gray-400">Task Taker</span>
+                                </div>
+                            </label>
+                        </div>
+
+                        <div>
+                            <label for="rationale" class="block text-sm font-semibold text-gray-300 mb-1">Written Rationale (Optional)</label>
+                            <textarea id="rationale" name="rationale" rows="3" placeholder="Explain the reasoning behind your vote..." class="w-full px-4 py-2.5 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 text-sm"></textarea>
+                        </div>
+
+                        <button type="submit" class="w-full sm:w-auto bg-cyan-600 hover:bg-cyan-700 text-white font-semibold px-6 py-2.5 rounded-lg transition-colors">
+                            Submit Peer Vote
+                        </button>
+                    </form>
+                {% elif user_voted %}
+                    <div class="bg-cyan-950/40 border border-cyan-800/50 rounded-lg p-4 text-cyan-200">
+                        <p class="font-semibold text-sm mb-1">Your Vote Has Been Recorded</p>
+                        <p class="text-xs">You voted for <strong class="text-white">{{ user_vote.get_vote_display }}</strong> on {{ user_vote.created_at|date:"M d, Y H:i" }}.</p>
+                        {% if user_vote.rationale %}
+                        <p class="text-xs italic mt-2 text-gray-300">"{{ user_vote.rationale }}"</p>
+                        {% endif %}
+                    </div>
+                {% elif is_participant %}
+                    <div class="bg-gray-900/60 border border-gray-700 rounded-lg p-4 text-gray-400 text-xs">
+                        Task participants (poster and taker) are excluded from casting jury votes on their own disputes.
+                    </div>
+                {% else %}
+                    <div class="bg-gray-900/60 border border-gray-700 rounded-lg p-4 text-gray-400 text-xs">
+                        This dispute is resolved and no longer accepting votes.
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Community Rationales & Votes List -->
+        {% if votes %}
+        <div class="bg-gray-800/50 p-6 rounded-xl border border-gray-700 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Peer Vote History</h3>
+            <div class="space-y-3">
+                {% for v in votes %}
+                <div class="bg-gray-900/70 p-4 rounded-lg border border-gray-700 flex flex-col space-y-1">
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="font-semibold text-white">{{ v.voter.username }}</span>
+                        <span class="px-2 py-0.5 rounded text-xs font-semibold {% if v.vote == 'poster' %}bg-blue-500/20 text-blue-300{% else %}bg-green-500/20 text-green-300{% endif %}">
+                            Voted {{ v.get_vote_display }}
+                        </span>
+                    </div>
+                    {% if v.rationale %}
+                    <p class="text-sm text-gray-300 mt-1">"{{ v.rationale }}"</p>
+                    {% endif %}
+                    <span class="text-xs text-gray-500 text-right">{{ v.created_at|date:"M d, Y H:i" }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
     </div>
-
 {% endblock %}

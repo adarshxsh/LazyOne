@@ -182,3 +182,180 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+from django.core.management import call_command
+from basic.models import DisputeVote
+
+class DisputeVotingTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.poster = User.objects.create_user(username='poster_user', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker_user', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="Disputed Delivery",
+            description="Deliver parcel",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed',
+            deadline=self.deadline
+        )
+        Conversation.objects.create(task=self.task)
+
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Poster refused to pay",
+            deposit_amount=50,
+            escrow_status='held',
+            status='open'
+        )
+
+        self.peers = []
+        for i in range(1, 7):
+            peer = User.objects.create_user(username=f'peer_{i}', password='password123')
+            UserProfile.objects.create(user=peer, rewards=1500)
+            self.peers.append(peer)
+
+    def test_authenticated_non_participant_can_view_open_dispute(self):
+        self.client.login(username='peer_1', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'dispute_detail.html')
+        self.assertTrue(response.context['can_vote'])
+        self.assertFalse(response.context['is_participant'])
+        self.assertEqual(response.context['total_votes'], 0)
+
+    def test_task_participants_cannot_vote(self):
+        # Poster tries to vote
+        self.client.login(username='poster_user', password='password123')
+        response = self.client.post(
+            reverse('cast_dispute_vote', args=[self.dispute.id]),
+            {'vote': 'poster'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(DisputeVote.objects.count(), 0)
+
+        # Taker tries to vote
+        self.client.login(username='taker_user', password='password123')
+        response = self.client.post(
+            reverse('cast_dispute_vote', args=[self.dispute.id]),
+            {'vote': 'taker'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(DisputeVote.objects.count(), 0)
+
+    def test_peer_vote_submission_and_duplicate_prevention(self):
+        self.client.login(username='peer_1', password='password123')
+        response = self.client.post(
+            reverse('cast_dispute_vote', args=[self.dispute.id]),
+            {'vote': 'taker', 'rationale': 'Proof looks valid'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(DisputeVote.objects.count(), 1)
+
+        vote = DisputeVote.objects.first()
+        self.assertEqual(vote.voter, self.peers[0])
+        self.assertEqual(vote.vote, 'taker')
+        self.assertEqual(vote.rationale, 'Proof looks valid')
+
+        # Try duplicate vote
+        response2 = self.client.post(
+            reverse('cast_dispute_vote', args=[self.dispute.id]),
+            {'vote': 'poster', 'rationale': 'Changed mind'}
+        )
+        self.assertRedirects(response2, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(DisputeVote.objects.count(), 1)
+
+    def test_quorum_of_5_votes_triggers_settlement_for_poster(self):
+        # 3 votes for poster, 2 votes for taker
+        votes_plan = [
+            (self.peers[0], 'poster'),
+            (self.peers[1], 'poster'),
+            (self.peers[2], 'taker'),
+            (self.peers[3], 'taker'),
+            (self.peers[4], 'poster'),
+        ]
+
+        for peer, choice in votes_plan:
+            self.client.login(username=peer.username, password='password123')
+            self.client.post(
+                reverse('cast_dispute_vote', args=[self.dispute.id]),
+                {'vote': choice, 'rationale': f'Vote for {choice}'}
+            )
+
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.task.status, 'cancelled')
+        self.assertEqual(self.dispute.escrow_status, 'forfeited')
+
+        # Poster rewards: 1000 + 200 (task reward refund) + 50 (forfeited bond from taker) = 1250
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 1250)
+
+    def test_quorum_of_5_votes_triggers_settlement_for_taker(self):
+        # 4 votes for taker, 1 vote for poster
+        votes_plan = [
+            (self.peers[0], 'taker'),
+            (self.peers[1], 'taker'),
+            (self.peers[2], 'poster'),
+            (self.peers[3], 'taker'),
+            (self.peers[4], 'taker'),
+        ]
+
+        for peer, choice in votes_plan:
+            self.client.login(username=peer.username, password='password123')
+            self.client.post(
+                reverse('cast_dispute_vote', args=[self.dispute.id]),
+                {'vote': choice}
+            )
+
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.task.status, 'completed')
+        self.assertEqual(self.dispute.escrow_status, 'refunded')
+
+        # Taker rewards: 500 + 200 (task reward) + 50 (deposit bond refund) = 750
+        self.taker_profile.refresh_from_db()
+        self.assertEqual(self.taker_profile.rewards, 750)
+
+    def test_expiration_script_processes_partial_vote_tallies(self):
+        self.dispute.created_at = timezone.now() - timedelta(days=8)
+        self.dispute.save()
+
+        # Submit 3 votes: 2 for taker, 1 for poster
+        DisputeVote.objects.create(dispute=self.dispute, voter=self.peers[0], vote='taker')
+        DisputeVote.objects.create(dispute=self.dispute, voter=self.peers[1], vote='taker')
+        DisputeVote.objects.create(dispute=self.dispute, voter=self.peers[2], vote='poster')
+
+        call_command('resolve_expired_disputes', days=7)
+
+        self.dispute.refresh_from_db()
+        self.task.refresh_from_db()
+
+        self.assertEqual(self.dispute.status, 'resolved')
+        self.assertEqual(self.task.status, 'completed')
+
+    def test_vote_rejected_when_dispute_already_resolved(self):
+        self.dispute.status = 'resolved'
+        self.dispute.save()
+
+        self.client.login(username='peer_1', password='password123')
+        response = self.client.post(
+            reverse('cast_dispute_vote', args=[self.dispute.id]),
+            {'vote': 'poster'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(DisputeVote.objects.count(), 0)
+
+
