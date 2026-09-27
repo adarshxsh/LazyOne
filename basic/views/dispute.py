@@ -2,22 +2,169 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, DisputeVote, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
+
+def settle_dispute_by_vote(dispute):
+    task = dispute.task
+    poster_votes = dispute.votes.filter(vote='poster').count()
+    taker_votes = dispute.votes.filter(vote='taker').count()
+
+    if poster_votes > taker_votes:
+        winner = 'poster'
+    else:
+        winner = 'taker'
+
+    if winner == 'poster':
+        poster_profile = task.posted_by.userprofile
+        poster_profile.rewards += task.reward
+        poster_profile.save()
+
+        RewardLedger.objects.create(
+            user=task.posted_by,
+            task=task,
+            amount=task.reward,
+            transaction_type='task_cancellation',
+            description=f"Task reward refunded via peer vote consensus on dispute for task: '{task.title}'"
+        )
+
+        if dispute.escrow_status == 'held':
+            if dispute.raised_by == task.taken_by:
+                dispute.forfeit_deposit(
+                    beneficiary=task.posted_by,
+                    reason_description=f"Deposit bond forfeited to poster via peer vote settlement for task: '{task.title}'"
+                )
+            else:
+                dispute.refund_deposit(
+                    reason_description=f"Deposit bond refunded to poster via peer vote settlement for task: '{task.title}'"
+                )
+
+        task.status = 'cancelled'
+        task.save()
+
+        dispute.status = 'resolved'
+        dispute.save()
+
+        msg = f"Dispute for task '{task.title}' has been settled by peer consensus in favor of the poster ({poster_votes}-{taker_votes})."
+        dispute_link = reverse('dispute_detail', args=[dispute.id])
+        Notification.objects.create(recipient=task.posted_by, message=msg, link=dispute_link)
+        if task.taken_by and task.taken_by != task.posted_by:
+            Notification.objects.create(recipient=task.taken_by, message=msg, link=dispute_link)
+
+    else:
+        if task.taken_by:
+            taker_profile = task.taken_by.userprofile
+            taker_profile.rewards += task.reward
+            taker_profile.save()
+
+            RewardLedger.objects.create(
+                user=task.taken_by,
+                task=task,
+                amount=task.reward,
+                transaction_type='task_completion',
+                description=f"Task reward awarded via peer vote consensus on dispute for task: '{task.title}'"
+            )
+
+        if dispute.escrow_status == 'held':
+            if dispute.raised_by == task.taken_by:
+                dispute.refund_deposit(
+                    reason_description=f"Deposit bond refunded to taker via peer vote settlement for task: '{task.title}'"
+                )
+            else:
+                dispute.forfeit_deposit(
+                    beneficiary=task.taken_by,
+                    reason_description=f"Deposit bond forfeited to taker via peer vote settlement for task: '{task.title}'"
+                )
+
+        task.status = 'completed'
+        task.save()
+
+        dispute.status = 'resolved'
+        dispute.save()
+
+        msg = f"Dispute for task '{task.title}' has been settled by peer consensus in favor of the taker ({taker_votes}-{poster_votes})."
+        dispute_link = reverse('dispute_detail', args=[dispute.id])
+        Notification.objects.create(recipient=task.posted_by, message=msg, link=dispute_link)
+        if task.taken_by and task.taken_by != task.posted_by:
+            Notification.objects.create(recipient=task.taken_by, message=msg, link=dispute_link)
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
-        messages.error(request, "You are not authorized to view this dispute.")
-        return redirect('home')
+
+    poster_votes = dispute.votes.filter(vote='poster').count()
+    taker_votes = dispute.votes.filter(vote='taker').count()
+    total_votes = poster_votes + taker_votes
+    quorum_threshold = 5
+    quorum_progress = min(100, int((total_votes / quorum_threshold) * 100))
+
+    user_voted = dispute.votes.filter(voter=request.user).exists()
+    user_vote = dispute.votes.filter(voter=request.user).first() if user_voted else None
+    is_participant = (request.user == task.posted_by or request.user == task.taken_by)
+    can_vote = (dispute.status == 'open' and not is_participant and not user_voted)
+
+    votes = dispute.votes.select_related('voter').order_by('-created_at')
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'poster_votes': poster_votes,
+        'taker_votes': taker_votes,
+        'total_votes': total_votes,
+        'quorum_threshold': quorum_threshold,
+        'quorum_progress': quorum_progress,
+        'user_voted': user_voted,
+        'user_vote': user_vote,
+        'is_participant': is_participant,
+        'can_vote': can_vote,
+        'votes': votes,
     }
     return render(request, 'dispute_detail.html', context)
+
+@login_required(login_url='/login/')
+@require_POST
+def cast_dispute_vote(request, dispute_id):
+    with transaction.atomic():
+        dispute = get_object_or_404(Dispute.objects.select_for_update(), id=dispute_id)
+        task = dispute.task
+
+        if dispute.status != 'open':
+            messages.error(request, "This dispute is no longer open for voting.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+        if request.user == task.posted_by or request.user == task.taken_by:
+            messages.error(request, "Task posters and takers cannot vote on their own dispute.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+        if DisputeVote.objects.filter(dispute=dispute, voter=request.user).exists():
+            messages.error(request, "You have already voted on this dispute.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+        vote_choice = request.POST.get('vote')
+        if vote_choice not in ['poster', 'taker']:
+            messages.error(request, "Please select a valid vote choice (Poster or Taker).")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+        rationale = request.POST.get('rationale', '').strip()
+
+        DisputeVote.objects.create(
+            dispute=dispute,
+            voter=request.user,
+            vote=vote_choice,
+            rationale=rationale
+        )
+
+        total_votes = dispute.votes.count()
+        if total_votes >= 5:
+            settle_dispute_by_vote(dispute)
+            messages.success(request, f"Your vote has been recorded. Quorum threshold reached ({total_votes}/5)! Dispute has been settled.")
+        else:
+            messages.success(request, f"Your vote has been recorded successfully ({total_votes}/5 votes towards quorum).")
+
+    return redirect('dispute_detail', dispute_id=dispute.id)
+
 
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
