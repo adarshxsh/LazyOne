@@ -1,8 +1,9 @@
+import os
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, Task, Notification, RewardLedger, DisputeEvidence
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,14 +11,92 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+
+    is_participant = (request.user == task.posted_by or request.user == task.taken_by)
+    is_juror = dispute.jurors.filter(id=request.user.id).exists()
+    is_staff = request.user.is_staff
+
+    if not is_participant and not is_juror and not is_staff:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+
+    if request.method == 'POST':
+        title = request.POST.get('title', '').strip()
+        file = request.FILES.get('file')
+
+        if not title or not file:
+            messages.error(request, "Title and file are required to upload evidence.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+        allowed_extensions = ['.png', '.jpg', '.jpeg', '.pdf', '.txt']
+        ext = os.path.splitext(file.name)[1].lower()
+        if ext not in allowed_extensions:
+            messages.error(request, "Invalid file format. Supported formats are PNG, JPG, PDF, and TXT.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+        if file.size > 10 * 1024 * 1024:
+            messages.error(request, "File size exceeds the 10 MB limit.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+        DisputeEvidence.objects.create(
+            dispute=dispute,
+            uploaded_by=request.user,
+            title=title,
+            file=file
+        )
+        messages.success(request, "Evidence uploaded successfully.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    evidences = dispute.evidences.all()
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'evidences': evidences,
+        'is_participant': is_participant,
+        'is_juror': is_juror,
+        'is_staff': is_staff,
     }
     return render(request, 'dispute_detail.html', context)
+
+@login_required(login_url='/login/')
+@require_POST
+def upload_evidence(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+
+    is_participant = (request.user == task.posted_by or request.user == task.taken_by)
+    is_juror = dispute.jurors.filter(id=request.user.id).exists()
+    is_staff = request.user.is_staff
+
+    if not is_participant and not is_juror and not is_staff:
+        messages.error(request, "You are not authorized to upload evidence for this dispute.")
+        return redirect('home')
+
+    title = request.POST.get('title', '').strip()
+    file = request.FILES.get('file')
+
+    if not title or not file:
+        messages.error(request, "Title and file are required to upload evidence.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    allowed_extensions = ['.png', '.jpg', '.jpeg', '.pdf', '.txt']
+    ext = os.path.splitext(file.name)[1].lower()
+    if ext not in allowed_extensions:
+        messages.error(request, "Invalid file format. Supported formats are PNG, JPG, PDF, and TXT.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if file.size > 10 * 1024 * 1024:
+        messages.error(request, "File size exceeds the 10 MB limit.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    DisputeEvidence.objects.create(
+        dispute=dispute,
+        uploaded_by=request.user,
+        title=title,
+        file=file
+    )
+    messages.success(request, "Evidence uploaded successfully.")
+    return redirect('dispute_detail', dispute_id=dispute.id)
 
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
