@@ -33,7 +33,7 @@ ALLOWED_HOSTS = []
 if os.getenv('VERCEL_URL'):
     ALLOWED_HOSTS.append(os.getenv('VERCEL_URL').split('//')[1])
 else:
-    ALLOWED_HOSTS.extend(['127.0.0.1', 'localhost'])
+    ALLOWED_HOSTS.extend(['127.0.0.1', 'localhost', 'testserver'])
 print(f"ALLOWED_HOSTS: {ALLOWED_HOSTS}")
 
 # Application definition
