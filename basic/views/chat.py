@@ -1,11 +1,11 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
-from ..models import Conversation, Message, Notification
+from ..models import Conversation, Message, Notification, JurorAssignment
 from django.contrib.auth.models import User
 from django.http import HttpResponseForbidden, JsonResponse
 from django.urls import reverse
 from django.utils import timezone
-from django.contrib import messages # Import messages
+from django.contrib import messages
 import logging
 
 logger = logging.getLogger(__name__)
@@ -13,32 +13,39 @@ logger = logging.getLogger(__name__)
 @login_required(login_url='/login/')
 def chat_view(request, conversation_id):
     logger.info(f"--- CHAT_VIEW START: conv_id={conversation_id}, user={request.user.username} ---")
-    
+
     try:
         conversation = get_object_or_404(Conversation, id=conversation_id)
         logger.info("Step 1: Conversation object found.")
     except Exception as e:
         logger.error(f"FATAL ERROR at Step 1 (get_object_or_404): {e}")
-        # If conversation not found, redirect to home with an error
         messages.error(request, "Chat not found.")
         return redirect('home')
 
-    if request.user not in conversation.participants.all():
-        logger.warning("Step 2: User is not a participant. Redirecting to home.")
-        messages.error(request, "You are not authorized to view this chat.")
-        return redirect('home') # Redirect to home page
-    logger.info("Step 2: User is a valid participant.")
+    is_participant = request.user in conversation.participants.all()
+    is_juror = False
+
+    if not is_participant:
+        if conversation.task and hasattr(conversation.task, 'dispute'):
+            is_juror = JurorAssignment.objects.filter(
+                dispute=conversation.task.dispute,
+                juror=request.user
+            ).exists()
+
+        if not is_juror and not request.user.is_staff:
+            logger.warning("Step 2: User is not authorized to view this chat. Redirecting to home.")
+            messages.error(request, "You are not authorized to view this chat.")
+            return redirect('home')
+
+    is_read_only = not is_participant
 
     try:
-        # This is for the Django-based message system, which we are bypassing for Firestore.
-        # We will pass an empty list to the template.
-        messages_list = [] # Renamed to avoid conflict with django.contrib.messages
+        messages_list = []
         logger.info("Step 3: Bypassing Django message fetching for Firestore.")
     except Exception as e:
         logger.error(f"ERROR at Step 3 (Message Handling): {e}")
 
     try:
-        # Mark related notifications as read
         notification_link = reverse('chat_view', args=[conversation_id])
         updated_count = Notification.objects.filter(
             recipient=request.user, 
@@ -49,8 +56,12 @@ def chat_view(request, conversation_id):
     except Exception as e:
         logger.error(f"ERROR at Step 4 (Marking notifications): {e}")
 
-    context = {'conversation': conversation, 'messages': messages_list}
-    
+    context = {
+        'conversation': conversation,
+        'messages': messages_list,
+        'is_read_only': is_read_only
+    }
+
     logger.info(f"--- CHAT_VIEW END: Successfully rendering template. ---")
     return render(request, 'chat.html', context)
 
@@ -61,7 +72,7 @@ def send_message(request, conversation_id):
         conversation = get_object_or_404(Conversation, id=conversation_id)
         if request.user not in conversation.participants.all():
             return HttpResponseForbidden("You are not authorized to send messages in this chat.")
-        
+
         content = request.POST.get('content')
         if content:
             Message.objects.create(
