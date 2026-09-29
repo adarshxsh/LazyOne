@@ -23,6 +23,70 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <!-- Task Evidence Review Section -->
+        <div id="task-evidence-section" class="bg-gray-800/60 p-6 rounded-lg border border-gray-700">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold text-cyan-400">Task Evidence & Chat History</h3>
+                {% if task_conversation %}
+                    <a href="{% url 'chat_view' task_conversation.id %}" class="text-sm text-cyan-400 hover:underline">View Full Chat</a>
+                {% endif %}
+            </div>
+            {% if task_messages %}
+                <div class="space-y-3 max-h-80 overflow-y-auto p-3 bg-gray-900/50 rounded-lg border border-gray-700">
+                    {% for msg in task_messages %}
+                        <div class="p-3 bg-gray-800 rounded border border-gray-700">
+                            <div class="flex justify-between text-xs text-gray-400 mb-1">
+                                <span class="font-semibold text-cyan-300">{{ msg.sender.username }}</span>
+                                <span>{{ msg.timestamp|date:"M d, Y H:i" }}</span>
+                            </div>
+                            <p class="text-sm text-gray-200">{{ msg.content }}</p>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-gray-400 italic">No task chat messages recorded.</p>
+            {% endif %}
+        </div>
+
+        <!-- Dispute Deliberation Channel Section -->
+        <div id="deliberation-channel-section" class="bg-gray-800/60 p-6 rounded-lg border border-gray-700">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold text-cyan-400">Dispute Deliberation Channel</h3>
+                {% if is_deliberation_read_only %}
+                    <span class="px-2 py-1 text-xs rounded bg-red-500/20 text-red-300 border border-red-500/30">Read-Only (Dispute Resolved)</span>
+                {% else %}
+                    <span class="px-2 py-1 text-xs rounded bg-green-500/20 text-green-300 border border-green-500/30">Active Deliberation</span>
+                {% endif %}
+            </div>
+
+            <div class="space-y-3 max-h-80 overflow-y-auto p-3 bg-gray-900/50 rounded-lg border border-gray-700 mb-4" id="deliberation-messages">
+                {% if deliberation_messages %}
+                    {% for msg in deliberation_messages %}
+                        <div class="p-3 bg-gray-800 rounded border border-gray-700">
+                            <div class="flex justify-between text-xs text-gray-400 mb-1">
+                                <span class="font-semibold text-cyan-300">{{ msg.sender.username }}</span>
+                                <span>{{ msg.timestamp|date:"M d, Y H:i" }}</span>
+                            </div>
+                            <p class="text-sm text-gray-200">{{ msg.content }}</p>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-gray-400 italic">No deliberation messages posted yet.</p>
+                {% endif %}
+            </div>
+
+            {% if not is_deliberation_read_only and is_juror or not is_deliberation_read_only and request.user.is_staff %}
+                <form action="{% url 'send_message' deliberation_conversation.id %}" method="POST" class="flex gap-2">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{% url 'dispute_detail' dispute.id %}">
+                    <input type="text" name="content" placeholder="Post a message to juror deliberation..." required class="flex-grow px-4 py-2 bg-gray-700 border border-gray-600 rounded text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400">
+                    <button type="submit" class="px-4 py-2 bg-cyan-500 hover:bg-cyan-600 text-white font-semibold rounded transition-colors">Send</button>
+                </form>
+            {% elif is_deliberation_read_only %}
+                <p class="text-sm text-gray-400 italic">This deliberation channel is now read-only as the dispute has been resolved.</p>
+            {% endif %}
+        </div>
     </div>
 
 {% endblock %}

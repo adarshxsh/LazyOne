@@ -2,6 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
+from django.http import HttpResponseForbidden
 from ..models import Dispute, Task, Notification, RewardLedger
 from django.views.decorators.http import require_POST
 from django.urls import reverse
@@ -10,12 +11,28 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
-        messages.error(request, "You are not authorized to view this dispute.")
-        return redirect('home')
+    is_juror = dispute.jurors.filter(id=request.user.id).exists()
+    is_participant = (request.user == task.posted_by or request.user == task.taken_by)
+
+    if not is_participant and not request.user.is_staff and not is_juror:
+        return HttpResponseForbidden("You are not authorized to view this dispute.")
+
+    task_conversation = getattr(task, 'conversation', None) or getattr(task, 'main_chat', None)
+    task_messages = task_conversation.messages.select_related('sender').all() if task_conversation else []
+
+    deliberation_conversation = dispute.get_or_create_deliberation_conversation()
+    deliberation_messages = deliberation_conversation.messages.select_related('sender').all()
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'task_conversation': task_conversation,
+        'task_messages': task_messages,
+        'deliberation_conversation': deliberation_conversation,
+        'deliberation_messages': deliberation_messages,
+        'is_juror': is_juror,
+        'is_participant': is_participant,
+        'is_deliberation_read_only': dispute.status != 'open',
     }
     return render(request, 'dispute_detail.html', context)
 

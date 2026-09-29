@@ -93,12 +93,22 @@ class Dispute(models.Model):
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    jurors = models.ManyToManyField(User, related_name='assigned_disputes', blank=True)
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    def get_or_create_deliberation_conversation(self):
+        delib_conv = self.conversations.filter(is_deliberation=True).first()
+        if not delib_conv:
+            delib_conv = Conversation.objects.create(dispute=self, is_deliberation=True)
+        jurors = self.jurors.all()
+        if jurors.exists():
+            delib_conv.participants.add(*jurors)
+        return delib_conv
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -158,10 +168,14 @@ class Friendship(models.Model):
 
 class Conversation(models.Model):
     task = models.OneToOneField(Task, on_delete=models.CASCADE, null=True, blank=True, related_name='conversation')
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, null=True, blank=True, related_name='conversations')
+    is_deliberation = models.BooleanField(default=False)
     participants = models.ManyToManyField(User, related_name='conversations')
     last_message_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self):
+        if self.is_deliberation and self.dispute:
+            return f"Deliberation chat for dispute: {self.dispute.task.title}"
         if self.task:
             return f"Chat for task: {self.task.title}"
         participant_names = [user.username for user in self.participants.all()]
