@@ -95,6 +95,7 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    quorum_threshold = models.PositiveIntegerField(default=3)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -141,6 +142,18 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class DisputeVote(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes')
+    voted_for = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_votes_received')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'voter')
+
+    def __str__(self):
+        return f"Vote by {self.voter.username} for {self.voted_for.username} on dispute {self.dispute.id}"
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
