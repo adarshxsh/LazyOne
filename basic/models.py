@@ -95,6 +95,7 @@ class Dispute(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
+    is_staff_escalated = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -141,6 +142,24 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class JurorAssignment(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='juror_assignments')
+    juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='juror_assignments')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    has_voted = models.BooleanField(default=False)
+    vote = models.CharField(max_length=20, blank=True, null=True)
+    voted_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        unique_together = ('dispute', 'juror')
+
+    def __str__(self):
+        return f"Juror {self.juror.username} for dispute {self.dispute.id}"
+
+    @property
+    def user(self):
+        return self.juror
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)

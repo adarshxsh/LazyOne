@@ -2,7 +2,9 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from django.utils import timezone
+from ..models import Dispute, Task, Notification, RewardLedger, JurorAssignment
+from ..services.juror import select_juror_pool
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,12 +12,59 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+    assignment = JurorAssignment.objects.filter(dispute=dispute, juror=request.user).first()
+    is_juror = assignment is not None
+
+    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff and not is_juror:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+
+    if request.method == 'POST' and is_juror:
+        if assignment.has_voted:
+            messages.error(request, "You have already cast your vote on this dispute.")
+        else:
+            vote_choice = request.POST.get('vote')
+            if vote_choice in ['poster', 'taker']:
+                assignment.vote = vote_choice
+                assignment.has_voted = True
+                assignment.voted_at = timezone.now()
+                assignment.save()
+                messages.success(request, f"Your vote for '{vote_choice}' has been recorded.")
+
+                # Evaluate consensus if all assigned jurors have voted
+                total_assignments = dispute.juror_assignments.count()
+                voted_assignments = dispute.juror_assignments.filter(has_voted=True)
+                if total_assignments > 0 and voted_assignments.count() == total_assignments:
+                    poster_votes = dispute.juror_assignments.filter(vote='poster').count()
+                    taker_votes = dispute.juror_assignments.filter(vote='taker').count()
+                    if poster_votes > taker_votes:
+                        if dispute.raised_by == task.posted_by:
+                            dispute.refund_deposit(reason_description="Dispute resolved in favor of task poster by jury consensus.")
+                        else:
+                            dispute.forfeit_deposit(beneficiary=task.posted_by, reason_description="Dispute resolved in favor of task poster by jury consensus.")
+                        dispute.status = 'resolved'
+                        dispute.save()
+                        task.status = 'completed'
+                        task.save()
+                    elif taker_votes > poster_votes:
+                        if dispute.raised_by == task.taken_by:
+                            dispute.refund_deposit(reason_description="Dispute resolved in favor of task taker by jury consensus.")
+                        else:
+                            dispute.forfeit_deposit(beneficiary=task.taken_by, reason_description="Dispute resolved in favor of task taker by jury consensus.")
+                        dispute.status = 'resolved'
+                        dispute.save()
+                        task.status = 'in_progress'
+                        task.save()
+            else:
+                messages.error(request, "Invalid vote choice.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'is_juror': is_juror,
+        'assignment': assignment,
+        'juror_assignments': dispute.juror_assignments.all(),
     }
     return render(request, 'dispute_detail.html', context)
 
@@ -79,6 +128,10 @@ def raise_dispute(request, task_id):
                 message=f"{request.user.username} has raised a dispute for your task: '{task.title}'.",
                 link=reverse('dispute_detail', args=[dispute.id])
             )
+
+            # Sample neutral juror pool automatically upon dispute creation
+            select_juror_pool(dispute)
+
         messages.success(request, f"Dispute raised successfully. {deposit_amount} points held as deposit bond.")
         return redirect('dispute_detail', dispute_id=dispute.id)
     return redirect('my_tasks')

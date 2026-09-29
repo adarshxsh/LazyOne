@@ -5,6 +5,12 @@
 {% block content %}
     <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
 
+    {% if dispute.is_staff_escalated %}
+    <div class="bg-amber-900/40 border border-amber-500 text-amber-200 p-4 rounded-lg mb-6">
+        <strong>Notice:</strong> This dispute has fewer than 3 conflict-free community jurors available and has been flagged for staff escalation.
+    </div>
+    {% endif %}
+
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
@@ -23,6 +29,40 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if is_juror %}
+        <div class="bg-gray-800/80 p-6 rounded-lg border border-cyan-500/30">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Juror Arbitration Panel</h3>
+            <p class="text-sm text-gray-300 mb-4">You have been selected as a neutral community juror for this dispute.</p>
+
+            {% if assignment.has_voted %}
+            <div class="bg-green-900/30 border border-green-500/50 text-green-300 p-4 rounded-lg">
+                <p class="font-medium">Your vote has been recorded.</p>
+                <p class="text-sm mt-1">Vote submitted for: <strong class="capitalize">{{ assignment.vote }}</strong></p>
+            </div>
+            {% elif dispute.status == 'open' %}
+            <form method="post" class="space-y-4">
+                {% csrf_token %}
+                <p class="text-white font-medium">Please select your verdict:</p>
+                <div class="flex flex-col sm:flex-row gap-4">
+                    <label class="flex items-center space-x-2 bg-gray-900 p-3 rounded-lg border border-gray-700 cursor-pointer hover:border-cyan-500 transition-colors">
+                        <input type="radio" name="vote" value="poster" required class="text-cyan-600 focus:ring-cyan-500">
+                        <span>In favor of Poster ({{ task.posted_by.username }})</span>
+                    </label>
+                    <label class="flex items-center space-x-2 bg-gray-900 p-3 rounded-lg border border-gray-700 cursor-pointer hover:border-cyan-500 transition-colors">
+                        <input type="radio" name="vote" value="taker" required class="text-cyan-600 focus:ring-cyan-500">
+                        <span>In favor of Taker ({{ task.taken_by.username }})</span>
+                    </label>
+                </div>
+                <button type="submit" class="bg-cyan-600 text-white font-semibold px-6 py-2 rounded-lg hover:bg-cyan-700 transition-colors">
+                    Cast Binding Vote
+                </button>
+            </form>
+            {% else %}
+            <p class="text-gray-400">This dispute is resolved.</p>
+            {% endif %}
+        </div>
+        {% endif %}
     </div>
 
 {% endblock %}

@@ -1,11 +1,12 @@
-from django.test import TestCase, Client
+from django.test import TestCase, Client, override_settings
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, JurorAssignment, Notification
 
 
+@override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
 class DisputeDepositBondTests(TestCase):
     def setUp(self):
         self.client = Client()
@@ -181,4 +182,128 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+@override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
+class JurorSelectionAndAccessTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Task poster & profile
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        # Task taker & profile
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        # Friends of poster and taker
+        self.poster_friend = User.objects.create_user(username='poster_friend', password='password123')
+        self.poster_friend_profile = UserProfile.objects.create(user=self.poster_friend)
+        self.poster_profile.friends.add(self.poster_friend_profile)
+
+        self.taker_friend = User.objects.create_user(username='taker_friend', password='password123')
+        self.taker_friend_profile = UserProfile.objects.create(user=self.taker_friend)
+        self.taker_profile.friends.add(self.taker_friend_profile)
+
+        # Staff user
+        self.staff_user = User.objects.create_user(username='staff', password='password123', is_staff=True)
+
+        # 5 Neutral candidates
+        self.neutral_users = []
+        for i in range(5):
+            u = User.objects.create_user(username=f'neutral_{i}', password='password123')
+            UserProfile.objects.create(user=u)
+            self.neutral_users.append(u)
+
+        # Task
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="Juror Test Task",
+            description="Testing Juror Selection",
+            reward=300,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=self.deadline
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_automated_juror_panel_selection_and_conflict_filtering(self):
+        self.client.login(username='taker', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work unsatisfactory'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+        # Check exactly 3 assignments created
+        assignments = JurorAssignment.objects.filter(dispute=dispute)
+        self.assertEqual(assignments.count(), 3)
+
+        assigned_jurors = set(a.juror for a in assignments)
+        # Excluded users
+        excluded = {self.poster, self.taker, self.poster_friend, self.taker_friend, self.staff_user}
+        for juror in assigned_jurors:
+            self.assertNotIn(juror, excluded)
+            self.assertTrue(juror in self.neutral_users)
+
+        # Check notifications sent to all 3 assigned jurors
+        for juror in assigned_jurors:
+            notif = Notification.objects.filter(recipient=juror).first()
+            self.assertIsNotNone(notif)
+            self.assertEqual(notif.message, f"You have been assigned as a juror for dispute on task: '{self.task.title}'.")
+            self.assertEqual(notif.link, reverse('dispute_detail', args=[dispute.id]))
+
+    def test_insufficient_juror_pool_flags_staff_escalation(self):
+        # Delete neutral users except 1
+        for u in self.neutral_users[1:]:
+            u.delete()
+
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work unsatisfactory'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+
+        assignments = JurorAssignment.objects.filter(dispute=dispute)
+        self.assertEqual(assignments.count(), 1)
+        self.assertTrue(dispute.is_staff_escalated)
+
+    def test_juror_access_and_voting_lock(self):
+        self.client.login(username='taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work unsatisfactory'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        assignments = list(JurorAssignment.objects.filter(dispute=dispute))
+        assigned_juror = assignments[0].juror
+
+        # Unassigned user attempt -> redirected to home
+        unassigned_user = User.objects.create_user(username='outsider', password='password123')
+        self.client.login(username='outsider', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertRedirects(response, reverse('home'))
+
+        # Assigned juror attempt -> 200 OK
+        self.client.login(username=assigned_juror.username, password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertEqual(response.status_code, 200)
+
+        # Assigned juror votes 'poster'
+        vote_response = self.client.post(reverse('dispute_detail', args=[dispute.id]), {'vote': 'poster'})
+        self.assertRedirects(vote_response, reverse('dispute_detail', args=[dispute.id]))
+
+        assignment = JurorAssignment.objects.get(dispute=dispute, juror=assigned_juror)
+        self.assertTrue(assignment.has_voted)
+        self.assertEqual(assignment.vote, 'poster')
+
+        # Attempt to vote again -> blocked
+        second_vote = self.client.post(reverse('dispute_detail', args=[dispute.id]), {'vote': 'taker'})
+        assignment.refresh_from_db()
+        self.assertEqual(assignment.vote, 'poster')
+
 
