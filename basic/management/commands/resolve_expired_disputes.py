@@ -27,6 +27,11 @@ class Command(BaseCommand):
         count = 0
         for dispute in expired_disputes:
             task = dispute.task
+            if dispute.total_votes_count() > 0:
+                dispute.tally_and_settle()
+                count += 1
+                continue
+
             with transaction.atomic():
                 dispute.status = 'resolved'
                 dispute.save()
