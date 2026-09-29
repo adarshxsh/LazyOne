@@ -1,9 +1,13 @@
+import time
 from django.test import TestCase, Client
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import (
+    UserProfile, Task, Dispute, RewardLedger, Conversation,
+    Friendship, FriendRequest, DisputeJuror, DisputeVote, Notification
+)
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +185,202 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class JurorSelectionTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Litigants
+        self.poster = User.objects.create_user(username='litigant_poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='litigant_taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        # Friends of poster
+        self.poster_friend = User.objects.create_user(username='poster_friend', password='password123')
+        self.poster_friend_profile = UserProfile.objects.create(user=self.poster_friend, rewards=500)
+        self.poster_profile.friends.add(self.poster_friend_profile)
+
+        # Friends of taker via Friendship model
+        self.taker_friend = User.objects.create_user(username='taker_friend', password='password123')
+        self.taker_friend_profile = UserProfile.objects.create(user=self.taker_friend, rewards=500)
+        Friendship.objects.create(from_user=self.taker_profile, to_user=self.taker_friend_profile)
+
+        # User with pending friend request to poster
+        self.pending_friend = User.objects.create_user(username='pending_friend', password='password123')
+        UserProfile.objects.create(user=self.pending_friend, rewards=500)
+        FriendRequest.objects.create(from_user=self.pending_friend, to_user=self.poster)
+
+        # User with shared task history with taker
+        self.task_history_user = User.objects.create_user(username='task_history_user', password='password123')
+        UserProfile.objects.create(user=self.task_history_user, rewards=500)
+        Task.objects.create(
+            title="Old Task",
+            description="History task",
+            reward=100,
+            posted_by=self.taker,
+            taken_by=self.task_history_user,
+            status='completed'
+        )
+
+        # Clean eligible community candidates (6 users to ensure >= 5 panel size)
+        self.candidates = []
+        for i in range(1, 7):
+            u = User.objects.create_user(username=f'community_member_{i}', password='password123')
+            UserProfile.objects.create(user=u, rewards=500)
+            self.candidates.append(u)
+
+        # Unassigned external user
+        self.unassigned_user = User.objects.create_user(username='unassigned_stranger', password='password123')
+        UserProfile.objects.create(user=self.unassigned_user, rewards=500)
+
+        # Main active task
+        self.task = Task.objects.create(
+            title="Disputed Task",
+            description="Task with dispute",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress'
+        )
+
+    def test_friend_isolated_juror_selection(self):
+        self.client.login(username='litigant_taker', password='password123')
+        
+        start_time = time.time()
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work incomplete'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        elapsed_time = (time.time() - start_time) * 1000  # ms
+
+        # Test selection speed directly
+        dispute_temp = Dispute.objects.get(task=self.task)
+        DisputeJuror.objects.filter(dispute=dispute_temp).delete() # clear assigned
+        direct_start = time.time()
+        from .views.dispute import select_and_assign_jurors
+        select_and_assign_jurors(dispute_temp)
+        direct_elapsed = (time.time() - direct_start) * 1000
+        self.assertLess(direct_elapsed, 500, "Direct juror selection must take < 500ms")
+
+        juror_assignments = DisputeJuror.objects.filter(dispute=dispute)
+
+        # Must select 3 or 5 jurors
+        self.assertIn(juror_assignments.count(), [3, 5])
+
+        assigned_user_ids = set(juror_assignments.values_list('user_id', flat=True))
+
+        # Check strict isolation: no litigants, no direct friends, no task history connections
+        excluded_ids = {
+            self.poster.id,
+            self.taker.id,
+            self.poster_friend.id,
+            self.taker_friend.id,
+            self.pending_friend.id,
+            self.task_history_user.id
+        }
+        for ex_id in excluded_ids:
+            self.assertNotIn(ex_id, assigned_user_ids)
+
+        # Check notifications sent to all assigned jurors
+        for dj in juror_assignments:
+            notification = Notification.objects.filter(
+                recipient=dj.user,
+                link=reverse('dispute_detail', args=[dispute.id])
+            ).first()
+            self.assertIsNotNone(notification)
+
+    def test_dispute_access_control(self):
+        # Raise dispute
+        self.client.login(username='litigant_taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work incomplete'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+
+        # Assigned juror can view dispute details
+        assigned_juror = DisputeJuror.objects.filter(dispute=dispute).first().user
+        self.client.login(username=assigned_juror.username, password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertEqual(response.status_code, 200)
+
+        # Create user after dispute jury selection finished
+        late_stranger = User.objects.create_user(username='late_stranger', password='password123')
+        UserProfile.objects.create(user=late_stranger, rewards=500)
+
+        # Unassigned non-staff user blocked from viewing
+        self.client.login(username='late_stranger', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertRedirects(response, reverse('home'))
+
+    def test_confidential_voting_and_deliberation(self):
+        self.client.login(username='litigant_taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work incomplete'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+        assigned_jurors = [dj.user for dj in DisputeJuror.objects.filter(dispute=dispute)]
+        self.assertEqual(len(assigned_jurors), 5)
+
+        # 3 jurors vote for taker, 2 for poster
+        # Juror 1 votes for taker
+        self.client.login(username=assigned_jurors[0].username, password='password123')
+        self.client.post(
+            reverse('cast_dispute_vote', args=[dispute.id]),
+            {'voted_for': self.taker.id}
+        )
+
+        # Litigant checking during deliberation should not see vote breakdown
+        self.client.login(username='litigant_poster', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertIsNone(response.context['poster_votes'])
+
+        # Jurors 2 & 3 vote for taker
+        for juror in assigned_jurors[1:3]:
+            self.client.login(username=juror.username, password='password123')
+            self.client.post(
+                reverse('cast_dispute_vote', args=[dispute.id]),
+                {'voted_for': self.taker.id}
+            )
+
+        # Jurors 4 & 5 vote for poster
+        for juror in assigned_jurors[3:5]:
+            self.client.login(username=juror.username, password='password123')
+            self.client.post(
+                reverse('cast_dispute_vote', args=[dispute.id]),
+                {'voted_for': self.poster.id}
+            )
+
+        # All 5 voted, dispute auto-resolved in favor of taker (3 votes to 2)
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+
+    def test_staff_override_authority(self):
+        self.client.login(username='litigant_taker', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work incomplete'}
+        )
+        dispute = Dispute.objects.get(task=self.task)
+
+        # Staff user applies override
+        staff_user = User.objects.create_superuser(username='admin', password='password123')
+        self.client.login(username='admin', password='password123')
+
+        response = self.client.post(
+            reverse('staff_resolve_dispute', args=[dispute.id]),
+            {'winner': self.poster.id}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+        self.assertEqual(dispute.escrow_status, 'forfeited')
 
