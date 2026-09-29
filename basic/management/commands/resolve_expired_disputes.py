@@ -21,7 +21,6 @@ class Command(BaseCommand):
         now = timezone.now()
         expiry_threshold = now - timedelta(days=days)
 
-        # Find open disputes created before the expiration window
         expired_disputes = Dispute.objects.filter(status='open', created_at__lte=expiry_threshold)
 
         count = 0
@@ -32,7 +31,6 @@ class Command(BaseCommand):
                 dispute.save()
 
                 if dispute.raised_by == task.posted_by:
-                    # Poster challenged an unresponsive taker: cancel task, refund task reward, forfeit bond
                     poster_profile = task.posted_by.userprofile
                     poster_profile.rewards += task.reward
                     poster_profile.save()
@@ -47,12 +45,7 @@ class Command(BaseCommand):
                         transaction_type='task_cancellation',
                         description=f"Refund for expired dispute on task: '{task.title}'"
                     )
-
-                    # Handle escrow bond refund / forfeiture
-                    if dispute.escrow_status == 'held':
-                        dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
                 else:
-                    # Taker raised dispute: award reward to taker, complete task, and refund bond
                     if task.taken_by:
                         taker_profile = task.taken_by.userprofile
                         taker_profile.rewards += task.reward
@@ -68,10 +61,22 @@ class Command(BaseCommand):
                     task.status = 'completed'
                     task.save()
 
-                    if dispute.escrow_status == 'held':
-                        dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
+                # Handle escrow bond refund for symmetrical deposits
+                dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
 
-                # Notify participants
+                # Constraint: If a dispute expires without majority consensus, refund all juror micro-stakes in full
+                for vote in dispute.votes.all():
+                    voter_profile = vote.voter.userprofile
+                    voter_profile.rewards += vote.staked_amount
+                    voter_profile.save()
+                    RewardLedger.objects.create(
+                        user=vote.voter,
+                        task=task,
+                        amount=vote.staked_amount,
+                        transaction_type='juror_stake_refund',
+                        description=f"Juror micro-stake refunded for expired dispute on task: '{task.title}'"
+                    )
+
                 participants = [task.posted_by]
                 if task.taken_by and task.taken_by not in participants:
                     participants.append(task.taken_by)

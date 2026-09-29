@@ -14,7 +14,9 @@
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
             <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
+            <p><strong>Symmetrical Deposit Bonds:</strong> {{ dispute.deposit_amount }} points each (Poster & Taker)</p>
+            <p><strong>Poster Deposit Status:</strong> <span class="font-medium text-cyan-300">{{ dispute.get_poster_escrow_status_display }}</span></p>
+            <p><strong>Taker Deposit Status:</strong> <span class="font-medium text-cyan-300">{{ dispute.get_taker_escrow_status_display }}</span></p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
             <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
         </div>
@@ -23,6 +25,66 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <!-- Community Juror Voting Section -->
+        <div class="bg-gray-800/60 p-6 rounded-xl border border-gray-700">
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Community Juror Voting & Staking</h3>
+            <p class="text-sm text-gray-400 mb-4">
+                Total Juror Votes Cast: <span class="font-bold text-white">{{ total_votes }}</span> 
+                (Poster: <span class="text-green-400 font-bold">{{ poster_votes }}</span> | Taker: <span class="text-cyan-400 font-bold">{{ taker_votes }}</span>)
+            </p>
+
+            {% if user_vote %}
+                <div class="p-4 bg-gray-900/40 rounded-lg border border-cyan-500/30">
+                    <p class="text-cyan-300">You voted as a juror for <strong class="uppercase text-white">{{ user_vote.vote }}</strong> with a micro-stake of <strong>{{ user_vote.staked_amount }} points</strong>.</p>
+                </div>
+            {% elif can_vote %}
+                <div class="p-4 bg-gray-900/40 rounded-lg border border-gray-700">
+                    <p class="text-sm text-gray-300 mb-3">Stake <strong>{{ micro_stake }} points</strong> from your balance to cast your vote as a community juror. Winning votes receive their micro-stake back plus a share of forfeited bonds and slashed minority stakes.</p>
+                    <form action="{% url 'vote_dispute' dispute.id %}" method="POST" class="flex flex-wrap gap-4 items-center">
+                        {% csrf_token %}
+                        <button type="submit" name="vote" value="poster" class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white font-semibold rounded-lg transition-colors">
+                            Vote for Poster ({{ dispute.task.posted_by.username }})
+                        </button>
+                        <button type="submit" name="vote" value="taker" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold rounded-lg transition-colors">
+                            Vote for Taker ({{ dispute.task.taken_by.username }})
+                        </button>
+                    </form>
+                </div>
+            {% elif is_participant %}
+                <p class="text-yellow-400/80 text-sm">Task posters and takers cannot vote as jurors on their own disputed tasks.</p>
+            {% elif dispute.status != 'open' %}
+                <p class="text-gray-400 text-sm">Voting is closed for this dispute.</p>
+            {% endif %}
+        </div>
+
+        <!-- Dispute Resolution Section -->
+        {% if dispute.status == 'open' and request.user.is_staff or is_participant %}
+            <div class="bg-gray-800/60 p-6 rounded-xl border border-gray-700">
+                <h3 class="text-xl font-semibold text-cyan-400 mb-2">Settle Dispute</h3>
+                <p class="text-sm text-gray-400 mb-4">Settle dispute outcome. Minority juror micro-stakes will be slashed and redistributed to majority voters along with the losing party deposit bond.</p>
+                <form action="{% url 'resolve_dispute' dispute.id %}" method="POST" class="flex gap-4">
+                    {% csrf_token %}
+                    <button type="submit" name="winner" value="poster" class="px-4 py-2 bg-green-700 hover:bg-green-600 text-white font-medium rounded-lg">
+                        Resolve for Poster
+                    </button>
+                    <button type="submit" name="winner" value="taker" class="px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-white font-medium rounded-lg">
+                        Resolve for Taker
+                    </button>
+                </form>
+            </div>
+        {% endif %}
+
+        {% if dispute.status == 'open' and dispute.raised_by == request.user %}
+            <div class="pt-2">
+                <form action="{% url 'withdraw_dispute' dispute.id %}" method="POST">
+                    {% csrf_token %}
+                    <button type="submit" class="px-4 py-2 bg-red-600/80 hover:bg-red-500 text-white font-semibold rounded-lg transition-colors">
+                        Withdraw Dispute
+                    </button>
+                </form>
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}
