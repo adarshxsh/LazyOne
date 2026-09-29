@@ -23,11 +23,17 @@ def chat_view(request, conversation_id):
         messages.error(request, "Chat not found.")
         return redirect('home')
 
-    if request.user not in conversation.participants.all():
-        logger.warning("Step 2: User is not a participant. Redirecting to home.")
+    is_participant = request.user in conversation.participants.all()
+    is_disputed = (
+        conversation.task is not None
+        and hasattr(conversation.task, 'dispute')
+        and conversation.task.dispute.status == 'open'
+    )
+    if not (is_participant or is_disputed):
+        logger.warning("Step 2: User is not authorized to view this chat. Redirecting to home.")
         messages.error(request, "You are not authorized to view this chat.")
         return redirect('home') # Redirect to home page
-    logger.info("Step 2: User is a valid participant.")
+    logger.info("Step 2: User authorization verified.")
 
     try:
         # This is for the Django-based message system, which we are bypassing for Firestore.
@@ -59,7 +65,13 @@ def chat_view(request, conversation_id):
 def send_message(request, conversation_id):
     if request.method == 'POST':
         conversation = get_object_or_404(Conversation, id=conversation_id)
-        if request.user not in conversation.participants.all():
+        is_participant = request.user in conversation.participants.all()
+        is_disputed = (
+            conversation.task is not None
+            and hasattr(conversation.task, 'dispute')
+            and conversation.task.dispute.status == 'open'
+        )
+        if not (is_participant or is_disputed):
             return HttpResponseForbidden("You are not authorized to send messages in this chat.")
         
         content = request.POST.get('content')

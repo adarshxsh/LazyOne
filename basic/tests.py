@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, Message
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +181,123 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class JurorEvidenceDeliberationTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Task poster
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        # Task taker
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        # Third-party juror
+        self.juror = User.objects.create_user(username='juror', password='password123')
+        UserProfile.objects.create(user=self.juror, rewards=1000)
+
+        # Create task in disputed state
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="Disputed Task Title",
+            description="Detailed task description for evidence review",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed',
+            deadline=self.deadline
+        )
+        self.conversation = Conversation.objects.create(task=self.task)
+        self.conversation.participants.add(self.poster, self.taker)
+
+        # Create messages in conversation
+        Message.objects.create(conversation=self.conversation, sender=self.poster, content="I posted this task.")
+        Message.objects.create(conversation=self.conversation, sender=self.taker, content="I finished the task!")
+
+        # Create dispute
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Poster did not confirm completion",
+            deposit_amount=50,
+            escrow_status='held',
+            status='open'
+        )
+
+    def test_juror_can_access_open_dispute_detail(self):
+        self.client.login(username='juror', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Disputed Task Title")
+        self.assertContains(response, "Poster did not confirm completion")
+        self.assertContains(response, "I posted this task.")
+        self.assertContains(response, "I finished the task!")
+
+    def test_juror_cannot_access_closed_dispute(self):
+        self.dispute.status = 'resolved'
+        self.dispute.save()
+
+        self.client.login(username='juror', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertRedirects(response, reverse('home'))
+
+        # Participants can still access resolved dispute details
+        self.client.login(username='poster', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(response.status_code, 200)
+
+    def test_juror_can_view_task_chat_and_send_message_during_open_dispute(self):
+        self.client.login(username='juror', password='password123')
+        
+        # Access chat view
+        response = self.client.get(reverse('chat_view', args=[self.conversation.id]))
+        self.assertEqual(response.status_code, 200)
+
+        # Post message via send_message endpoint
+        response = self.client.post(
+            reverse('send_message', args=[self.conversation.id]),
+            {'content': 'As a juror, I advise resolving this.'}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
+            Message.objects.filter(
+                conversation=self.conversation,
+                sender=self.juror,
+                content='As a juror, I advise resolving this.'
+            ).exists()
+        )
+
+    def test_juror_cannot_view_or_send_message_when_dispute_closed(self):
+        self.dispute.status = 'resolved'
+        self.dispute.save()
+
+        self.client.login(username='juror', password='password123')
+
+        response = self.client.get(reverse('chat_view', args=[self.conversation.id]))
+        self.assertRedirects(response, reverse('home'))
+
+        response = self.client.post(
+            reverse('send_message', args=[self.conversation.id]),
+            {'content': 'Juror message after resolution'}
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_juror_can_post_deliberation_on_dispute_detail_page(self):
+        self.client.login(username='juror', password='password123')
+        response = self.client.post(
+            reverse('dispute_detail', args=[self.dispute.id]),
+            {'content': 'Deliberation posted on detail view'}
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertTrue(
+            Message.objects.filter(
+                conversation=self.conversation,
+                sender=self.juror,
+                content='Deliberation posted on detail view'
+            ).exists()
+        )
+
 
