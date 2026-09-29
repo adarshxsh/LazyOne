@@ -2,7 +2,8 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from django.utils import timezone
+from ..models import Dispute, Task, Notification, RewardLedger, Conversation, Message
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,12 +11,42 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+    is_participant = (request.user == task.posted_by or request.user == task.taken_by)
+    is_open = (dispute.status == 'open')
+
+    if not (is_open or is_participant or request.user.is_staff):
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+
+    conversation = getattr(task, 'conversation', None)
+
+    if request.method == 'POST' and is_open:
+        content = request.POST.get('content')
+        if content:
+            if not conversation:
+                conversation = Conversation.objects.create(task=task)
+                if task.posted_by:
+                    conversation.participants.add(task.posted_by)
+                if task.taken_by:
+                    conversation.participants.add(task.taken_by)
+            Message.objects.create(
+                conversation=conversation,
+                sender=request.user,
+                content=content
+            )
+            conversation.last_message_at = timezone.now()
+            conversation.save()
+            messages.success(request, "Deliberation message posted successfully.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+    chat_messages = conversation.messages.all() if conversation else []
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'conversation': conversation,
+        'messages': chat_messages,
+        'chat_messages': chat_messages,
     }
     return render(request, 'dispute_detail.html', context)
 
