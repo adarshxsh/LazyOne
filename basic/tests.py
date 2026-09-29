@@ -1,4 +1,4 @@
-from django.test import TestCase, Client
+from django.test import TestCase, Client, override_settings
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
@@ -6,6 +6,7 @@ from datetime import timedelta
 from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
 
 
+@override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
 class DisputeDepositBondTests(TestCase):
     def setUp(self):
         self.client = Client()
@@ -181,4 +182,127 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+@override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
+class JurorDisputeEvidenceAndDeliberationTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        self.juror = User.objects.create_user(username='juror1', password='password123')
+        self.juror_profile = UserProfile.objects.create(user=self.juror, rewards=1000)
+
+        self.unassigned_user = User.objects.create_user(username='unassigned', password='password123')
+        self.unassigned_profile = UserProfile.objects.create(user=self.unassigned_user, rewards=1000)
+
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="Disputed Task",
+            description="Task for testing dispute access",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed',
+            deadline=self.deadline
+        )
+        self.task_conversation = Conversation.objects.create(task=self.task)
+        self.task_conversation.participants.add(self.poster, self.taker)
+
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Work quality dispute",
+            deposit_amount=50,
+            status='open'
+        )
+        self.dispute.jurors.add(self.juror)
+
+    def test_assigned_juror_can_access_dispute_detail(self):
+        self.client.login(username='juror1', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('task_conversation', response.context)
+        self.assertIn('deliberation_conversation', response.context)
+        self.assertTrue(response.context['is_juror'])
+        self.assertContains(response, "Task Evidence & Chat History")
+        self.assertContains(response, "Dispute Deliberation Channel")
+
+    def test_unassigned_user_gets_403_for_dispute_detail(self):
+        self.client.login(username='unassigned', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(response.status_code, 403)
+
+    def test_assigned_juror_read_only_task_chat(self):
+        self.client.login(username='juror1', password='password123')
+        response = self.client.get(reverse('chat_view', args=[self.task_conversation.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['is_read_only'])
+
+        # Attempt to send message to task chat as juror
+        send_resp = self.client.post(
+            reverse('send_message', args=[self.task_conversation.id]),
+            {'content': 'Juror trying to post to task chat'}
+        )
+        self.assertEqual(send_resp.status_code, 403)
+
+    def test_unassigned_user_gets_403_for_task_chat_and_deliberation(self):
+        delib_conv = self.dispute.get_or_create_deliberation_conversation()
+        self.client.login(username='unassigned', password='password123')
+
+        # Task chat access check
+        resp1 = self.client.get(reverse('chat_view', args=[self.task_conversation.id]))
+        self.assertEqual(resp1.status_code, 403)
+
+        send_resp1 = self.client.post(
+            reverse('send_message', args=[self.task_conversation.id]),
+            {'content': 'Unauthorized post'}
+        )
+        self.assertEqual(send_resp1.status_code, 403)
+
+        # Deliberation channel access check
+        resp2 = self.client.get(reverse('chat_view', args=[delib_conv.id]))
+        self.assertEqual(resp2.status_code, 403)
+
+        send_resp2 = self.client.post(
+            reverse('send_message', args=[delib_conv.id]),
+            {'content': 'Unauthorized post'}
+        )
+        self.assertEqual(send_resp2.status_code, 403)
+
+    def test_juror_deliberation_channel_open_and_resolved(self):
+        delib_conv = self.dispute.get_or_create_deliberation_conversation()
+        self.client.login(username='juror1', password='password123')
+
+        # Open dispute: Juror can view and post
+        resp = self.client.get(reverse('chat_view', args=[delib_conv.id]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.context['is_read_only'])
+
+        send_resp = self.client.post(
+            reverse('send_message', args=[delib_conv.id]),
+            {'content': 'Juror deliberation message'}
+        )
+        self.assertEqual(send_resp.status_code, 200)
+
+        # Transition dispute to resolved
+        self.dispute.status = 'resolved'
+        self.dispute.save()
+
+        # Resolved dispute: Deliberation channel becomes read-only
+        resp_resolved = self.client.get(reverse('chat_view', args=[delib_conv.id]))
+        self.assertEqual(resp_resolved.status_code, 200)
+        self.assertTrue(resp_resolved.context['is_read_only'])
+
+        send_resp_resolved = self.client.post(
+            reverse('send_message', args=[delib_conv.id]),
+            {'content': 'Post after resolution'}
+        )
+        self.assertEqual(send_resp_resolved.status_code, 403)
+
 
