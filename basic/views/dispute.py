@@ -2,7 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, Task, Notification, RewardLedger, DisputeVote
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,14 +10,83 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
-        messages.error(request, "You are not authorized to view this dispute.")
-        return redirect('home')
+
+    # Check if voting deadline expired for an open dispute
+    if dispute.status == 'open' and dispute.is_voting_expired():
+        dispute.tally_and_settle()
+        dispute.refresh_from_db()
+
+    is_participant = (request.user == task.posted_by or request.user == task.taken_by)
+    can_vote = dispute.can_user_vote(request.user)
+    user_vote = DisputeVote.objects.filter(dispute=dispute, voter=request.user).first() if request.user.is_authenticated else None
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'is_participant': is_participant,
+        'can_vote': can_vote,
+        'user_vote': user_vote,
+        'poster_votes': dispute.poster_votes_count(),
+        'taker_votes': dispute.taker_votes_count(),
+        'total_votes': dispute.total_votes_count(),
+        'quorum_target': dispute.get_quorum_target(),
+        'voting_deadline': dispute.get_voting_deadline(),
+        'is_expired': dispute.is_voting_expired(),
     }
     return render(request, 'dispute_detail.html', context)
+
+@login_required(login_url='/login/')
+@require_POST
+def vote_dispute(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+
+    if dispute.status != 'open':
+        messages.error(request, "This dispute is no longer open for community voting.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if dispute.is_voting_expired():
+        dispute.tally_and_settle()
+        messages.error(request, "The voting window for this dispute has expired.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if request.user == task.posted_by or request.user == task.taken_by:
+        messages.error(request, "Task participants cannot vote on their own dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if DisputeVote.objects.filter(dispute=dispute, voter=request.user).exists():
+        messages.error(request, "You have already cast a vote for this dispute.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    if hasattr(request.user, 'userprofile') and request.user.userprofile.reputation_score < 50:
+        messages.error(request, "Your reputation score does not meet the minimum threshold to vote as a juror.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    vote_choice = request.POST.get('vote')
+    if vote_choice not in ['poster', 'taker']:
+        messages.error(request, "Invalid vote option selected.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    with transaction.atomic():
+        dispute_obj = Dispute.objects.select_for_update().get(id=dispute.id)
+        if dispute_obj.status != 'open':
+            messages.error(request, "This dispute is no longer open for voting.")
+            return redirect('dispute_detail', dispute_id=dispute.id)
+
+        DisputeVote.objects.create(
+            dispute=dispute_obj,
+            voter=request.user,
+            vote=vote_choice
+        )
+
+        if dispute_obj.total_votes_count() >= dispute_obj.get_quorum_target():
+            dispute_obj.tally_and_settle()
+            messages.success(request, "Your vote was recorded and reached quorum! The dispute has been automatically settled based on jury consensus.")
+        else:
+            messages.success(request, "Your vote has been recorded. Thank you for participating in the community jury!")
+
+    return redirect('dispute_detail', dispute_id=dispute.id)
+
 
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
