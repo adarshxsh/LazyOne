@@ -8,20 +8,69 @@
     <div class="space-y-6 text-gray-300">
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a> (Reward: {{ task.reward }} pts)</p>
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
             <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
             <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
+            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y H:i" }}</p>
+        </div>
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400">Deposit Collateral</h3>
+            <p><strong>Worker Bond ({{ dispute.worker_deposit_amount }} pts):</strong> <span class="font-medium text-cyan-300">{{ dispute.get_worker_escrow_status_display }}</span></p>
+            <p><strong>Poster Bond ({{ dispute.poster_deposit_amount }} pts):</strong> <span class="font-medium text-cyan-300">{{ dispute.get_poster_escrow_status_display }}</span></p>
+
+            {% if can_counter_deposit %}
+                <div class="mt-4 p-4 bg-yellow-900/30 border border-yellow-600 rounded-lg">
+                    <p class="text-yellow-200 font-medium mb-2">Matching counter-deposit bond required ({{ task.deposit_bond_amount }} points) within 48 hours of dispute creation.</p>
+                    <form action="{% url 'post_counter_deposit' dispute.id %}" method="POST">
+                        {% csrf_token %}
+                        <button type="submit" class="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold rounded">
+                            Post Counter-Deposit Bond ({{ task.deposit_bond_amount }} pts)
+                        </button>
+                    </form>
+                </div>
+            {% endif %}
         </div>
 
         <div>
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+        </div>
+
+        <div>
+            <h3 class="text-xl font-semibold text-cyan-400 mb-2">Community Juror Voting</h3>
+            <p><strong>Total Votes Cast:</strong> {{ total_votes }} / 11</p>
+            <p><strong>Poster Votes:</strong> {{ poster_votes }} | <strong>Worker Votes:</strong> {{ taker_votes }}</p>
+
+            {% if user_vote %}
+                <p class="mt-2 text-green-400">You voted for <strong>{{ user_vote.choice|capfirst }}</strong> (20 points staked).</p>
+            {% elif can_vote %}
+                <div class="mt-4 p-4 bg-gray-900/80 border border-cyan-700 rounded-lg">
+                    <p class="font-medium text-white mb-2">Cast your vote as a community juror (Stakes 20 points):</p>
+                    <form action="{% url 'vote_dispute' dispute.id %}" method="POST" class="space-y-4">
+                        {% csrf_token %}
+                        <div class="flex items-center space-x-6">
+                            <label class="inline-flex items-center space-x-2 text-gray-200 cursor-pointer">
+                                <input type="radio" name="choice" value="poster" required class="text-cyan-500 focus:ring-cyan-400">
+                                <span>Support Poster ({{ task.posted_by.username }})</span>
+                            </label>
+                            <label class="inline-flex items-center space-x-2 text-gray-200 cursor-pointer">
+                                <input type="radio" name="choice" value="taker" required class="text-cyan-500 focus:ring-cyan-400">
+                                <span>Support Worker ({% if task.taken_by %}{{ task.taken_by.username }}{% else %}Worker{% endif %})</span>
+                            </label>
+                        </div>
+                        <button type="submit" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold rounded">
+                            Submit Vote & Stake 20 Points
+                        </button>
+                    </form>
+                </div>
+            {% elif dispute.status == 'open' and not dispute.has_counter_deposit %}
+                <p class="mt-2 text-yellow-400 text-sm">Voting will open once the counter-deposit bond is posted.</p>
+            {% endif %}
         </div>
     </div>
 
