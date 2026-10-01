@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, DisputeEvidence, Message
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +181,153 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class JurorDisputeEvidenceTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        self.juror = User.objects.create_user(username='juror1', password='password123')
+        UserProfile.objects.create(user=self.juror, rewards=1000)
+
+        self.random_user = User.objects.create_user(username='random_user', password='password123')
+        UserProfile.objects.create(user=self.random_user, rewards=1000)
+
+        self.task = Task.objects.create(
+            title="Disputed Task",
+            description="Task undergoing dispute",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed'
+        )
+
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Work completed but unpaid",
+            deposit_amount=50,
+            escrow_status='held'
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_dispute_jurors_relationship(self):
+        self.dispute.jurors.add(self.juror)
+        self.assertIn(self.juror, self.dispute.jurors.all())
+
+    def test_dispute_evidence_creation(self):
+        evidence = DisputeEvidence.objects.create(
+            dispute=self.dispute,
+            uploaded_by=self.taker,
+            url="https://example.com/proof.png",
+            description="Proof of task completion"
+        )
+        self.assertEqual(evidence.dispute, self.dispute)
+        self.assertIn(evidence, self.dispute.evidence_items.all())
+        self.assertIn(evidence, self.dispute.evidences)
+
+    def test_dispute_detail_authorization_for_juror(self):
+        self.dispute.jurors.add(self.juror)
+        self.client.login(username='juror1', password='password123')
+
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['is_juror'])
+        self.assertTrue(response.context['has_jurors'])
+
+    def test_dispute_detail_blocked_for_non_juror(self):
+        self.client.login(username='random_user', password='password123')
+
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertRedirects(response, reverse('home'))
+
+    def test_upload_dispute_evidence_success(self):
+        self.dispute.jurors.add(self.juror)
+        self.client.login(username='juror1', password='password123')
+
+        response = self.client.post(
+            reverse('upload_dispute_evidence', args=[self.dispute.id]),
+            {
+                'description': 'Juror review notes',
+                'url': 'https://example.com/audit_report.pdf'
+            }
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+        evidence = DisputeEvidence.objects.filter(dispute=self.dispute, uploaded_by=self.juror).first()
+        self.assertIsNotNone(evidence)
+        self.assertEqual(evidence.description, 'Juror review notes')
+        self.assertEqual(evidence.url, 'https://example.com/audit_report.pdf')
+
+    def test_upload_dispute_evidence_blocked_for_non_party(self):
+        self.client.login(username='random_user', password='password123')
+
+        response = self.client.post(
+            reverse('upload_dispute_evidence', args=[self.dispute.id]),
+            {
+                'description': 'Unauthorized evidence',
+                'url': 'https://example.com/spam.png'
+            }
+        )
+        self.assertRedirects(response, reverse('home'))
+        self.assertFalse(DisputeEvidence.objects.filter(uploaded_by=self.random_user).exists())
+
+    def test_dispute_chat_authorization_for_juror(self):
+        self.dispute.jurors.add(self.juror)
+        conv, _ = Conversation.objects.get_or_create(dispute=self.dispute)
+
+        self.client.login(username='juror1', password='password123')
+        response = self.client.get(reverse('chat_view', args=[conv.id]))
+        self.assertEqual(response.status_code, 200)
+
+    def test_dispute_chat_blocked_for_non_juror(self):
+        self.dispute.jurors.add(self.juror)
+        conv, _ = Conversation.objects.get_or_create(dispute=self.dispute)
+
+        self.client.login(username='random_user', password='password123')
+        response = self.client.get(reverse('chat_view', args=[conv.id]))
+        self.assertRedirects(response, reverse('home'))
+
+    def test_send_message_in_dispute_chat_for_juror(self):
+        self.dispute.jurors.add(self.juror)
+        conv, _ = Conversation.objects.get_or_create(dispute=self.dispute)
+
+        self.client.login(username='juror1', password='password123')
+        response = self.client.post(
+            reverse('send_message', args=[conv.id]),
+            {'content': 'Juror deliberation message'}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['status'], 'success')
+        self.assertTrue(Message.objects.filter(conversation=conv, sender=self.juror, content='Juror deliberation message').exists())
+
+    def test_send_message_in_dispute_chat_blocked_for_non_juror(self):
+        self.dispute.jurors.add(self.juror)
+        conv, _ = Conversation.objects.get_or_create(dispute=self.dispute)
+
+        self.client.login(username='random_user', password='password123')
+        response = self.client.post(
+            reverse('send_message', args=[conv.id]),
+            {'content': 'Unauthorized message'}
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_template_deliberation_panel_rendering(self):
+        # 1. Zero assigned jurors -> deliberation panel not rendered for jurors
+        self.client.login(username='poster', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertNotContains(response, 'juror-deliberation-panel')
+
+        # 2. Add juror -> deliberation panel rendered
+        self.dispute.jurors.add(self.juror)
+        self.client.login(username='juror1', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertContains(response, 'juror-deliberation-panel')
+        self.assertContains(response, 'Isolated Juror Deliberation Chat')
+
 

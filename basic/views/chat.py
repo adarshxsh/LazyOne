@@ -23,7 +23,16 @@ def chat_view(request, conversation_id):
         messages.error(request, "Chat not found.")
         return redirect('home')
 
-    if request.user not in conversation.participants.all():
+    if hasattr(conversation, 'dispute') and conversation.dispute:
+        is_juror = request.user in conversation.dispute.jurors.all()
+        is_participant = request.user in conversation.participants.all()
+        if not (is_juror or is_participant or request.user.is_staff):
+            logger.warning("Step 2: User is not authorized for dispute deliberation chat. Redirecting to home.")
+            messages.error(request, "You are not authorized to view this chat.")
+            return redirect('home')
+        if is_juror and request.user not in conversation.participants.all():
+            conversation.participants.add(request.user)
+    elif request.user not in conversation.participants.all():
         logger.warning("Step 2: User is not a participant. Redirecting to home.")
         messages.error(request, "You are not authorized to view this chat.")
         return redirect('home') # Redirect to home page
@@ -59,7 +68,14 @@ def chat_view(request, conversation_id):
 def send_message(request, conversation_id):
     if request.method == 'POST':
         conversation = get_object_or_404(Conversation, id=conversation_id)
-        if request.user not in conversation.participants.all():
+        if hasattr(conversation, 'dispute') and conversation.dispute:
+            is_juror = request.user in conversation.dispute.jurors.all()
+            is_participant = request.user in conversation.participants.all()
+            if not (is_juror or is_participant or request.user.is_staff):
+                return HttpResponseForbidden("You are not authorized to send messages in this chat.")
+            if is_juror and request.user not in conversation.participants.all():
+                conversation.participants.add(request.user)
+        elif request.user not in conversation.participants.all():
             return HttpResponseForbidden("You are not authorized to send messages in this chat.")
         
         content = request.POST.get('content')

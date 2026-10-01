@@ -91,6 +91,7 @@ class Dispute(models.Model):
     )
     task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='dispute')
     raised_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='raised_disputes')
+    jurors = models.ManyToManyField(User, related_name='juror_disputes', blank=True)
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     deposit_amount = models.PositiveIntegerField(default=0)
@@ -99,6 +100,10 @@ class Dispute(models.Model):
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
+
+    @property
+    def evidences(self):
+        return self.evidence_items.all()
 
     def refund_deposit(self, reason_description=None):
         if self.escrow_status == 'held' and self.deposit_amount > 0:
@@ -142,6 +147,17 @@ class Dispute(models.Model):
             self.escrow_status = 'forfeited'
             self.save()
 
+class DisputeEvidence(models.Model):
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='evidence_items')
+    uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='uploaded_evidence')
+    file = models.FileField(upload_to='dispute_evidence/', blank=True, null=True)
+    url = models.URLField(max_length=500, blank=True, null=True)
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Evidence for Dispute #{self.dispute.id} by {self.uploaded_by.username}"
+
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
     to_user = models.ForeignKey(User, related_name='to_user', on_delete=models.CASCADE)
@@ -158,12 +174,15 @@ class Friendship(models.Model):
 
 class Conversation(models.Model):
     task = models.OneToOneField(Task, on_delete=models.CASCADE, null=True, blank=True, related_name='conversation')
+    dispute = models.OneToOneField(Dispute, on_delete=models.CASCADE, null=True, blank=True, related_name='conversation')
     participants = models.ManyToManyField(User, related_name='conversations')
     last_message_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self):
         if self.task:
             return f"Chat for task: {self.task.title}"
+        if hasattr(self, 'dispute') and self.dispute:
+            return f"Dispute Chat for task: {self.dispute.task.title}"
         participant_names = [user.username for user in self.participants.all()]
         return f"Chat between {' and '.join(participant_names)}"
 
