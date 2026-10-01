@@ -3,26 +3,172 @@
 {% block title %}Dispute Details - {{ block.super }}{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-bold text-white mb-4">Dispute Details</h2>
+<div class="max-w-4xl mx-auto space-y-8">
+    <div class="border-b border-gray-700/50 pb-4">
+        <h2 class="text-3xl font-bold text-white">Dispute Details</h2>
+        <p class="text-gray-400 text-sm mt-1">Dispute #{{ dispute.id }} for Task: {{ dispute.task.title }}</p>
+    </div>
 
-    <div class="space-y-6 text-gray-300">
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Task in Question</h3>
-            <p class="text-lg"><a href="#" class="hover:underline">{{ dispute.task.title }}</a></p>
+    <!-- Task History & Details -->
+    <div class="bg-gray-800/40 rounded-xl p-6 border border-gray-700/50 space-y-4">
+        <h3 class="text-xl font-semibold text-cyan-400 flex items-center gap-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+            Task Details & History
+        </h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-300">
+            <div><strong>Task Title:</strong> {{ dispute.task.title }}</div>
+            <div><strong>Status:</strong> <span class="capitalize px-2 py-0.5 rounded text-xs bg-yellow-500/20 text-yellow-300">{{ dispute.task.status }}</span></div>
+            <div><strong>Posted By:</strong> {{ dispute.task.posted_by.username }}</div>
+            <div><strong>Assigned To:</strong> {{ dispute.task.taken_by.username|default:"Unassigned" }}</div>
+            <div><strong>Reward:</strong> {{ dispute.task.reward }} points</div>
+            <div><strong>Deadline:</strong> {{ dispute.task.deadline|date:"M d, Y H:i"|default:"None" }}</div>
         </div>
-
         <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Dispute Information</h3>
-            <p><strong>Status:</strong> <span class="px-2 py-1 text-sm rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></p>
-            <p><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</p>
-            <p><strong>Raised By:</strong> {{ dispute.raised_by.username }}</p>
-            <p><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</p>
-        </div>
-
-        <div>
-            <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
-            <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
+            <strong class="text-sm text-gray-300 block mb-1">Task Description:</strong>
+            <p class="bg-gray-900/60 p-3 rounded-lg border border-gray-700/50 text-sm text-gray-300">{{ dispute.task.description|linebreaksbr }}</p>
         </div>
     </div>
 
+    <!-- Dispute Overview -->
+    <div class="bg-gray-800/40 rounded-xl p-6 border border-gray-700/50 space-y-4">
+        <h3 class="text-xl font-semibold text-cyan-400 flex items-center gap-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            Dispute Information
+        </h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-300">
+            <div><strong>Dispute Status:</strong> <span class="px-2 py-1 text-xs rounded-full {% if dispute.status == 'open' %}bg-yellow-500/20 text-yellow-300{% else %}bg-green-500/20 text-green-300{% endif %}">{{ dispute.get_status_display }}</span></div>
+            <div><strong>Security Deposit Bond:</strong> {{ dispute.deposit_amount }} points (<span class="font-medium text-cyan-300">{{ dispute.get_escrow_status_display }}</span>)</div>
+            <div><strong>Raised By:</strong> {{ dispute.raised_by.username }}</div>
+            <div><strong>Date Raised:</strong> {{ dispute.created_at|date:"F d, Y" }}</div>
+        </div>
+        <div>
+            <strong class="text-sm text-gray-300 block mb-1">Reason for Dispute:</strong>
+            <p class="bg-gray-900/60 p-3 rounded-lg border border-gray-700/50 text-sm text-gray-300">{{ dispute.reason|linebreaksbr }}</p>
+        </div>
+    </div>
+
+    <!-- Assigned Jurors -->
+    <div class="bg-gray-800/40 rounded-xl p-6 border border-gray-700/50 space-y-3">
+        <h3 class="text-xl font-semibold text-cyan-400 flex items-center gap-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+            Assigned Dispute Jurors
+        </h3>
+        {% if dispute.jurors.exists %}
+            <div class="flex flex-wrap gap-2">
+                {% for juror in dispute.jurors.all %}
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                        {{ juror.username }}
+                    </span>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="text-sm text-gray-400 italic">No jurors assigned yet to this dispute.</p>
+        {% endif %}
+    </div>
+
+    <!-- Dispute Evidence Review & Upload -->
+    <div class="bg-gray-800/40 rounded-xl p-6 border border-gray-700/50 space-y-6">
+        <h3 class="text-xl font-semibold text-cyan-400 flex items-center gap-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
+            Task Evidence Items
+        </h3>
+
+        <!-- Evidence List -->
+        <div id="evidence-list" class="space-y-3">
+            {% if evidence_list %}
+                {% for item in evidence_list %}
+                    <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700/50 space-y-2">
+                        <div class="flex items-center justify-between text-xs text-gray-400">
+                            <span class="font-medium text-cyan-300">Submitted by {{ item.uploaded_by.username }}</span>
+                            <span>{{ item.created_at|date:"M d, Y H:i" }}</span>
+                        </div>
+                        {% if item.description %}
+                            <p class="text-sm text-gray-200">{{ item.description|linebreaksbr }}</p>
+                        {% endif %}
+                        {% if item.url %}
+                            <div class="text-sm">
+                                <strong class="text-gray-400">URL:</strong>
+                                <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer" class="text-cyan-400 hover:underline break-all">{{ item.url }}</a>
+                            </div>
+                        {% endif %}
+                        {% if item.file %}
+                            <div class="text-sm">
+                                <strong class="text-gray-400">Attachment:</strong>
+                                <a href="{{ item.file.url }}" target="_blank" class="text-cyan-400 hover:underline inline-flex items-center gap-1">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                                    View Attached File
+                                </a>
+                            </div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            {% else %}
+                <p class="text-sm text-gray-400 italic">No evidence items submitted yet.</p>
+            {% endif %}
+        </div>
+
+        <!-- Evidence Upload Form -->
+        <div class="border-t border-gray-700/50 pt-4">
+            <h4 class="text-md font-semibold text-white mb-3">Submit Evidence Item</h4>
+            <form action="{% url 'upload_dispute_evidence' dispute.id %}" method="POST" enctype="multipart/form-data" class="space-y-3">
+                {% csrf_token %}
+                <div>
+                    <label class="block text-xs font-medium text-gray-300 mb-1">Description / Notes</label>
+                    <textarea name="description" rows="2" placeholder="Explain this evidence..." class="w-full px-3 py-2 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400"></textarea>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-300 mb-1">Evidence URL (optional)</label>
+                        <input type="url" name="url" placeholder="https://..." class="w-full px-3 py-2 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-300 mb-1">Evidence File (optional)</label>
+                        <input type="file" name="file" class="w-full text-xs text-gray-300 file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-cyan-500 file:text-white hover:file:bg-cyan-600">
+                    </div>
+                </div>
+                <button type="submit" class="px-4 py-2 bg-cyan-500 hover:bg-cyan-600 text-white font-medium text-sm rounded-lg transition-colors">
+                    Upload Evidence
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Dispute Deliberation Panel -->
+    {% if dispute.jurors.exists %}
+        <div class="bg-gray-800/40 rounded-xl p-6 border border-gray-700/50 space-y-4" id="juror-deliberation-panel">
+            <div class="flex items-center justify-between">
+                <h3 class="text-xl font-semibold text-cyan-400 flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"></path></svg>
+                    Isolated Juror Deliberation Chat
+                </h3>
+                {% if conversation %}
+                    <a href="{% url 'chat_view' conversation.id %}" class="text-xs bg-cyan-600 hover:bg-cyan-700 text-white px-3 py-1.5 rounded-lg transition-colors inline-flex items-center gap-1">
+                        Open Full Screen Chat
+                    </a>
+                {% endif %}
+            </div>
+
+            {% if is_juror or request.user.is_staff %}
+                <div class="bg-gray-900/80 rounded-lg p-4 border border-gray-700/50">
+                    <p class="text-xs text-gray-400 mb-3">Deliberation channel for assigned dispute jurors.</p>
+                    <div class="flex justify-between items-center bg-gray-800 p-3 rounded-lg border border-gray-700">
+                        <div>
+                            <p class="text-sm text-white font-medium">Dispute Chat Channel #{{ conversation.id }}</p>
+                            <p class="text-xs text-gray-400">Jurors: {% for j in dispute.jurors.all %}{{ j.username }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+                        </div>
+                        {% if conversation %}
+                            <a href="{% url 'chat_view' conversation.id %}" class="bg-cyan-500 hover:bg-cyan-600 text-white font-bold text-xs px-4 py-2 rounded-full transition-colors">
+                                Join Deliberation Chat
+                            </a>
+                        {% endif %}
+                    </div>
+                </div>
+            {% else %}
+                <p class="text-sm text-gray-400 italic bg-gray-900/60 p-3 rounded-lg border border-gray-700/50">
+                    Deliberation room is active and accessible only to assigned dispute jurors.
+                </p>
+            {% endif %}
+        </div>
+    {% endif %}
+</div>
 {% endblock %}

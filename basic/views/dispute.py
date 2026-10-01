@@ -2,7 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, Task, Notification, RewardLedger, DisputeEvidence, Conversation
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,14 +10,59 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+    is_party = request.user == task.posted_by or request.user == task.taken_by
+    is_juror = request.user in dispute.jurors.all()
+    if not (is_party or is_juror or request.user.is_staff):
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+
+    conversation, _ = Conversation.objects.get_or_create(dispute=dispute)
+    for juror in dispute.jurors.all():
+        if juror not in conversation.participants.all():
+            conversation.participants.add(juror)
+
+    evidence_list = dispute.evidence_items.all().order_by('-created_at')
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'evidence_list': evidence_list,
+        'conversation': conversation,
+        'is_juror': is_juror,
+        'has_jurors': dispute.jurors.exists(),
     }
     return render(request, 'dispute_detail.html', context)
+
+@login_required(login_url='/login/')
+@require_POST
+def upload_dispute_evidence(request, dispute_id):
+    dispute = get_object_or_404(Dispute, id=dispute_id)
+    task = dispute.task
+    is_party = request.user == task.posted_by or request.user == task.taken_by
+    is_juror = request.user in dispute.jurors.all()
+    if not (is_party or is_juror or request.user.is_staff):
+        messages.error(request, "You are not authorized to submit evidence for this dispute.")
+        return redirect('home')
+
+    description = request.POST.get('description', '').strip()
+    url = request.POST.get('url', '').strip() or None
+    uploaded_file = request.FILES.get('file')
+
+    if not uploaded_file and not url and not description:
+        messages.error(request, "Please provide a file, URL, or description for your evidence.")
+        return redirect('dispute_detail', dispute_id=dispute_id)
+
+    DisputeEvidence.objects.create(
+        dispute=dispute,
+        uploaded_by=request.user,
+        file=uploaded_file,
+        url=url,
+        description=description
+    )
+    messages.success(request, "Evidence submitted successfully.")
+    return redirect('dispute_detail', dispute_id=dispute_id)
+
+submit_dispute_evidence = upload_dispute_evidence
 
 @login_required(login_url='/login/')
 def raise_dispute(request, task_id):
