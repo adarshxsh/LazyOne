@@ -4,9 +4,11 @@ from django.utils import timezone
 from django.db import transaction
 from django.urls import reverse
 from basic.models import Dispute, RewardLedger, Notification
+from basic.views.dispute import evaluate_dispute_consensus
+
 
 class Command(BaseCommand):
-    help = 'Resolves expired open disputes, refunds/forfeits escrowed bonds, and settles task points.'
+    help = 'Evaluates vote consensus on open disputes and resolves expired disputes with escrow bond settlement.'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -21,7 +23,16 @@ class Command(BaseCommand):
         now = timezone.now()
         expiry_threshold = now - timedelta(days=days)
 
-        # Find open disputes created before the expiration window
+        # 1. First evaluate vote consensus on ALL open disputes
+        consensus_count = 0
+        for dispute in Dispute.objects.filter(status='open'):
+            if evaluate_dispute_consensus(dispute):
+                consensus_count += 1
+
+        if consensus_count > 0:
+            self.stdout.write(self.style.SUCCESS(f"Resolved {consensus_count} dispute(s) via majority vote consensus."))
+
+        # 2. Find remaining open disputes created before the expiration window
         expired_disputes = Dispute.objects.filter(status='open', created_at__lte=expiry_threshold)
 
         count = 0
