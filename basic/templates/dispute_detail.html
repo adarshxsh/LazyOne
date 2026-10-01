@@ -23,6 +23,95 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <!-- Consensus Voting & Quorum Progress -->
+        <div class="bg-gray-800/80 p-6 rounded-lg border border-gray-700 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Peer Juror Voting & Consensus Progress</h3>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+                <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700">
+                    <span class="block text-2xl font-bold text-white">{{ total_votes }} / {{ assigned_jurors_count }}</span>
+                    <span class="text-sm text-gray-400">Votes Cast</span>
+                </div>
+                <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700">
+                    <span class="block text-2xl font-bold text-blue-400">{{ poster_votes }}</span>
+                    <span class="text-sm text-gray-400">Votes for Poster ({{ task.posted_by.username }})</span>
+                </div>
+                <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700">
+                    <span class="block text-2xl font-bold text-green-400">{{ worker_votes }}</span>
+                    <span class="text-sm text-gray-400">Votes for Worker ({% if task.taken_by %}{{ task.taken_by.username }}{% else %}N/A{% endif %})</span>
+                </div>
+            </div>
+
+            {% if can_vote %}
+                <div class="mt-6 pt-4 border-t border-gray-700">
+                    <h4 class="text-lg font-semibold text-cyan-300 mb-3">Cast Your Juror Vote</h4>
+                    <form method="POST" action="{% url 'submit_dispute_vote' dispute.id %}" class="space-y-4">
+                        {% csrf_token %}
+                        <div class="space-y-2">
+                            <p class="text-sm font-medium text-gray-300">Select Choice:</p>
+                            <div class="flex items-center space-x-6">
+                                <label class="inline-flex items-center cursor-pointer">
+                                    <input type="radio" name="vote_choice" value="poster" required class="text-cyan-500 focus:ring-cyan-400">
+                                    <span class="ml-2 text-white">In favor of Poster ({{ task.posted_by.username }})</span>
+                                </label>
+                                <label class="inline-flex items-center cursor-pointer">
+                                    <input type="radio" name="vote_choice" value="worker" required class="text-cyan-500 focus:ring-cyan-400">
+                                    <span class="ml-2 text-white">In favor of Worker ({% if task.taken_by %}{{ task.taken_by.username }}{% else %}N/A{% endif %})</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label for="comment" class="block text-sm font-medium text-gray-300 mb-1">Feedback / Explanation (Optional):</label>
+                            <textarea id="comment" name="comment" rows="3" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-cyan-500" placeholder="State reason for your vote choice..."></textarea>
+                        </div>
+
+                        <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-2 px-6 rounded-lg transition-colors">
+                            Submit Vote
+                        </button>
+                    </form>
+                </div>
+            {% elif has_voted %}
+                <div class="p-4 bg-cyan-950/40 border border-cyan-700/50 rounded-lg text-cyan-200">
+                    <p class="font-medium">You have submitted your vote as a peer juror on this dispute.</p>
+                    <p class="text-sm mt-1">Your choice: <strong class="capitalize">{{ user_vote.vote_choice }}</strong></p>
+                    {% if user_vote.comment %}
+                        <p class="text-sm italic mt-1">"{{ user_vote.comment }}"</p>
+                    {% endif %}
+                </div>
+            {% elif is_participant %}
+                <div class="p-4 bg-gray-900/50 border border-gray-700 rounded-lg text-gray-400 text-sm">
+                    As a direct participant in this task, you are monitoring live juror voting progress. Direct participants cannot cast votes.
+                </div>
+            {% elif dispute.status == 'resolved' %}
+                <div class="p-4 bg-green-950/40 border border-green-700/50 rounded-lg text-green-300 text-sm">
+                    This dispute is resolved. Voting is closed.
+                </div>
+            {% endif %}
+        </div>
+
+        {% if votes_list %}
+            <div class="space-y-3">
+                <h3 class="text-xl font-semibold text-cyan-400">Juror Votes</h3>
+                <div class="space-y-2">
+                    {% for vote in votes_list %}
+                        <div class="bg-gray-900/50 p-3 rounded-lg border border-gray-800 flex justify-between items-start">
+                            <div>
+                                <span class="font-semibold text-white">{{ vote.voter.username }}</span>
+                                <span class="ml-2 px-2 py-0.5 text-xs rounded-full {% if vote.vote_choice == 'poster' %}bg-blue-500/20 text-blue-300{% else %}bg-green-500/20 text-green-300{% endif %}">
+                                    Voted for {{ vote.vote_choice|capfirst }}
+                                </span>
+                                {% if vote.comment %}
+                                    <p class="text-sm text-gray-300 mt-1">{{ vote.comment }}</p>
+                                {% endif %}
+                            </div>
+                            <span class="text-xs text-gray-500">{{ vote.created_at|date:"M d, H:i" }}</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
     </div>
 
 {% endblock %}
