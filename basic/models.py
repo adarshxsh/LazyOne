@@ -192,3 +192,26 @@ class Notification(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+class JurorAssignment(models.Model):
+    STATUS_CHOICES = (
+        ('assigned', 'Assigned'),
+        ('accepted', 'Accepted'),
+        ('declined', 'Declined'),
+        ('voted', 'Voted'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='juror_assignments')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='juror_assignments')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='assigned')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('dispute', 'user')
+
+    def __str__(self):
+        return f"Juror {self.user.username} for dispute #{self.dispute.id} ({self.status})"
+
+    @property
+    def juror(self):
+        return self.user
+

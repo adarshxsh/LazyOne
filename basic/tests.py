@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, JurorAssignment, Friendship, Notification
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,4 +181,158 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+class JurorAssignmentAndSocialGraphTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        # Task poster and taker
+        self.poster = User.objects.create_user(username='poster_user', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker_user', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        self.deadline = timezone.now() + timedelta(days=2)
+        self.task = Task.objects.create(
+            title="Dispute Task",
+            description="Task Description",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=self.deadline
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_juror_assignment_on_dispute_creation(self):
+        # Create 6 neutral candidate users
+        neutral_users = []
+        for i in range(1, 7):
+            u = User.objects.create_user(username=f'neutral_{i}', password='password123')
+            UserProfile.objects.create(user=u, rewards=500)
+            neutral_users.append(u)
+
+        self.client.login(username='taker_user', password='password123')
+        response = self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Incomplete work'}
+        )
+
+        dispute = Dispute.objects.get(task=self.task)
+        assignments = JurorAssignment.objects.filter(dispute=dispute)
+
+        # Criterion 1 & Requirement 3: 3 to 5 JurorAssignment entries generated
+        self.assertGreaterEqual(assignments.count(), 3)
+        self.assertLessEqual(assignments.count(), 5)
+
+        for assignment in assignments:
+            self.assertIn(assignment.user, neutral_users)
+            self.assertNotEqual(assignment.user, self.poster)
+            self.assertNotEqual(assignment.user, self.taker)
+            self.assertEqual(assignment.status, 'assigned')
+
+    def test_social_graph_conflict_exclusion(self):
+        # 1. Friend of poster (M2M)
+        friend_poster = User.objects.create_user(username='friend_poster', password='password123')
+        friend_poster_profile = UserProfile.objects.create(user=friend_poster, rewards=500)
+        self.poster_profile.friends.add(friend_poster_profile)
+
+        # 2. Friend of taker (M2M)
+        friend_taker = User.objects.create_user(username='friend_taker', password='password123')
+        friend_taker_profile = UserProfile.objects.create(user=friend_taker, rewards=500)
+        self.taker_profile.friends.add(friend_taker_profile)
+
+        # 3. High closeness connection (> 30)
+        high_close_user = User.objects.create_user(username='high_close_user', password='password123')
+        high_close_profile = UserProfile.objects.create(user=high_close_user, rewards=500)
+        Friendship.objects.create(from_user=self.poster_profile, to_user=high_close_profile, closeness=80)
+
+        # 4. Neutral users
+        neutral1 = User.objects.create_user(username='neutral_1', password='password123')
+        UserProfile.objects.create(user=neutral1, rewards=500)
+
+        neutral2 = User.objects.create_user(username='neutral_2', password='password123')
+        UserProfile.objects.create(user=neutral2, rewards=500)
+
+        neutral3 = User.objects.create_user(username='neutral_3', password='password123')
+        UserProfile.objects.create(user=neutral3, rewards=500)
+
+        self.client.login(username='taker_user', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Quality issues'}
+        )
+
+        dispute = Dispute.objects.get(task=self.task)
+        assigned_user_ids = set(JurorAssignment.objects.filter(dispute=dispute).values_list('user_id', flat=True))
+
+        # Criterion 2: Conflicted users must NEVER be assigned
+        self.assertNotIn(friend_poster.id, assigned_user_ids)
+        self.assertNotIn(friend_taker.id, assigned_user_ids)
+        self.assertNotIn(high_close_user.id, assigned_user_ids)
+        self.assertNotIn(self.poster.id, assigned_user_ids)
+        self.assertNotIn(self.taker.id, assigned_user_ids)
+
+        # Neutral users are assigned
+        self.assertIn(neutral1.id, assigned_user_ids)
+        self.assertIn(neutral2.id, assigned_user_ids)
+        self.assertIn(neutral3.id, assigned_user_ids)
+
+    def test_assigned_juror_access_dispute_detail(self):
+        neutral_user = User.objects.create_user(username='assigned_juror', password='password123')
+        UserProfile.objects.create(user=neutral_user, rewards=500)
+
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Dispute reason',
+            deposit_amount=50,
+            escrow_status='held'
+        )
+        JurorAssignment.objects.create(dispute=dispute, user=neutral_user, status='assigned')
+
+        # Criterion 3: Assigned juror can view dispute detail without authorization error
+        self.client.login(username='assigned_juror', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertEqual(response.status_code, 200)
+
+    def test_unassigned_third_party_restricted(self):
+        third_party = User.objects.create_user(username='unassigned_user', password='password123')
+        UserProfile.objects.create(user=third_party, rewards=500)
+
+        dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason='Dispute reason',
+            deposit_amount=50,
+            escrow_status='held'
+        )
+
+        # Criterion 4: Unassigned third party receives error and redirect
+        self.client.login(username='unassigned_user', password='password123')
+        response = self.client.get(reverse('dispute_detail', args=[dispute.id]))
+        self.assertRedirects(response, reverse('home'))
+
+    def test_selected_jurors_receive_notification(self):
+        neutral_user = User.objects.create_user(username='notified_juror', password='password123')
+        UserProfile.objects.create(user=neutral_user, rewards=500)
+
+        self.client.login(username='taker_user', password='password123')
+        self.client.post(
+            reverse('raise_dispute', args=[self.task.id]),
+            {'reason': 'Work not done'}
+        )
+
+        dispute = Dispute.objects.get(task=self.task)
+        assigned_juror = JurorAssignment.objects.filter(dispute=dispute, user=neutral_user).first()
+        self.assertIsNotNone(assigned_juror)
+
+        # Criterion 5: Selected juror receives system notification with link to dispute
+        notification = Notification.objects.filter(recipient=neutral_user).first()
+        self.assertIsNotNone(notification)
+        self.assertIn("assigned as a juror for dispute", notification.message)
+        self.assertEqual(notification.link, reverse('dispute_detail', args=[dispute.id]))
+
 

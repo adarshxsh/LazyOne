@@ -2,7 +2,8 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, Task, Notification, RewardLedger, JurorAssignment
+from ..services.juror import assign_jurors_for_dispute
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,7 +11,14 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+    is_participant = (request.user == task.posted_by or request.user == task.taken_by)
+    is_staff = request.user.is_staff
+    is_assigned_juror = JurorAssignment.objects.filter(
+        dispute=dispute,
+        user=request.user
+    ).exclude(status='declined').exists()
+
+    if not (is_participant or is_staff or is_assigned_juror):
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
     context = {
@@ -73,6 +81,8 @@ def raise_dispute(request, task_id):
 
             task.status = 'disputed'
             task.save()
+
+            assign_jurors_for_dispute(dispute)
 
             Notification.objects.create(
                 recipient=task.posted_by,
