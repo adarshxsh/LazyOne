@@ -23,6 +23,67 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        <!-- Community Jury Voting Progress -->
+        <div class="bg-gray-800/80 p-6 rounded-xl border border-gray-700 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Community Jury Tally & Quorum</h3>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+                <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700">
+                    <p class="text-sm text-gray-400">Votes for Poster ({{ task.posted_by.username }})</p>
+                    <p class="text-2xl font-bold text-emerald-400">{{ poster_votes }}</p>
+                </div>
+                <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700">
+                    <p class="text-sm text-gray-400">Votes for Taker ({% if task.taken_by %}{{ task.taken_by.username }}{% else %}N/A{% endif %})</p>
+                    <p class="text-2xl font-bold text-blue-400">{{ taker_votes }}</p>
+                </div>
+                <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700">
+                    <p class="text-sm text-gray-400">Total Votes / Quorum</p>
+                    <p class="text-2xl font-bold text-purple-400">{{ total_votes }} / {{ quorum }}</p>
+                </div>
+            </div>
+
+            <!-- Vote Submission Controls -->
+            <div class="pt-4 border-t border-gray-700">
+                {% if user_vote %}
+                    <div class="p-4 bg-emerald-900/30 border border-emerald-600/50 rounded-lg text-emerald-300">
+                        ✓ You cast your jury vote for <strong>{{ user_vote.voted_for.username }}</strong>.
+                    </div>
+                {% elif is_participant %}
+                    <div class="p-4 bg-gray-900/50 border border-gray-700 rounded-lg text-gray-400 italic">
+                        Task participants (Poster and Taker) cannot vote on their own dispute.
+                    </div>
+                {% elif dispute.status != 'open' %}
+                    <div class="p-4 bg-gray-900/50 border border-gray-700 rounded-lg text-gray-400 italic">
+                        Voting is closed. This dispute has been resolved by jury consensus or administrator action.
+                    </div>
+                {% elif can_vote %}
+                    <div class="bg-gray-900/60 p-4 rounded-lg border border-gray-700 space-y-3">
+                        <h4 class="text-lg font-medium text-white">Cast Your Jury Vote</h4>
+                        <p class="text-sm text-gray-400">Review the details above and select the party you believe should win this dispute.</p>
+                        
+                        <form method="POST" action="{% url 'cast_dispute_vote' dispute.id %}" class="flex flex-wrap gap-4 items-center">
+                            {% csrf_token %}
+                            <label class="flex items-center space-x-2 cursor-pointer bg-gray-800 px-4 py-2 rounded border border-gray-600 hover:border-emerald-500">
+                                <input type="radio" name="voted_for_id" value="{{ task.posted_by.id }}" required class="form-radio text-emerald-500">
+                                <span>Vote for Poster (<strong>{{ task.posted_by.username }}</strong>)</span>
+                            </label>
+
+                            {% if task.taken_by %}
+                                <label class="flex items-center space-x-2 cursor-pointer bg-gray-800 px-4 py-2 rounded border border-gray-600 hover:border-blue-500">
+                                    <input type="radio" name="voted_for_id" value="{{ task.taken_by.id }}" required class="form-radio text-blue-500">
+                                    <span>Vote for Taker (<strong>{{ task.taken_by.username }}</strong>)</span>
+                                </label>
+                            {% endif %}
+
+                            <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white font-semibold px-6 py-2 rounded-lg transition-colors">
+                                Submit Jury Vote
+                            </button>
+                        </form>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
     </div>
 
 {% endblock %}
