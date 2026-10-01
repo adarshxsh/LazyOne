@@ -1,11 +1,12 @@
-from django.test import TestCase, Client
+from django.test import TestCase, Client, override_settings
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from .models import UserProfile, Task, Dispute, RewardLedger, Conversation, DisputeEvidence
 
 
+@override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
 class DisputeDepositBondTests(TestCase):
     def setUp(self):
         self.client = Client()
@@ -181,4 +182,130 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
+
+
+@override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
+class DisputeEvidenceAndJurorDeliberationTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+        self.poster = User.objects.create_user(username='poster', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=1000)
+
+        self.juror = User.objects.create_user(username='juror1', password='password123')
+        self.juror_profile = UserProfile.objects.create(user=self.juror, rewards=1000)
+
+        self.unassigned = User.objects.create_user(username='unassigned', password='password123')
+        self.unassigned_profile = UserProfile.objects.create(user=self.unassigned, rewards=1000)
+
+        self.task = Task.objects.create(
+            title="Deliberation Test Task",
+            description="Task Description",
+            reward=200,
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='disputed'
+        )
+        self.task_chat = Conversation.objects.create(task=self.task)
+        self.task_chat.participants.add(self.poster, self.taker)
+
+        self.dispute = Dispute.objects.create(
+            task=self.task,
+            raised_by=self.taker,
+            reason="Work quality dispute",
+            deposit_amount=50,
+            status='open'
+        )
+        self.dispute.jurors.add(self.juror)
+        self.deliberation_chat = self.dispute.get_or_create_deliberation_conversation()
+
+    def test_assigned_juror_can_view_dispute_details_and_access_task_chat_history(self):
+        self.client.login(username='juror1', password='password123')
+
+        # View dispute detail
+        response = self.client.get(reverse('dispute_detail', args=[self.dispute.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['is_juror'])
+
+        # View task chat history (read-only)
+        response = self.client.get(reverse('chat_view', args=[self.task_chat.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['is_read_only'])
+
+    def test_juror_cannot_post_to_main_task_chat(self):
+        self.client.login(username='juror1', password='password123')
+
+        response = self.client.post(
+            reverse('send_message', args=[self.task_chat.id]),
+            {'content': 'Juror attempting to post in task chat'}
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_unassigned_user_cannot_access_deliberation_chat(self):
+        self.client.login(username='unassigned', password='password123')
+
+        # View deliberation chat -> redirect to home
+        response = self.client.get(reverse('chat_view', args=[self.deliberation_chat.id]))
+        self.assertRedirects(response, reverse('home'))
+
+        # Send message to deliberation chat -> 403
+        response = self.client.post(
+            reverse('send_message', args=[self.deliberation_chat.id]),
+            {'content': 'Unassigned user trying to deliberate'}
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_juror_can_upload_evidence_and_deliberate_in_deliberation_chat(self):
+        self.client.login(username='juror1', password='password123')
+
+        # Upload evidence
+        response = self.client.post(
+            reverse('dispute_detail', args=[self.dispute.id]),
+            {
+                'file_url': 'http://example.com/screenshot.png',
+                'description': 'Log evidence showing incomplete delivery'
+            }
+        )
+        self.assertRedirects(response, reverse('dispute_detail', args=[self.dispute.id]))
+
+        evidence = DisputeEvidence.objects.filter(dispute=self.dispute).first()
+        self.assertIsNotNone(evidence)
+        self.assertEqual(evidence.uploaded_by, self.juror)
+        self.assertEqual(evidence.description, 'Log evidence showing incomplete delivery')
+
+        # View deliberation chat
+        response = self.client.get(reverse('chat_view', args=[self.deliberation_chat.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context['is_read_only'])
+
+        # Post message in deliberation chat
+        response = self.client.post(
+            reverse('send_message', args=[self.deliberation_chat.id]),
+            {'content': 'Evidence seems clear in favor of taker.'}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(self.deliberation_chat.messages.filter(sender=self.juror, content='Evidence seems clear in favor of taker.').exists())
+
+    def test_deliberation_chat_becomes_read_only_when_dispute_resolved_or_withdrawn(self):
+        self.client.login(username='juror1', password='password123')
+
+        # Resolve dispute
+        self.dispute.status = 'resolved'
+        self.dispute.save()
+
+        # View deliberation chat
+        response = self.client.get(reverse('chat_view', args=[self.deliberation_chat.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['is_read_only'])
+
+        # Post message in deliberation chat -> 403
+        response = self.client.post(
+            reverse('send_message', args=[self.deliberation_chat.id]),
+            {'content': 'Post after resolution'}
+        )
+        self.assertEqual(response.status_code, 403)
+
 

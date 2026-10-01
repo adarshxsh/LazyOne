@@ -2,7 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db import transaction
-from ..models import Dispute, Task, Notification, RewardLedger
+from ..models import Dispute, Task, Notification, RewardLedger, DisputeEvidence, Conversation
 from django.views.decorators.http import require_POST
 from django.urls import reverse
 
@@ -10,12 +10,45 @@ from django.urls import reverse
 def dispute_detail_view(request, dispute_id):
     dispute = get_object_or_404(Dispute, id=dispute_id)
     task = dispute.task
-    if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
+
+    is_poster = (request.user == task.posted_by)
+    is_taker = (request.user == task.taken_by)
+    is_staff = request.user.is_staff
+    is_juror = dispute.jurors.filter(id=request.user.id).exists()
+
+    if not (is_poster or is_taker or is_staff or is_juror):
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
+
+    if request.method == 'POST':
+        file_obj = request.FILES.get('file') or request.FILES.get('evidence_file')
+        file_url_input = request.POST.get('file_url') or request.POST.get('url')
+        description = request.POST.get('description', '')
+
+        if file_obj or file_url_input:
+            DisputeEvidence.objects.create(
+                dispute=dispute,
+                uploaded_by=request.user,
+                file_url=file_obj if file_obj else file_url_input,
+                description=description
+            )
+            messages.success(request, "Evidence uploaded successfully.")
+        else:
+            messages.error(request, "Please provide an evidence file or URL.")
+        return redirect('dispute_detail', dispute_id=dispute.id)
+
+    deliberation_conversation = dispute.get_or_create_deliberation_conversation()
+    evidence_entries = dispute.evidence_entries.all().order_by('-created_at')
+
     context = {
         'dispute': dispute,
-        'task': task
+        'task': task,
+        'is_poster': is_poster,
+        'is_taker': is_taker,
+        'is_staff': is_staff,
+        'is_juror': is_juror,
+        'deliberation_conversation': deliberation_conversation,
+        'evidence_entries': evidence_entries,
     }
     return render(request, 'dispute_detail.html', context)
 
