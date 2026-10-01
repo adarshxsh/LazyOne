@@ -28,48 +28,17 @@ class Command(BaseCommand):
         for dispute in expired_disputes:
             task = dispute.task
             with transaction.atomic():
-                dispute.status = 'resolved'
-                dispute.save()
+                poster_votes = dispute.votes.filter(vote='poster').count()
+                worker_votes = dispute.votes.filter(vote='worker').count()
 
-                if dispute.raised_by == task.posted_by:
-                    # Poster challenged an unresponsive taker: cancel task, refund task reward, forfeit bond
-                    poster_profile = task.posted_by.userprofile
-                    poster_profile.rewards += task.reward
-                    poster_profile.save()
-
-                    task.status = 'cancelled'
-                    task.save()
-
-                    RewardLedger.objects.create(
-                        user=task.posted_by,
-                        task=task,
-                        amount=task.reward,
-                        transaction_type='task_cancellation',
-                        description=f"Refund for expired dispute on task: '{task.title}'"
-                    )
-
-                    # Handle escrow bond refund / forfeiture
-                    if dispute.escrow_status == 'held':
-                        dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
+                if poster_votes > worker_votes:
+                    winner_choice = 'poster'
+                elif worker_votes > poster_votes:
+                    winner_choice = 'worker'
                 else:
-                    # Taker raised dispute: award reward to taker, complete task, and refund bond
-                    if task.taken_by:
-                        taker_profile = task.taken_by.userprofile
-                        taker_profile.rewards += task.reward
-                        taker_profile.save()
+                    winner_choice = 'poster' if dispute.raised_by == task.posted_by else 'worker'
 
-                        RewardLedger.objects.create(
-                            user=task.taken_by,
-                            task=task,
-                            amount=task.reward,
-                            transaction_type='task_completion',
-                            description=f"Awarded reward for auto-resolved expired dispute on task: '{task.title}'"
-                        )
-                    task.status = 'completed'
-                    task.save()
-
-                    if dispute.escrow_status == 'held':
-                        dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
+                dispute.resolve(winner_choice)
 
                 # Notify participants
                 participants = [task.posted_by]
