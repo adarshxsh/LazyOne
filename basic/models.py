@@ -96,6 +96,7 @@ class Dispute(models.Model):
     deposit_amount = models.PositiveIntegerField(default=0)
     escrow_status = models.CharField(max_length=20, choices=ESCROW_STATUS_CHOICES, default='held')
     created_at = models.DateTimeField(auto_now_add=True)
+    jurors = models.ManyToManyField(User, through='DisputeJuror', related_name='juror_disputes')
 
     def __str__(self):
         return f"Dispute for task: {self.task.title}"
@@ -141,6 +142,29 @@ class Dispute(models.Model):
             )
             self.escrow_status = 'forfeited'
             self.save()
+
+class DisputeJuror(models.Model):
+    VOTE_CHOICES = (
+        ('pending', 'Pending'),
+        ('poster', 'Poster'),
+        ('taker', 'Taker'),
+    )
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='dispute_jurors')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dispute_juror_assignments')
+    vote = models.CharField(max_length=20, choices=VOTE_CHOICES, default='pending')
+    reasoning = models.TextField(blank=True, default='')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    voted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ('dispute', 'user')
+
+    def __str__(self):
+        return f"Juror {self.user.username} for Dispute {self.dispute.id} ({self.vote})"
+
+    @property
+    def juror(self):
+        return self.user
 
 class FriendRequest(models.Model):
     from_user = models.ForeignKey(User, related_name='from_user', on_delete=models.CASCADE)
