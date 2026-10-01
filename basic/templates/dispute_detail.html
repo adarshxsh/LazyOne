@@ -23,6 +23,69 @@
             <h3 class="text-xl font-semibold text-cyan-400">Reason for Dispute</h3>
             <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
         </div>
+
+        {% if is_assigned_juror %}
+        <div class="bg-gray-800 p-6 rounded-lg border border-cyan-500/30 space-y-4">
+            <h3 class="text-xl font-semibold text-cyan-400">Juror Adjudication</h3>
+            {% if dispute.status == 'open' %}
+                {% if user_juror_record and user_juror_record.vote != 'pending' %}
+                    <p class="text-green-400">You have cast your vote: <strong class="uppercase">{{ user_juror_record.get_vote_display }}</strong></p>
+                    {% if user_juror_record.reasoning %}
+                        <p class="text-sm text-gray-400">Reasoning: {{ user_juror_record.reasoning }}</p>
+                    {% endif %}
+                {% else %}
+                    <form method="POST" action="{% url 'vote_dispute' dispute.id %}" class="space-y-4">
+                        {% csrf_token %}
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Select Winning Party:</label>
+                            <div class="space-x-6">
+                                <label class="inline-flex items-center">
+                                    <input type="radio" name="vote" value="poster" required class="form-radio text-cyan-500">
+                                    <span class="ml-2 text-gray-200">Task Poster ({{ dispute.task.posted_by.username }})</span>
+                                </label>
+                                <label class="inline-flex items-center">
+                                    <input type="radio" name="vote" value="taker" required class="form-radio text-cyan-500">
+                                    <span class="ml-2 text-gray-200">Task Taker ({% if dispute.task.taken_by %}{{ dispute.task.taken_by.username }}{% else %}N/A{% endif %})</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label for="reasoning" class="block text-sm font-medium text-gray-300 mb-1">Reasoning (Optional):</label>
+                            <textarea id="reasoning" name="reasoning" rows="3" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-gray-200 focus:outline-none focus:border-cyan-500" placeholder="Provide reasoning for your vote..."></textarea>
+                        </div>
+
+                        <button type="submit" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold rounded shadow transition-colors duration-200">
+                            Cast Binding Vote
+                        </button>
+                    </form>
+                {% endif %}
+            {% else %}
+                <p class="text-gray-400">Voting is closed for this dispute.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <div class="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-3">
+            <h3 class="text-xl font-semibold text-cyan-400">Peer Jury Status</h3>
+            {% if hide_vote_details %}
+                <p class="text-yellow-400/90 text-sm">Individual juror vote details remain hidden from task parties until dispute resolution completes.</p>
+            {% else %}
+                <p><strong>Total Votes Cast:</strong> {{ total_votes }} / 3</p>
+                {% if poster_votes is not None %}
+                    <p><strong>Task Poster Votes:</strong> {{ poster_votes }}</p>
+                    <p><strong>Task Taker Votes:</strong> {{ taker_votes }}</p>
+                {% endif %}
+                {% if jurors %}
+                    <h4 class="text-md font-medium text-gray-300 mt-2">Assigned Jurors:</h4>
+                    <ul class="list-disc list-inside text-sm text-gray-400">
+                        {% for j in jurors %}
+                            <li>{{ j.user.username }} - Status: <span class="capitalize">{{ j.get_vote_display }}</span></li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+            {% endif %}
+        </div>
     </div>
 
 {% endblock %}
