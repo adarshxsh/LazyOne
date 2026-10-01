@@ -182,3 +182,159 @@ class DisputeDepositBondTests(TestCase):
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
 
+
+class SymmetricalFixedBondStakingTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.poster = User.objects.create_user(username='poster2', password='password123')
+        self.poster_profile = UserProfile.objects.create(user=self.poster, rewards=1000)
+
+        self.taker = User.objects.create_user(username='taker2', password='password123')
+        self.taker_profile = UserProfile.objects.create(user=self.taker, rewards=500)
+
+        self.task = Task.objects.create(
+            title="Symmetrical Test Task",
+            description="Description",
+            reward=300, # Bond = 60
+            posted_by=self.poster,
+            taken_by=self.taker,
+            status='in_progress',
+            deadline=timezone.now() + timedelta(days=2)
+        )
+        Conversation.objects.create(task=self.task)
+
+    def test_poster_can_submit_counter_deposit(self):
+        # Taker raises dispute
+        self.client.login(username='taker2', password='password123')
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Work rejected'})
+
+        dispute = Dispute.objects.get(task=self.task)
+        self.assertFalse(dispute.has_counter_deposit)
+        self.assertEqual(dispute.worker_deposit_amount, 60)
+        self.assertEqual(dispute.worker_escrow_status, 'held')
+        self.assertEqual(dispute.poster_escrow_status, 'pending')
+
+        # Poster submits counter-deposit
+        self.client.login(username='poster2', password='password123')
+        response = self.client.post(reverse('post_counter_deposit', args=[dispute.id]))
+        self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+        dispute.refresh_from_db()
+        self.assertTrue(dispute.has_counter_deposit)
+        self.assertEqual(dispute.poster_deposit_amount, 60)
+        self.assertEqual(dispute.poster_escrow_status, 'held')
+
+        self.poster_profile.refresh_from_db()
+        self.assertEqual(self.poster_profile.rewards, 940) # 1000 - 60
+
+        # Check ledger entry
+        ledger = RewardLedger.objects.filter(user=self.poster, transaction_type='dispute_counter_deposit').first()
+        self.assertIsNotNone(ledger)
+        self.assertEqual(ledger.amount, -60)
+
+    def test_non_response_counter_party_auto_resolves_after_48h(self):
+        from django.core.management import call_command
+
+        # Taker raises dispute
+        self.client.login(username='taker2', password='password123')
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Unresponsive poster'})
+
+        dispute = Dispute.objects.get(task=self.task)
+        # Fast-forward 49 hours
+        Dispute.objects.filter(id=dispute.id).update(
+            created_at=timezone.now() - timedelta(hours=49),
+            counter_bond_deadline=timezone.now() - timedelta(hours=1)
+        )
+
+        call_command('resolve_expired_disputes')
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, 'completed')
+
+        self.taker_profile.refresh_from_db()
+        # Initial 500 - 60 (bond) + 60 (refund) + 300 (reward) = 800
+        self.assertEqual(self.taker_profile.rewards, 800)
+
+    def test_juror_staking_voting_and_slash_pool_redistribution(self):
+        # 1. Worker raises dispute & poster counter-deposits
+        self.client.login(username='taker2', password='password123')
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Dispute reason'})
+        dispute = Dispute.objects.get(task=self.task)
+
+        self.client.login(username='poster2', password='password123')
+        self.client.post(reverse('post_counter_deposit', args=[dispute.id]))
+
+        # Create 4 independent jurors
+        jurors = []
+        for i in range(4):
+            u = User.objects.create_user(username=f'juror_{i}', password='password123')
+            p = UserProfile.objects.create(user=u, rewards=100)
+            jurors.append((u, p))
+
+        # Jurors 0, 1, 2 vote for Poster; Juror 3 votes for Taker
+        for i in range(3):
+            self.client.login(username=f'juror_{i}', password='password123')
+            response = self.client.post(reverse('vote_dispute', args=[dispute.id]), {'choice': 'poster'})
+            self.assertRedirects(response, reverse('dispute_detail', args=[dispute.id]))
+
+        self.client.login(username='juror_3', password='password123')
+        self.client.post(reverse('vote_dispute', args=[dispute.id]), {'choice': 'taker'})
+
+        self.assertEqual(dispute.votes.count(), 4)
+
+        # Check juror stake deducted (100 -> 80)
+        for u, p in jurors:
+            p.refresh_from_db()
+            self.assertEqual(p.rewards, 80)
+
+        # 2. Resolve dispute
+        from basic.views.dispute import resolve_dispute_instance
+        resolve_dispute_instance(dispute)
+
+        dispute.refresh_from_db()
+        self.assertEqual(dispute.status, 'resolved')
+
+        # Minority juror_3 slashed (rewards remain 80), ledger has juror_slash
+        j3_user, j3_prof = jurors[3]
+        j3_prof.refresh_from_db()
+        self.assertEqual(j3_prof.rewards, 80)
+        self.assertTrue(RewardLedger.objects.filter(user=j3_user, transaction_type='juror_slash').exists())
+
+        # Majority jurors (0, 1, 2) get 20 (stake) + floor(20 / 3) = 6 -> 26 pts returned (80 + 26 = 106)
+        for i in range(3):
+            ju, jp = jurors[i]
+            jp.refresh_from_db()
+            self.assertEqual(jp.rewards, 106)
+            self.assertTrue(RewardLedger.objects.filter(user=ju, transaction_type='juror_reward').exists())
+
+        # Check all transaction types logged
+        self.assertTrue(RewardLedger.objects.filter(transaction_type='dispute_counter_deposit').exists())
+        self.assertTrue(RewardLedger.objects.filter(transaction_type='juror_stake').exists())
+        self.assertTrue(RewardLedger.objects.filter(transaction_type='juror_reward').exists())
+        self.assertTrue(RewardLedger.objects.filter(transaction_type='juror_slash').exists())
+
+    def test_juror_voting_cap_at_11(self):
+        self.client.login(username='taker2', password='password123')
+        self.client.post(reverse('raise_dispute', args=[self.task.id]), {'reason': 'Dispute reason'})
+        dispute = Dispute.objects.get(task=self.task)
+
+        self.client.login(username='poster2', password='password123')
+        self.client.post(reverse('post_counter_deposit', args=[dispute.id]))
+
+        # Create 12 jurors
+        for i in range(12):
+            u = User.objects.create_user(username=f'cap_juror_{i}', password='password123')
+            UserProfile.objects.create(user=u, rewards=100)
+
+        for i in range(11):
+            self.client.login(username=f'cap_juror_{i}', password='password123')
+            self.client.post(reverse('vote_dispute', args=[dispute.id]), {'choice': 'poster'})
+
+        # 12th juror attempt
+        j12 = User.objects.get(username='cap_juror_11')
+        self.assertFalse(dispute.can_vote(j12))
+
+
