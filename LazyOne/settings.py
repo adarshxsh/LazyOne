@@ -26,12 +26,25 @@ load_dotenv(BASE_DIR / '.env')
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-9755rcl^sg+)6z4%8n(4h7oq%$o+36mu35iv)*bgw+5su#a3z1')
-
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = ['127.0.0.1', 'vercel.app']
+# No hardcoded fallback: this repo is public, so a committed key is a known key.
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
+if not SECRET_KEY:
+    if DEBUG:
+        from django.core.management.utils import get_random_secret_key
+        SECRET_KEY = get_random_secret_key()  # dev only; sessions reset on restart
+    else:
+        from django.core.exceptions import ImproperlyConfigured
+        raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set when DEBUG is off.")
+
+def _env_list(name, default):
+    value = os.getenv(name)
+    return [v.strip() for v in value.split(',') if v.strip()] if value else default
+
+ALLOWED_HOSTS = _env_list('ALLOWED_HOSTS', ['127.0.0.1', 'localhost', '.vercel.app', '.ngrok-free.dev'])
+CSRF_TRUSTED_ORIGINS = _env_list('CSRF_TRUSTED_ORIGINS', ['https://*.ngrok-free.dev', 'https://*.vercel.app'])
 
 # Application definition
 
@@ -68,37 +81,6 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'LazyOne.urls'
 
-# Security Settings for Vercel
-if os.getenv('VERCEL') == '1':
-    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-    SECURE_SSL_REDIRECT = False # Vercel handles this
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
-
-# Allauth Settings
-SITE_ID = 1
-LOGIN_REDIRECT_URL = 'home'
-ACCOUNT_EMAIL_VERIFICATION = 'none' # Or 'mandatory' if you want to verify emails
-ACCOUNT_AUTHENTICATION_METHOD = 'email'
-ACCOUNT_EMAIL_REQUIRED = True
-ACCOUNT_USERNAME_REQUIRED = False
-SOCIALACCOUNT_PROVIDERS = {
-    'google': {
-        'APP': {
-            'client_id': os.getenv('GOOGLE_CLIENT_ID', ''),
-            'secret': os.getenv('GOOGLE_CLIENT_SECRET', ''),
-            'key': ''
-        },
-        'SCOPE': [
-            'profile',
-            'email',
-        ],
-        'AUTH_PARAMS': {
-            'access_type': 'online',
-        }
-    }
-}
-
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -125,11 +107,15 @@ WSGI_APPLICATION = 'LazyOne.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+# Set DATABASE_URL (e.g. postgres://user:pass@host:5432/db) in production.
+# SQLite is only for local development: serverless filesystems (Vercel) are ephemeral.
+import dj_database_url
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    'default': dj_database_url.config(
+        default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
+        conn_max_age=int(os.getenv('DB_CONN_MAX_AGE', '60')),
+        conn_health_checks=True,
+    )
 }
 
 

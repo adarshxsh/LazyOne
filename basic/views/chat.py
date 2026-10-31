@@ -83,12 +83,16 @@ def send_message(request, public_id):
                     )
             return JsonResponse({'status': 'success'})
     except Exception:
-        pass
+        logger.exception("send_message failed for conversation %s", public_id)
+        return JsonResponse({'status': 'error'}, status=500)
     return JsonResponse({'status': 'error'}, status=400)
 
 @login_required(login_url='/login/')
 def start_chat(request, user_id):
     other_user = get_object_or_404(User, id=user_id)
+    if other_user == request.user:
+        messages.error(request, "You cannot start a chat with yourself.")
+        return redirect('home')
     conversation = Conversation.objects.filter(
         participants=request.user
     ).filter(
@@ -101,4 +105,4 @@ def start_chat(request, user_id):
         conversation = Conversation.objects.create()
         conversation.participants.add(request.user, other_user)
 
-    return redirect('chat_view', conversation_id=conversation.id)
+    return redirect('chat_view', public_id=conversation.public_id)

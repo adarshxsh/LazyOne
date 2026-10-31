@@ -1,0 +1,38 @@
+name: tests
+
+on:
+  push:
+    branches: [master, deployment]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: lazyone
+          POSTGRES_PASSWORD: lazyone
+          POSTGRES_DB: lazyone
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U lazyone"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DJANGO_SECRET_KEY: ci-only-not-secret
+      DATABASE_URL: postgres://lazyone:lazyone@localhost:5432/lazyone
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Migrations are up to date
+        run: python manage.py makemigrations --check --dry-run
+      - name: Tests
+        run: python manage.py test basic -v 2

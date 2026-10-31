@@ -24,32 +24,35 @@ class DisputeService:
         Forcefully resolves a dispute, transferring rewards to the winner.
         Currently meant to be called by admins/moderators, or future voting mechanism.
         """
-        task = dispute.task
-        if dispute.status != Dispute.Status.OPEN:
-            raise ValueError("Can only resolve an open dispute.")
-
         with transaction.atomic():
-            if winner == task.taken_by:
+            dispute = Dispute.objects.select_for_update().get(pk=dispute.pk)
+            task = Task.objects.select_for_update().get(pk=dispute.task_id)
+            if dispute.status != Dispute.Status.OPEN or task.status != Task.Status.DISPUTED:
+                raise ValueError("Can only resolve an open dispute on a disputed task.")
+            if winner.id not in (task.posted_by_id, task.taken_by_id):
+                raise ValueError("Winner must be the task creator or the assignee.")
+
+            if winner.id == task.taken_by_id:
                 # Assignee wins, gets the reward
-                UserProfile.objects.filter(pk=task.taken_by.userprofile.pk).update(rewards=F('rewards') + task.reward)
+                UserProfile.objects.filter(user_id=task.taken_by_id).update(rewards=F('rewards') + task.reward)
                 RewardLedger.objects.create(
-                    user=task.taken_by, task=task, amount=task.reward,
+                    user_id=task.taken_by_id, task=task, amount=task.reward,
                     transaction_type='task_completion', description=f"Won dispute for task: '{task.title}'"
                 )
                 task.status = Task.Status.COMPLETED
-            elif winner == task.posted_by:
-                # Creator wins, gets refund
-                UserProfile.objects.filter(pk=task.posted_by.userprofile.pk).update(rewards=F('rewards') + task.reward)
+            else:
+                # Creator wins, gets refund; the task ends.
+                UserProfile.objects.filter(user_id=task.posted_by_id).update(rewards=F('rewards') + task.reward)
                 RewardLedger.objects.create(
-                    user=task.posted_by, task=task, amount=task.reward,
+                    user_id=task.posted_by_id, task=task, amount=task.reward,
                     transaction_type='task_cancellation', description=f"Won dispute refund for task: '{task.title}'"
                 )
-                task.status = Task.Status.AVAILABLE # Or CANCELLED, depending on business logic, we'll set to CANCELLED for simplicity
                 task.status = Task.Status.CANCELLED
-            
+
             task.save()
             dispute.status = Dispute.Status.RESOLVED
             dispute.save()
+        return dispute
 
     @staticmethod
     def can_vote(user, dispute):

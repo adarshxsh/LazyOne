@@ -1,5 +1,4 @@
 import firebase_admin
-from firebase_admin import credentials
 from firebase_admin import firestore
 import os
 import secrets
@@ -10,17 +9,9 @@ import logging
 logger = logging.getLogger(__name__)
 from django.utils import timezone
 
-# Initialize Firebase Admin SDK if not already initialized
-if not firebase_admin._apps:
-    cred_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../serviceAccountKey.json')
-    try:
-        cred = credentials.Certificate(cred_path)
-        firebase_admin.initialize_app(cred)
-        print("Firebase Admin SDK initialized successfully.")
-    except Exception as e:
-        print(f"Error initializing Firebase Admin SDK: {e}")
-
-db = firestore.client() if firebase_admin._apps else None
+def get_firestore():
+    """Firestore client if Firebase Admin was initialised (see settings.py), else None."""
+    return firestore.client() if firebase_admin._apps else None
 
 
 def generate_public_id():
@@ -97,6 +88,7 @@ class RewardLedger(models.Model):
 
 
 def sync_dispute_to_firestore(dispute_id):
+    db = get_firestore()
     if not db:
         return
     try:

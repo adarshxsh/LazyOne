@@ -77,3 +77,6 @@ urllib3==2.5.0
 zope.interface==8.0.1
 
 django-allauth>=0.63.0
+dj-database-url==2.1.0
+psycopg2-binary==2.9.9
+whitenoise==6.7.0
