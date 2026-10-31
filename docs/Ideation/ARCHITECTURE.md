@@ -1,3 +1,5 @@
+> ⚠️ **Superseded.** This describes the original plan (Channels + Redis), which the code no longer follows. See [ARCHITECTURE_V2.md](ARCHITECTURE_V2.md) for the current proposal.
+
 # System Architecture
 
 ## Architecture Overview
