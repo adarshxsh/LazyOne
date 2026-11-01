@@ -210,6 +210,7 @@ if not DEBUG:
 
 # Allauth Settings
 SITE_ID = 1
+LOGIN_URL = 'account_login'
 LOGIN_REDIRECT_URL = 'home'
 ACCOUNT_EMAIL_VERIFICATION = 'mandatory'
 ACCOUNT_LOGIN_METHODS = {'email'}

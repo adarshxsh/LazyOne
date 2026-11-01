@@ -35,9 +35,12 @@ from .views import (
     realtime_token,
 )
 from .views.internal import cron, healthz
+from django.views.generic import RedirectView
 
 urlpatterns = [
     path('', home, name='home'),
+    # Views use login_url='/login/'; the real page is allauth's.
+    path('login/', RedirectView.as_view(pattern_name='account_login', query_string=True), name='login'),
     path('logout/', logout_view, name='logout'),
     path('profile/', profile_view, name='profile'),
     path('user/<int:user_id>/', user_profile_view, name='user_profile'),
