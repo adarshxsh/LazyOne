@@ -34,7 +34,7 @@
 |------|---------------------|---------|
 | Postgres | Neon or Supabase, **pooled** connection string | `DATABASE_URL`, `DB_CONN_MAX_AGE=0` |
 | Shared cache | Upstash Redis | `REDIS_URL` |
-| Email | Brevo / Resend / Gmail app password (SMTP) | `EMAIL_HOST`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `DEFAULT_FROM_EMAIL` |
+| Email (optional) | Brevo / Resend / Gmail app password (SMTP). **Not needed to launch:** sign-up is Google-only until `EMAIL_HOST` is set, then email + password sign-up turns on | `EMAIL_HOST`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `DEFAULT_FROM_EMAIL` |
 | Frequent jobs | cron-job.org (every 1–5 min) → `GET https://<app>/internal/cron/` with header `Authorization: Bearer <CRON_SECRET>` | `CRON_SECRET` |
 
 Vercel Hobby cron runs **once a day** only; `vercel.json` registers a daily backstop, and the external cron does the real work (expiry, 48 h auto-approve, jury deadlines, wave alerts, outbox retries).

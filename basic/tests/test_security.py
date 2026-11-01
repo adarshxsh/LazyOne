@@ -94,3 +94,28 @@ class WebRateLimitTests(TestCase):
         codes = [self.client.post(reverse('send_friend_request', args=[t.pk]), {'closeness': 50}).status_code for t in targets]
         from ..models import FriendRequest
         self.assertEqual(FriendRequest.objects.filter(from_user=me).count(), 30)
+
+
+class SignInPolicyTests(TestCase):
+    def test_google_is_primary_on_login(self):
+        html = self.client.get(reverse('account_login')).content.decode()
+        self.assertLess(html.index('google-signin-button'), html.index('name="password"'))
+
+    @override_settings(EMAIL_SIGNUP_ENABLED=False)
+    def test_email_signup_closed_without_mail_server(self):
+        r = self.client.get(reverse('account_signup'))
+        self.assertTemplateUsed(r, 'account/signup_closed.html')
+        self.assertIn('google-signin-button', r.content.decode())
+        r = self.client.post(reverse('account_signup'), {'email': 'x@example.com', 'password1': 'Str0ng-pass-1', 'password2': 'Str0ng-pass-1'})
+        self.assertFalse(User.objects.filter(email='x@example.com').exists())
+        self.assertNotIn('sign up with email', self.client.get(reverse('account_login')).content.decode())
+
+    @override_settings(EMAIL_SIGNUP_ENABLED=True)
+    def test_email_signup_open_with_mail_server(self):
+        r = self.client.get(reverse('account_signup'))
+        self.assertTemplateUsed(r, 'account/signup.html')
+
+    def test_google_signup_allowed_even_when_email_signup_closed(self):
+        from basic.adapters import SocialAccountAdapter
+        with self.settings(EMAIL_SIGNUP_ENABLED=False):
+            self.assertTrue(SocialAccountAdapter().is_open_for_signup(None, None))

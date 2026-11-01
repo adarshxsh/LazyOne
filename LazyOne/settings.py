@@ -97,6 +97,7 @@ TEMPLATES = [
                 'django.contrib.messages.context_processors.messages',
                 'basic.context_processors.firebase_keys', # Custom context processor
                 'basic.context_processors.unread_notifications_count', # Custom context processor
+                'basic.context_processors.auth_options',
             ],
         },
     },
@@ -235,9 +236,17 @@ if not DEBUG:
 SITE_ID = 1
 LOGIN_URL = 'account_login'
 LOGIN_REDIRECT_URL = 'home'
-ACCOUNT_EMAIL_VERIFICATION = 'mandatory'
+ACCOUNT_EMAIL_VERIFICATION = 'mandatory'   # for email + password accounts
 ACCOUNT_LOGIN_METHODS = {'email'}
 ACCOUNT_SIGNUP_FIELDS = ['email*', 'password1*', 'password2*']
+ACCOUNT_ADAPTER = 'basic.adapters.AccountAdapter'
+SOCIALACCOUNT_ADAPTER = 'basic.adapters.SocialAccountAdapter'
+# Google is the main sign-in. Its emails are verified by Google, so no confirmation email,
+# no extra sign-up form, and an existing account with the same email is connected.
+SOCIALACCOUNT_EMAIL_VERIFICATION = 'none'
+SOCIALACCOUNT_AUTO_SIGNUP = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
 
 # Email: real SMTP when EMAIL_HOST is set (e.g. Gmail app password, Brevo, Resend, SES);
 # otherwise emails (verification links) are printed to the console.
@@ -249,6 +258,9 @@ EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'LazyOne <no-reply@localhost>')
+# Email + password sign-up needs working email (verification links). Default: on when SMTP
+# is configured or in local development (links print to the console); otherwise Google only.
+EMAIL_SIGNUP_ENABLED = os.getenv('EMAIL_SIGNUP_ENABLED', str(bool(EMAIL_HOST) or DEBUG)) == 'True'
 
 # Admin lives at a non-default path in production (set ADMIN_URL, e.g. 'manage-7f3k/').
 ADMIN_URL = os.getenv('ADMIN_URL', 'admin/')
@@ -268,7 +280,8 @@ SOCIALACCOUNT_PROVIDERS = {
         ],
         'AUTH_PARAMS': {
             'access_type': 'online',
-        }
+        },
+        'VERIFIED_EMAIL': True,  # Google only returns verified addresses
     }
 }
 

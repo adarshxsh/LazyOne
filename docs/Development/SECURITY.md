@@ -43,6 +43,7 @@
 | Production could silently run on SQLite | Startup fails without `DATABASE_URL` when `DEBUG` is off |
 | Default `/admin/` path, missing headers | `ADMIN_URL`, `X-Frame-Options: DENY`, `Referrer-Policy`, HSTS via env, https OAuth redirects; `check --deploy` clean |
 | Firebase key had to be a file | `FIREBASE_SERVICE_ACCOUNT_JSON` env var; `.vercelignore` blocks `.env`, key files and databases from uploads |
+| Email sign-up without a working mail server would strand users | Google is the primary sign-in (Google-verified email, no confirmation mail); email + password sign-up only when SMTP is configured (`basic/adapters.py`) |
 | Dead `basic/views.py` (old copy of the leak), `test_env.py` | Deleted |
 
 ## Rules for contributors

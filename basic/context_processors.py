@@ -21,3 +21,8 @@ def unread_notifications_count(request):
         count = request.user.notifications.filter(is_read=False).count()
         return {'unread_notifications_count': count}
     return {'unread_notifications_count': 0}
+
+
+def auth_options(request):
+    """Whether email + password sign-up is offered (Google is always offered)."""
+    return {'email_signup_enabled': settings.EMAIL_SIGNUP_ENABLED}
