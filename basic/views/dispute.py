@@ -15,7 +15,6 @@ def dispute_detail_view(request, dispute_id):
     if request.user != task.posted_by and request.user != task.taken_by and not request.user.is_staff:
         messages.error(request, "You are not authorized to view this dispute.")
         return redirect('home')
-
     evidence_items = dispute.evidence_items.all().order_by('created_at')
     file_attachments_count = dispute.evidence_items.filter(file__isnull=False).exclude(file='').count()
     is_expired = dispute.expires_at and timezone.now() >= dispute.expires_at

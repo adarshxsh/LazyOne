@@ -3,7 +3,9 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, Task, Dispute, RewardLedger, Conversation
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
+from .models import UserProfile, Task, Dispute, DisputeEvidence, RewardLedger, Conversation, Notification
 
 
 class DisputeDepositBondTests(TestCase):
@@ -181,16 +183,6 @@ class DisputeDepositBondTests(TestCase):
         # Check forfeit ledger
         forfeit_ledger = RewardLedger.objects.filter(user=self.taker, transaction_type='dispute_forfeit').first()
         self.assertIsNotNone(forfeit_ledger)
-
-
-from datetime import timedelta
-from django.test import TestCase, Client
-from django.contrib.auth.models import User
-from django.utils import timezone
-from django.core.files.uploadedfile import SimpleUploadedFile
-from django.core.management import call_command
-from django.urls import reverse
-from basic.models import UserProfile, Task, Dispute, DisputeEvidence, RewardLedger, Notification
 
 
 class DisputeEvidenceAndExpirationTests(TestCase):
