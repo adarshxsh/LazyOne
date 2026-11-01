@@ -21,6 +21,7 @@ def rewards_view(request):
     context = {
         'all_transactions': all_transactions,
         'rewards_earned': rewards_earned,
+        'total_earned': rewards_earned.aggregate(total=Sum('amount'))['total'] or 0,
         'rewards_given': rewards_given,
         'pending_points': pending_points,
         'current_balance': user.userprofile.rewards

@@ -3,72 +3,77 @@
 {% block title %}Your Friends{% endblock %}
 
 {% block content %}
-<div class="space-y-12">
-    <!-- Your Friends Section -->
+<div class="space-y-10">
     <div>
-        <h2 class="text-2xl font-bold text-white mb-4">Your Friends</h2>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+        <h1 class="page-title">Friends</h1>
+        <p class="mt-1 text-ink-muted">Closeness decides how early your friends see the tasks you post.</p>
+    </div>
+
+    {% if friend_requests %}
+    <section aria-labelledby="requests-heading">
+        <h2 id="requests-heading" class="section-title mb-3">Requests <span class="ml-1 text-ink-subtle">{{ friend_requests|length }}</span></h2>
+        <ul class="card divide-y divide-line">
+            {% for request in friend_requests %}
+                <li class="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+                    <div class="flex min-w-0 items-center gap-3">
+                        <span class="avatar h-9 w-9 text-xs" aria-hidden="true">{{ request.from_user.username|slice:":2" }}</span>
+                        <p class="min-w-0 truncate text-sm text-ink-muted"><strong class="font-medium text-ink">{{ request.from_user.username }}</strong> wants to be friends</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <form action="{% url 'accept_friend_request' request.id %}" method="post">{% csrf_token %}<button type="submit" class="btn btn-primary">Accept</button></form>
+                        <form action="{% url 'decline_friend_request' request.id %}" method="post">{% csrf_token %}<button type="submit" class="btn btn-secondary">Decline</button></form>
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% endif %}
+
+    <section aria-labelledby="friends-heading">
+        <h2 id="friends-heading" class="section-title mb-3">Your friends <span class="ml-1 text-ink-subtle">{{ friendships|length }}</span></h2>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {% for friendship in friendships %}
-                <a href="{% url 'user_profile' friendship.to_user.user.id %}" class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4 text-center hover:bg-gray-700/50 hover:border-cyan-500/50 transition-colors duration-200">
-                    <p class="text-white font-semibold truncate">{{ friendship.to_user.user.username }}</p>
-                    <p class="text-xs text-gray-400 mt-1">Closeness: {{ friendship.closeness }}</p>
+                <a href="{% url 'user_profile' friendship.to_user.user.id %}" class="card flex items-center gap-3 p-4 transition-colors hover:border-ink-subtle/50">
+                    <span class="avatar h-10 w-10 text-sm" aria-hidden="true">{{ friendship.to_user.user.username|slice:":2" }}</span>
+                    <span class="min-w-0 flex-1">
+                        <span class="block truncate font-medium text-ink">{{ friendship.to_user.user.username }}</span>
+                        <span class="mt-1.5 flex items-center gap-2" title="Closeness {{ friendship.closeness }} / 100">
+                            <span class="h-1.5 flex-1 overflow-hidden rounded-full bg-raised"><span class="block h-full rounded-full bg-accent/70" style="width: {{ friendship.closeness }}%"></span></span>
+                            <span class="text-xs tabular-nums text-ink-subtle">{{ friendship.closeness }}</span>
+                        </span>
+                    </span>
                 </a>
             {% empty %}
-                <div class="col-span-full bg-gray-800/50 border border-gray-700/50 rounded-xl p-8 text-center">
-                    <p class="text-gray-400">You haven't added any friends yet.</p>
-                </div>
+                <div class="empty col-span-full">You haven't added any friends yet. Find people below.</div>
             {% endfor %}
         </div>
-    </div>
+    </section>
 
-    <!-- Friend Requests Section -->
-    <div>
-        <h2 class="text-2xl font-bold text-white mb-4">Friend Requests</h2>
-        <div class="space-y-3">
-            {% for request in friend_requests %}
-                <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4 flex items-center justify-between">
-                    <p class="text-gray-300"><strong class="text-white">{{ request.from_user.username }}</strong> wants to be your friend.</p>
-                    <div class="flex items-center space-x-3">
-                        <form action="{% url 'accept_friend_request' request.id %}" method="post" class="inline">{% csrf_token %}<button type="submit" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors text-sm">Accept</button></form>
-                        <form action="{% url 'decline_friend_request' request.id %}" method="post" class="inline">{% csrf_token %}<button type="submit" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white font-semibold rounded-lg transition-colors text-sm">Decline</button></form>
-                    </div>
-                </div>
-            {% empty %}
-                <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-8 text-center">
-                    <p class="text-gray-400">You have no new friend requests.</p>
-                </div>
-            {% endfor %}
-        </div>
-    </div>
-
-    <!-- Find New Friends Section -->
-    <div>
-        <h2 class="text-2xl font-bold text-white mb-4">Find New Friends</h2>
-        <div class="space-y-3">
+    <section aria-labelledby="find-heading">
+        <h2 id="find-heading" class="section-title mb-3">Find people</h2>
+        <ul class="card divide-y divide-line">
             {% for profile in other_users %}
-                <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4 flex items-center justify-between">
-                    <div>
-                        <p class="text-white font-semibold">{{ profile.user.first_name }} {{ profile.user.last_name }}</p>
-                        <p class="text-sm text-gray-400">{{ profile.user.username|cut:"@gmail.com" }}</p>
-                    </div>
-                    <form action="{% url 'send_friend_request' profile.user.id %}" method="post" class="flex items-center space-x-4">
-                        {% csrf_token %}
-                        <div class="flex items-center space-x-2">
-                            <label for="closeness-{{ profile.user.id }}" class="text-sm text-gray-400">Closeness:</label>
-                            <input type="range" id="closeness-{{ profile.user.id }}" name="closeness" min="0" max="100" value="50" class="w-24 accent-cyan-500">
+                <li class="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div class="flex min-w-0 items-center gap-3">
+                        <span class="avatar h-9 w-9 text-xs" aria-hidden="true">{{ profile.user.username|slice:":2" }}</span>
+                        <div class="min-w-0">
+                            <p class="truncate font-medium text-ink">{{ profile.user.first_name }} {{ profile.user.last_name }}{% if not profile.user.first_name and not profile.user.last_name %}{{ profile.user.username|cut:"@gmail.com" }}{% endif %}</p>
+                            <p class="truncate text-sm text-ink-subtle">{{ profile.user.username|cut:"@gmail.com" }}</p>
                         </div>
-                        <button type="submit" class="px-5 py-2 bg-cyan-500 hover:bg-cyan-600 text-white font-bold rounded-lg transition-colors text-sm whitespace-nowrap">
-                            Add Friend
-                        </button>
+                    </div>
+                    <form action="{% url 'send_friend_request' profile.user.id %}" method="post" class="flex items-center gap-3">
+                        {% csrf_token %}
+                        <label for="closeness-{{ profile.user.id }}" class="text-sm text-ink-subtle">Closeness</label>
+                        <input type="range" id="closeness-{{ profile.user.id }}" name="closeness" min="0" max="100" value="50" class="w-28"
+                               oninput="this.nextElementSibling.textContent = this.value">
+                        <output class="w-7 text-right text-sm tabular-nums text-ink-muted">50</output>
+                        <button type="submit" class="btn btn-secondary">Add friend</button>
                     </form>
-                </div>
+                </li>
             {% empty %}
-                <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-8 text-center">
-                    <p class="text-gray-400">No new users to add as friends right now.</p>
-                </div>
+                <li class="px-5 py-10 text-center text-sm text-ink-subtle">No new people to add right now.</li>
             {% endfor %}
-        </div>
-    </div>
+        </ul>
+    </section>
 </div>
-
 {% endblock %}

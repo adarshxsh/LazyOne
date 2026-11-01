@@ -3,150 +3,294 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
     <title>{% block title %}LazyOne{% endblock %}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/vanta@latest/dist/vanta.net.min.js"></script>
-    <style>
-        #vanta-bg {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: -1; /* Ensure it's in the background */
+
+    <script>
+        // Apply the saved theme before first paint so the page never flashes the wrong colours.
+        (function () {
+            try {
+                var t = localStorage.getItem('lazyone-theme');
+                if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+            } catch (e) {}
+        })();
+    </script>
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    <script>
+        // Semantic colour tokens. Every template uses these names (bg-surface, text-ink-muted, ...)
+        // instead of raw palette colours, so the whole app is re-themed from the CSS variables below.
+        const token = (name) => `rgb(var(--${name}) / <alpha-value>)`;
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        canvas: token('canvas'),
+                        surface: token('surface'),
+                        raised: token('raised'),
+                        line: token('line'),
+                        ink: { DEFAULT: token('ink'), muted: token('ink-muted'), subtle: token('ink-subtle') },
+                        accent: { DEFAULT: token('accent'), hover: token('accent-hover'), ink: token('accent-ink') },
+                        ok: token('ok'),
+                        bad: token('bad'),
+                        warn: token('warn'),
+                        prog: token('prog'),
+                    },
+                },
+            },
+        };
+    </script>
+    <style type="text/tailwindcss">
+        @layer base {
+            /* Light: warm paper, not stark white. */
+            :root {
+                color-scheme: light;
+                --canvas: 247 245 241;
+                --surface: 255 254 251;
+                --raised: 240 237 231;
+                --line: 226 221 212;
+                --ink: 38 35 31;
+                --ink-muted: 87 81 73;
+                --ink-subtle: 117 110 100;
+                --accent: 161 98 7;
+                --accent-hover: 133 77 14;
+                --accent-ink: 255 255 255;
+                --ok: 22 122 60;
+                --bad: 185 38 38;
+                --warn: 180 70 15;
+                --prog: 104 60 200;
+            }
+            /* Dark: warm charcoal, off-white text, low-saturation accents. */
+            @media (prefers-color-scheme: dark) {
+                :root:not([data-theme="light"]) {
+                    color-scheme: dark;
+                    --canvas: 23 22 20;
+                    --surface: 31 30 27;
+                    --raised: 42 40 37;
+                    --line: 56 53 49;
+                    --ink: 232 228 221;
+                    --ink-muted: 176 170 161;
+                    --ink-subtle: 145 139 130;
+                    --accent: 214 168 92;
+                    --accent-hover: 228 186 116;
+                    --accent-ink: 28 25 20;
+                    --ok: 134 186 144;
+                    --bad: 226 128 120;
+                    --warn: 222 150 92;
+                    --prog: 168 156 222;
+                }
+            }
+            :root[data-theme="dark"] {
+                color-scheme: dark;
+                --canvas: 23 22 20;
+                --surface: 31 30 27;
+                --raised: 42 40 37;
+                --line: 56 53 49;
+                --ink: 232 228 221;
+                --ink-muted: 176 170 161;
+                --ink-subtle: 145 139 130;
+                --accent: 214 168 92;
+                --accent-hover: 228 186 116;
+                --accent-ink: 28 25 20;
+                --ok: 134 186 144;
+                --bad: 226 128 120;
+                --warn: 222 150 92;
+                --prog: 168 156 222;
+            }
+
+            html { -webkit-text-size-adjust: 100%; }
+            body { @apply bg-canvas text-ink antialiased; line-height: 1.6; }
+            ::selection { background: rgb(var(--accent) / 0.25); }
+            :focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; border-radius: 6px; }
+            input[type="range"] { accent-color: rgb(var(--accent)); }
+
+            @media (prefers-reduced-motion: reduce) {
+                *, *::before, *::after {
+                    animation-duration: 0.01ms !important;
+                    transition-duration: 0.01ms !important;
+                    scroll-behavior: auto !important;
+                }
+            }
         }
-        /* Styles for the auto-hiding navbar */
-        #main-navbar {
-            transition: transform 0.3s ease-in-out;
-        }
-        #main-navbar.navbar-hidden {
-            transform: translateY(-100%);
+
+        @layer components {
+            .card { @apply bg-surface border border-line rounded-xl; }
+            .page-title { @apply text-2xl sm:text-3xl font-semibold tracking-tight text-ink; }
+            .section-title { @apply text-base font-semibold text-ink; }
+            .eyebrow { @apply text-xs font-medium uppercase tracking-wider text-ink-subtle; }
+            .link { @apply text-accent font-medium underline-offset-2 hover:underline; }
+
+            .btn { @apply inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50; }
+            .btn-lg { @apply px-5 py-2.5 text-[15px]; }
+            .btn-primary { @apply bg-accent text-accent-ink hover:bg-accent-hover; }
+            .btn-secondary { @apply border border-line bg-raised text-ink hover:border-ink-subtle/60; }
+            .btn-ghost { @apply text-ink-muted hover:bg-raised hover:text-ink; }
+            .btn-danger { @apply border border-bad/35 bg-bad/10 text-bad hover:bg-bad/15; }
+            .icon-btn { @apply relative inline-flex h-9 w-9 items-center justify-center rounded-lg text-ink-muted transition-colors hover:bg-raised hover:text-ink; }
+
+            .label { @apply mb-1.5 block text-sm font-medium text-ink-muted; }
+            .hint { @apply mt-1.5 text-xs text-ink-subtle; }
+            .input { @apply w-full rounded-lg border border-line bg-canvas px-3.5 py-2.5 text-ink placeholder:text-ink-subtle transition-colors focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25; }
+
+            .nav-link { @apply rounded-lg px-3 py-2 text-sm font-medium text-ink-muted transition-colors hover:bg-raised hover:text-ink; }
+            .nav-link[aria-current="page"] { @apply bg-raised text-ink; }
+
+            /* Reward amount: the one place a card uses the accent colour. */
+            .points { @apply inline-flex shrink-0 items-baseline gap-1 rounded-lg bg-accent/10 px-2.5 py-1 font-semibold tabular-nums text-accent; }
+            .points small { @apply text-xs font-medium opacity-80; }
+
+            .badge { @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-medium; }
+            .badge::before { content: ""; @apply h-1.5 w-1.5 rounded-full bg-current; }
+            .status-available { @apply border-accent/30 bg-accent/10 text-accent; }
+            .status-in_progress, .status-submitted { @apply border-prog/30 bg-prog/10 text-prog; }
+            .status-completed, .status-resolved { @apply border-ok/30 bg-ok/10 text-ok; }
+            .status-disputed, .status-open, .status-escalated { @apply border-bad/30 bg-bad/10 text-bad; }
+            .status-cancelled, .status-withdrawn { @apply border-line bg-raised text-ink-subtle; }
+
+            .notice { @apply rounded-lg border px-3.5 py-2.5 text-sm; }
+            .notice-warn { @apply border-warn/30 bg-warn/10 text-warn; }
+            .notice-bad { @apply border-bad/30 bg-bad/10 text-bad; }
+
+            .alert { @apply flex items-start gap-3 rounded-lg border px-4 py-3 text-sm; }
+            .alert-success { @apply border-ok/30 bg-ok/10 text-ok; }
+            .alert-error { @apply border-bad/30 bg-bad/10 text-bad; }
+            .alert-warning { @apply border-warn/30 bg-warn/10 text-warn; }
+            .alert-info, .alert-debug { @apply border-line bg-surface text-ink-muted; }
+
+            .avatar { @apply inline-flex shrink-0 select-none items-center justify-center rounded-full bg-raised font-semibold uppercase text-ink-muted; }
+            .empty { @apply card px-6 py-10 text-center text-sm text-ink-subtle; }
         }
     </style>
+    {% block extra_head %}{% endblock %}
 </head>
-<body class="font-sans antialiased text-gray-200">
+<body class="min-h-screen">
+    <a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-3 focus:z-50 btn btn-primary">Skip to content</a>
 
-    <div id="vanta-bg"></div>
+    {% with url_name=request.resolver_match.url_name %}
+    <header class="sticky top-0 z-40 border-b border-line bg-canvas/90 backdrop-blur">
+        <div class="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4 sm:px-6">
+            <a href="{% url 'home' %}" class="flex items-center gap-2 text-lg font-semibold tracking-tight text-ink">
+                <span class="grid h-7 w-7 place-items-center rounded-lg bg-accent text-sm font-bold text-accent-ink" aria-hidden="true">L</span>
+                LazyOne
+            </a>
 
-    <nav id="main-navbar" class="bg-gray-800/70 backdrop-blur-lg border-b border-gray-700/50 sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between items-center h-16">
-                <div class="flex-shrink-0">
-                    <a href="{% url 'home' %}" class="text-2xl font-bold text-white tracking-wider">LazyOne</a>
-                </div>
-                <div class="hidden md:flex md:items-center md:space-x-2">
-                    <a href="{% url 'home' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'home' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Home</a>
-                    {% if user.is_authenticated %}
-                        <a href="{% url 'my_tasks' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'my_tasks' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">My Tasks</a>
-                        <a href="{% url 'rewards' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'rewards' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">My Rewards</a>
-                        <a href="{% url 'add_task' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'add_task' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Add Task</a>
-                        <a href="{% url 'friends' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'friends' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Friends</a>
-                        <a href="{% url 'notifications' %}" class="flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'notifications' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">
-                            <span>Notifications</span>
-                            {% if unread_notifications_count > 0 %}
-                                <span class="ml-2 h-2.5 w-2.5 rounded-full bg-red-500"></span>
-                            {% endif %}
-                        </a>
-                        <a href="{% url 'profile' %}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'profile' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Profile</a>
-                        <a href="{% url 'logout' %}" class="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 ml-4">Logout</a>
-                    {% else %}
-                        <a href="{% url 'account_login' %}" class="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors duration-200 ml-4">Login</a>
-                    {% endif %}
-                </div>
-                <div class="md:hidden flex items-center">
-                    <button id="mobile-menu-button" class="inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-white hover:bg-gray-700 focus:outline-none">
-                        <svg class="h-6 w-6" stroke="currentColor" fill="none" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7" />
-                        </svg>
-                    </button>
-                </div>
-            </div>
-        </div>
-        <div id="mobile-menu" class="md:hidden hidden">
-            <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
-                <a href="{% url 'home' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'home' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Home</a>
+            <nav class="ml-4 hidden items-center gap-1 lg:flex" aria-label="Main">
+                <a href="{% url 'home' %}" class="nav-link" {% if url_name == 'home' %}aria-current="page"{% endif %}>Home</a>
                 {% if user.is_authenticated %}
-                    <a href="{% url 'my_tasks' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'my_tasks' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">My Tasks</a>
-                    <a href="{% url 'rewards' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'rewards' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">My Rewards</a>
-                    <a href="{% url 'add_task' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'add_task' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Add Task</a>
-                    <a href="{% url 'friends' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'friends' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Friends</a>
-                    <a href="{% url 'notifications' %}" class="flex items-center block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'notifications' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">
-                        <span>Notifications</span>
-                        {% if unread_notifications_count > 0 %}
-                            <span class="ml-2 h-2.5 w-2.5 rounded-full bg-red-500"></span>
+                    <a href="{% url 'my_tasks' %}" class="nav-link" {% if url_name == 'my_tasks' %}aria-current="page"{% endif %}>My tasks</a>
+                    <a href="{% url 'rewards' %}" class="nav-link" {% if url_name == 'rewards' %}aria-current="page"{% endif %}>Rewards</a>
+                    <a href="{% url 'friends' %}" class="nav-link" {% if url_name == 'friends' %}aria-current="page"{% endif %}>Friends</a>
+                    <a href="{% url 'profile' %}" class="nav-link" {% if url_name == 'profile' %}aria-current="page"{% endif %}>Profile</a>
+                {% endif %}
+            </nav>
+
+            <div class="ml-auto flex items-center gap-1.5">
+                {% if user.is_authenticated %}
+                    {% if user.userprofile %}
+                        <a href="{% url 'rewards' %}" class="points mr-1 hidden sm:inline-flex" title="Your reward points">
+                            {{ user.userprofile.rewards }}<small>pts</small>
+                        </a>
+                    {% endif %}
+                    <a href="{% url 'notifications' %}" class="icon-btn {% if url_name == 'notifications' %}bg-raised text-ink{% endif %}"
+                       aria-label="Notifications{% if unread_notifications_count %}, {{ unread_notifications_count }} unread{% endif %}" title="Notifications">
+                        <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"/></svg>
+                        {% if unread_notifications_count %}
+                            <span class="absolute -right-0.5 -top-0.5 min-w-[1.1rem] rounded-full bg-accent px-1 text-center text-[10px] font-semibold leading-[1.1rem] text-accent-ink">{{ unread_notifications_count }}</span>
                         {% endif %}
                     </a>
-                    <a href="{% url 'profile' %}" class="block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 {% if request.resolver_match.url_name == 'profile' %}text-cyan-400 bg-gray-700/50{% else %}text-gray-300 hover:bg-gray-700/50 hover:text-white{% endif %}">Profile</a>
-                    <a href="{% url 'logout' %}" class="block px-3 py-2 rounded-md text-base font-medium text-gray-300 hover:bg-gray-700/50 hover:text-white">Logout</a>
-                {% else %}
-                    <a href="{% url 'account_login' %}" class="block px-3 py-2 rounded-md text-base font-medium text-gray-300 hover:bg-gray-700/50 hover:text-white">Login</a>
                 {% endif %}
+
+                <button type="button" id="theme-toggle" class="icon-btn" aria-label="Switch colour theme" title="Switch light / dark">
+                    <svg id="theme-icon-moon" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z"/></svg>
+                    <svg id="theme-icon-sun" class="hidden h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z"/></svg>
+                </button>
+
+                {% if user.is_authenticated %}
+                    <a href="{% url 'add_task' %}" class="btn btn-primary ml-1 hidden sm:inline-flex">
+                        <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>
+                        New task
+                    </a>
+                    <a href="{% url 'logout' %}" class="btn btn-ghost hidden lg:inline-flex">Log out</a>
+                {% else %}
+                    <a href="{% url 'account_login' %}" class="btn btn-primary ml-1">Log in</a>
+                {% endif %}
+
+                <button type="button" id="mobile-menu-button" class="icon-btn lg:hidden" aria-expanded="false" aria-controls="mobile-menu" aria-label="Open menu">
+                    <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" d="M4 7h16M4 12h16M4 17h16"/></svg>
+                </button>
             </div>
         </div>
-    </nav>
 
-    <main class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {% if user.is_authenticated and user.userprofile %}
-            <div class="bg-gray-800/50 backdrop-blur-lg p-4 rounded-xl mb-8 text-center shadow-lg border border-gray-700/50">
-                <p class="text-lg text-gray-300">Your Reward Points: <strong class="text-cyan-400 font-semibold">{{ request.user.userprofile.rewards }}</strong> | Unread: {{ unread_notifications_count }}</p>
+        <nav id="mobile-menu" class="hidden border-t border-line lg:hidden" aria-label="Mobile">
+            <div class="mx-auto grid max-w-6xl gap-1 px-4 py-3 sm:px-6">
+                <a href="{% url 'home' %}" class="nav-link" {% if url_name == 'home' %}aria-current="page"{% endif %}>Home</a>
+                {% if user.is_authenticated %}
+                    <a href="{% url 'my_tasks' %}" class="nav-link" {% if url_name == 'my_tasks' %}aria-current="page"{% endif %}>My tasks</a>
+                    <a href="{% url 'add_task' %}" class="nav-link" {% if url_name == 'add_task' %}aria-current="page"{% endif %}>New task</a>
+                    <a href="{% url 'rewards' %}" class="nav-link flex justify-between" {% if url_name == 'rewards' %}aria-current="page"{% endif %}>
+                        Rewards {% if user.userprofile %}<span class="tabular-nums text-accent">{{ user.userprofile.rewards }} pts</span>{% endif %}
+                    </a>
+                    <a href="{% url 'friends' %}" class="nav-link" {% if url_name == 'friends' %}aria-current="page"{% endif %}>Friends</a>
+                    <a href="{% url 'profile' %}" class="nav-link" {% if url_name == 'profile' %}aria-current="page"{% endif %}>Profile</a>
+                    <a href="{% url 'logout' %}" class="nav-link">Log out</a>
+                {% else %}
+                    <a href="{% url 'account_login' %}" class="nav-link">Log in</a>
+                {% endif %}
             </div>
-        {% endif %}
-        
+        </nav>
+    </header>
+    {% endwith %}
+
+    <main id="main" class="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
         {% if messages %}
-            <div class="mb-6 space-y-3">
+            <div class="mb-6 space-y-2">
                 {% for message in messages %}
-                    <div class="p-4 rounded-lg font-medium text-sm {% if message.tags == 'success' %}bg-green-500/20 text-green-300 border border-green-500/30{% elif message.tags == 'error' %}bg-red-500/20 text-red-300 border border-red-500/30{% else %}bg-blue-500/20 text-blue-300 border border-blue-500/30{% endif %}" role="alert">
-                        {{ message }}
+                    <div class="alert alert-{{ message.level_tag|default:'info' }}" role="status">
+                        <p class="flex-1">{{ message }}</p>
+                        <button type="button" class="-m-1 rounded p-1 opacity-70 hover:opacity-100" data-dismiss aria-label="Dismiss">
+                            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/></svg>
+                        </button>
                     </div>
                 {% endfor %}
             </div>
         {% endif %}
-        
-        <div class="bg-gray-800/50 backdrop-blur-lg p-6 sm:p-8 rounded-2xl shadow-2xl border border-gray-700/50">
-            {% block content %}
-            {% endblock content %}
-        </div>
+
+        {% block content %}
+        {% endblock content %}
     </main>
 
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            // Mobile menu toggle
-            const mobileMenuButton = document.getElementById('mobile-menu-button');
-            const mobileMenu = document.getElementById('mobile-menu');
-            mobileMenuButton.addEventListener('click', () => mobileMenu.classList.toggle('hidden'));
-
-            // Vanta.js animation
-            VANTA.NET({
-                el: "#vanta-bg",
-                mouseControls: true,
-                touchControls: true,
-                gyroControls: false,
-                minHeight: 200.00,
-                minWidth: 200.00,
-                scale: 1.00,
-                scaleMobile: 1.00,
-                color: 0x2dd4bf,      /* cyan-400 */
-                backgroundColor: 0x1a202c, /* gray-900 */
-                points: 12.00,
-                maxDistance: 25.00,
-                spacing: 18.00
+        document.addEventListener('DOMContentLoaded', function () {
+            // Mobile menu
+            const menuButton = document.getElementById('mobile-menu-button');
+            const menu = document.getElementById('mobile-menu');
+            menuButton.addEventListener('click', () => {
+                const open = menu.classList.toggle('hidden') === false;
+                menuButton.setAttribute('aria-expanded', String(open));
             });
 
-            // Auto-hiding navbar logic
-            let lastScrollY = window.scrollY;
-            const navbar = document.getElementById('main-navbar');
-            window.addEventListener('scroll', () => {
-                if (lastScrollY < window.scrollY && window.scrollY > navbar.offsetHeight) {
-                    // Scrolling down, hide navbar
-                    navbar.classList.add('navbar-hidden');
-                } else {
-                    // Scrolling up, show navbar
-                    navbar.classList.remove('navbar-hidden');
-                }
-                lastScrollY = window.scrollY;
+            // Dismissible flash messages
+            document.querySelectorAll('[data-dismiss]').forEach((btn) => {
+                btn.addEventListener('click', () => btn.closest('.alert').remove());
             });
+
+            // Light / dark toggle. Follows the OS until the user picks one, then remembers it.
+            const root = document.documentElement;
+            const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
+            const isDark = () => root.getAttribute('data-theme') ? root.getAttribute('data-theme') === 'dark' : systemDark.matches;
+            const syncIcon = () => {
+                document.getElementById('theme-icon-sun').classList.toggle('hidden', !isDark());
+                document.getElementById('theme-icon-moon').classList.toggle('hidden', isDark());
+            };
+            document.getElementById('theme-toggle').addEventListener('click', () => {
+                const next = isDark() ? 'light' : 'dark';
+                root.setAttribute('data-theme', next);
+                try { localStorage.setItem('lazyone-theme', next); } catch (e) {}
+                syncIcon();
+            });
+            systemDark.addEventListener('change', syncIcon);
+            syncIcon();
         });
     </script>
+    {% block extra_js %}{% endblock %}
 </body>
 </html>

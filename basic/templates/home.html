@@ -4,212 +4,317 @@
 
 {% block content %}
 
-<!-- Disputed Tasks Section -->
-{% if disputed_tasks %}
-<div class="mb-12">
-    <div class="text-center mb-6">
-        <h2 class="text-3xl font-bold text-red-400">Your Jury Duty</h2>
-        <p class="text-gray-400 mt-2">You were randomly selected (with no close ties to either side) to decide these disputes. Review the evidence and chat, then vote.</p>
-    </div>
-    <div class="space-y-4">
-        {% for task in disputed_tasks %}
-            <div class="scroll-animate bg-red-900/30 border border-red-500/50 rounded-xl p-5 transition-all duration-300 hover:shadow-red-500/20 hover:shadow-lg">
-                <div class="flex justify-between items-start">
-                    <div>
-                        <h3 class="text-lg font-bold text-white">{{ task.title }}</h3>
-                        <p class="text-sm text-gray-300 mt-1">Posted by: {{ task.posted_by.username }} | Taken by: {{ task.taken_by.username }}</p>
-                        <p class="text-sm text-gray-400 mt-2">Reason for dispute: <em class="text-gray-300">"{{ task.dispute.reason }}"</em></p>
-                    </div>
-                    <div class="text-right flex-shrink-0 ml-4">
-                        <p class="text-xl font-semibold text-red-400">{{ task.reward }}</p>
-                        <p class="text-xs text-gray-500">Points</p>
-                    </div>
-                </div>
-                <div class="mt-4">
-                    <a href="{% url 'dispute_detail' task.dispute.public_id %}" class="inline-block bg-red-600 text-white font-semibold px-5 py-2 rounded-lg hover:bg-red-500 transition-colors">Review &amp; Vote</a>
-                    <a href="{% url 'chat_view' task.conversation.public_id %}" class="inline-block bg-gray-600 text-white font-semibold px-5 py-2 rounded-lg hover:bg-gray-500 transition-colors">View Chat</a>
-                </div>
-            </div>
-        {% endfor %}
-    </div>
-</div>
+{% if not request.user.is_authenticated %}
+    <section class="card mb-6 flex flex-col items-start gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
+        <div>
+            <h1 class="page-title">Welcome to LazyOne</h1>
+            <p class="mt-1 text-ink-muted">Post small tasks, help classmates out, and earn points along the way.</p>
+        </div>
+        <a href="{% url 'account_login' %}" class="btn btn-primary btn-lg">Log in to get started</a>
+    </section>
 {% endif %}
 
+{# On large screens: task feed on the left, sidebar on the right. On phones the circle comes first, then tasks, then the rest. #}
+<div class="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:grid-rows-[auto_1fr] xl:grid-cols-[minmax(0,1fr)_24rem]">
 
-<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-
-    <!-- Left Column -->
-    <div class="lg:col-span-2 space-y-8">
-        <!-- Social Circle Section -->
-        <div>
-            {% if request.user.is_authenticated %}
-                <h1 class="text-3xl font-bold text-white mb-4">Your Social Circle</h1>
-                <div id="friend-circle-container" class="relative w-full max-w-xl mx-auto aspect-square rounded-full bg-gray-800/50 border border-gray-700/50 shadow-2xl flex items-center justify-center">
-                    <!-- JS will inject nodes here -->
-                </div>
-            {% else %}
-                <div class="text-center p-8">
-                    <h1 class="text-3xl font-bold text-white">Welcome to LazyOne</h1>
-                    <p class="text-gray-400 mt-2">Please <a href="{% url 'account_login' %}" class="text-cyan-400 font-bold hover:underline">login</a> to see your social circle and interact with tasks.</p>
-                </div>
-            {% endif %}
+    {% if request.user.is_authenticated %}
+    <!-- Social circle -->
+    <section class="card p-5 lg:col-start-2 lg:row-start-1" aria-labelledby="circle-heading">
+        <div class="mb-3 flex items-center justify-between">
+            <h2 id="circle-heading" class="section-title">Your circle</h2>
+            <a href="{% url 'friends' %}" class="text-sm link">Manage</a>
         </div>
+        <div id="friend-circle-container" class="relative mx-auto aspect-square w-full max-w-[22rem]">
+            <!-- JS draws orbits and people here -->
+        </div>
+        <p class="mt-3 text-xs leading-relaxed text-ink-subtle">Closer friends sit nearer the centre. Faded circles are people you haven't added yet. Select anyone for options.</p>
+    </section>
+    {% endif %}
 
-        <!-- Recent Tasks Section -->
-        <div class="mt-8">
-            <h2 class="text-2xl font-bold text-white mb-4">Available Tasks</h2>
-            <form method="get" action="{% url 'home' %}" class="mb-6">
-                <input type="text" name="q" value="{{ search_query|default_if_none:'' }}" placeholder="Search for tasks..." class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
-            </form>
-
-            <div class="space-y-4">
-                {% for task in available_tasks %}
-                    <div class="scroll-animate bg-gray-800/50 border border-gray-700/50 rounded-xl p-5 transition-all duration-300 hover:shadow-cyan-500/20 hover:shadow-lg hover:border-cyan-500/50">
-                        <div class="flex justify-between items-start">
-                            <div>
-                                <h3 class="text-lg font-bold text-white">{{ task.title }}</h3>
-                                <p class="text-sm text-gray-400 mt-1">Posted by: {{ task.posted_by.username }}</p>
-                            </div>
-                            <div class="text-right flex-shrink-0 ml-4">
-                                <p class="text-xl font-semibold text-cyan-400">{{ task.reward }}</p>
-                                <p class="text-xs text-gray-500">Points</p>
-                            </div>
-                        </div>
-                        <p class="text-gray-300 mt-3">{{ task.description }}</p>
-                        <div class="mt-4">
-                            {% if request.user.is_authenticated %}
-                                <form action="{% url 'take_task' task.public_id %}" method="post" class="inline">{% csrf_token %}<button type="submit" class="inline-block bg-teal-500 text-white font-semibold px-5 py-2 rounded-lg hover:bg-teal-600 transition-colors">Take Task</button></form>
-                            {% else %}
-                                <a href="{% url 'account_login' %}" class="inline-block bg-gray-600 text-white font-semibold px-5 py-2 rounded-lg hover:bg-gray-500 transition-colors">Login to Take Task</a>
-                            {% endif %}
-                        </div>
-                    </div>
-                {% empty %}
-                    <div class="scroll-animate bg-gray-800/50 border border-gray-700/50 rounded-xl p-8 text-center">
-                        <p class="text-gray-400">No tasks available at the moment.</p>
-                    </div>
-                {% endfor %}
+    <!-- Available tasks -->
+    <section class="min-w-0 lg:col-start-1 lg:row-span-2 lg:row-start-1 {% if not request.user.is_authenticated and not disputed_tasks %}lg:col-span-2 lg:mx-auto lg:w-full lg:max-w-3xl{% endif %}" aria-labelledby="tasks-heading">
+        <div class="mb-4 flex flex-wrap items-end justify-between gap-3">
+            <div>
+                <h1 id="tasks-heading" class="page-title">Available tasks</h1>
+                {% if search_query %}
+                    <p class="mt-1 text-sm text-ink-muted">
+                        {{ available_tasks|length }} result{{ available_tasks|length|pluralize }} for “{{ search_query }}” ·
+                        <a href="{% url 'home' %}" class="link">Clear</a>
+                    </p>
+                {% endif %}
             </div>
         </div>
-    </div>
 
-    <!-- Right Column -->
-    <div class="lg:col-span-1 space-y-8">
+        <form method="get" action="{% url 'home' %}" class="relative mb-5" role="search">
+            <label for="task-search" class="sr-only">Search tasks</label>
+            <svg class="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-subtle" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="m20 20-3.5-3.5"/></svg>
+            <input id="task-search" type="search" name="q" value="{{ search_query|default_if_none:'' }}" placeholder="Search tasks by title or description" class="input pl-10">
+        </form>
+
+        <div class="space-y-3">
+            {% for task in available_tasks %}
+                <article class="card p-5">
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="min-w-0">
+                            <h3 class="font-semibold leading-snug text-ink">{{ task.title }}</h3>
+                            <p class="mt-1 text-sm text-ink-subtle">{{ task.posted_by.username }} · {{ task.created_at|timesince }} ago</p>
+                        </div>
+                        <span class="points">{{ task.reward }}<small>pts</small></span>
+                    </div>
+                    <p class="mt-3 break-words text-[15px] leading-relaxed text-ink-muted">{{ task.description|linebreaksbr }}</p>
+                    <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+                        <span class="text-xs text-ink-subtle">{% if task.deadline %}Due {{ task.deadline|date:"D, M j · g:i a" }}{% endif %}</span>
+                        {% if request.user.is_authenticated %}
+                            {% if task.posted_by_id != request.user.id %}
+                                <form action="{% url 'take_task' task.public_id %}" method="post">{% csrf_token %}<button type="submit" class="btn btn-primary">Take task</button></form>
+                            {% else %}
+                                <span class="text-xs text-ink-subtle">Posted by you</span>
+                            {% endif %}
+                        {% else %}
+                            <a href="{% url 'account_login' %}" class="btn btn-secondary">Log in to take this</a>
+                        {% endif %}
+                    </div>
+                </article>
+            {% empty %}
+                <div class="empty">
+                    {% if search_query %}No tasks match “{{ search_query }}”.{% else %}No open tasks right now. Check back soon{% if request.user.is_authenticated %}, or <a href="{% url 'add_task' %}" class="link">post one</a>{% endif %}.{% endif %}
+                </div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <!-- Sidebar: community review + recent chats -->
+    {% if disputed_tasks or request.user.is_authenticated %}
+    <div class="space-y-6 lg:col-start-2 {% if request.user.is_authenticated %}lg:row-start-2{% else %}lg:row-start-1{% endif %}">
+        {% if disputed_tasks %}
+        <section class="card" aria-labelledby="review-heading">
+            <div class="flex items-center justify-between border-b border-line px-5 py-3.5">
+                <h2 id="review-heading" class="section-title">Your jury duty</h2>
+                <span class="badge status-disputed">{{ disputed_tasks|length }} to decide</span>
+            </div>
+            <p class="px-5 pt-3 text-xs text-ink-subtle">You were randomly selected (with no close ties to either side) to decide these disputes. Review the evidence and chat, then vote.</p>
+            <ul class="divide-y divide-line">
+                {% for task in disputed_tasks %}
+                    <li class="px-5 py-4">
+                        <div class="flex items-start justify-between gap-3">
+                            <p class="min-w-0 font-medium leading-snug text-ink">{{ task.title }}</p>
+                            <span class="shrink-0 text-sm font-semibold tabular-nums text-ink-muted">{{ task.reward }} pts</span>
+                        </div>
+                        <p class="mt-1 truncate text-xs text-ink-subtle">{{ task.posted_by.username }} ↔ {{ task.taken_by.username }}</p>
+                        {% if task.dispute.reason %}<p class="mt-2 line-clamp-2 text-sm text-ink-muted">“{{ task.dispute.reason }}”</p>{% endif %}
+                        <div class="mt-3 flex flex-wrap gap-2">
+                            {% if task.dispute %}<a href="{% url 'dispute_detail' task.dispute.public_id %}" class="btn btn-primary">Review &amp; vote</a>{% endif %}
+                            {% if task.conversation %}<a href="{% url 'chat_view' task.conversation.public_id %}" class="btn btn-secondary">View chat</a>{% endif %}
+                        </div>
+                    </li>
+                {% endfor %}
+            </ul>
+        </section>
+        {% endif %}
+
         {% if request.user.is_authenticated %}
-            <div>
-                <h2 class="text-2xl font-bold text-white mb-4">Recent Chats</h2>
-                <div class="space-y-3">
-                    {% for conv in recent_conversations %}
-                        <a href="{% url 'chat_view' conv.public_id %}" class="scroll-animate block bg-gray-800/50 border border-gray-700/50 rounded-xl p-4 hover:bg-gray-700/50 transition-colors">
+        <section class="card" aria-labelledby="chats-heading">
+            <h2 id="chats-heading" class="section-title border-b border-line px-5 py-3.5">Recent chats</h2>
+            <ul class="divide-y divide-line">
+                {% for conv in recent_conversations %}
+                    <li>
+                        <a href="{% url 'chat_view' conv.public_id %}" class="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-raised">
                             {% if conv.task %}
-                                <p class="text-sm text-gray-400">Task Chat</p>
-                                <strong class="text-white">{{ conv.task.title }}</strong>
+                                <span class="avatar h-9 w-9 text-xs" aria-hidden="true">
+                                    <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+                                </span>
+                                <span class="min-w-0">
+                                    <span class="block text-xs text-ink-subtle">Task chat</span>
+                                    <span class="block truncate text-sm font-medium text-ink">{{ conv.task.title }}</span>
+                                </span>
                             {% else %}
                                 {% for participant in conv.participants.all %}
                                     {% if participant.id != request.user.id %}
-                                        <p class="text-sm text-gray-400">Direct Chat</p>
-                                        <strong class="text-white">{{ participant.username }}</strong>
+                                        <span class="avatar h-9 w-9 text-xs" aria-hidden="true">{{ participant.username|slice:":2" }}</span>
+                                        <span class="min-w-0">
+                                            <span class="block text-xs text-ink-subtle">Direct message</span>
+                                            <span class="block truncate text-sm font-medium text-ink">{{ participant.username }}</span>
+                                        </span>
                                     {% endif %}
                                 {% endfor %}
                             {% endif %}
                         </a>
-                    {% empty %}
-                        <div class="scroll-animate bg-gray-800/50 border border-gray-700/50 rounded-xl p-8 text-center">
-                            <p class="text-gray-400">No recent conversations.</p>
-                        </div>
-                    {% endfor %}
-                </div>
-            </div>
+                    </li>
+                {% empty %}
+                    <li class="px-5 py-8 text-center text-sm text-ink-subtle">No conversations yet.</li>
+                {% endfor %}
+            </ul>
+        </section>
         {% endif %}
     </div>
-
+    {% endif %}
 </div>
 
-<!-- Context Menu (hidden by default) -->
-<div id="context-menu" class="context-menu fixed hidden bg-gray-800/90 backdrop-blur-md border border-gray-700 rounded-lg shadow-2xl py-2 z-50">
-    <!-- JS will inject links here -->
-</div>
+{% if request.user.is_authenticated %}
+<!-- Person menu (shown when a circle node is selected) -->
+<div id="context-menu" role="menu" class="fixed z-50 hidden w-56 overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-xl shadow-black/20"></div>
 
 <style>
-    .circle-orbit { position: absolute; border: 1px dashed #4a5568; border-radius: 50%; top: 50%; left: 50%; }
-    .user-node { position: absolute; width: 60px; height: 60px; background-color: #0d9488; color: white; border-radius: 50%; border: 3px solid #1a202c; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 10px; font-weight: 600; cursor: pointer; transition: all 0.2s ease-in-out; overflow: hidden; padding: 5px; text-decoration: none; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4); }
-    .user-node:hover { transform: scale(1.15); z-index: 1000; border-color: #2dd4bf; }
-    .user-node.center-user { width: 80px; height: 80px; background-color: #0f766e; font-size: 14px; z-index: 100; border-width: 4px; }
-    .scroll-animate { opacity: 0; transform: translateY(20px); transition: opacity 0.5s ease-out, transform 0.5s ease-out; }
-    .scroll-animate.is-visible { opacity: 1; transform: translateY(0); }
+    .orbit { position: absolute; left: 50%; top: 50%; border: 1px dashed rgb(var(--line)); border-radius: 9999px; transform: translate(-50%, -50%); pointer-events: none; }
+    .person { position: absolute; display: flex; align-items: center; justify-content: center; border-radius: 9999px; border: 1px solid rgb(var(--line));
+              background: rgb(var(--raised)); color: rgb(var(--ink)); font-weight: 600; line-height: 1.1; text-align: center; overflow: hidden;
+              padding: 2px; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+    .person:hover, .person:focus-visible { border-color: rgb(var(--accent)); box-shadow: 0 0 0 3px rgb(var(--accent) / .18); z-index: 20; outline: none; }
+    .person.stranger { background: transparent; border-style: dashed; color: rgb(var(--ink-subtle)); }
+    .person.me { background: rgb(var(--accent)); border-color: rgb(var(--accent)); color: rgb(var(--accent-ink)); z-index: 10; }
+    .person span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .menu-item { display: block; width: 100%; padding: .5rem 1rem; text-align: left; font-size: .875rem; color: rgb(var(--ink-muted)); }
+    .menu-item:hover, .menu-item:focus-visible { background: rgb(var(--raised)); color: rgb(var(--ink)); outline: none; }
 </style>
 
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                entry.target.classList.add('is-visible');
-                observer.unobserve(entry.target);
+document.addEventListener('DOMContentLoaded', function () {
+    const container = document.getElementById('friend-circle-container');
+    const contextMenu = document.getElementById('context-menu');
+    const people = JSON.parse('{{ user_nodes_json|escapejs }}');
+    const me = { username: '{{ request.user.username|escapejs }}' };
+    const profileUrl = '{% url "profile" %}';
+
+    const shortName = (u) => u.split('@')[0];
+    const initials = (u) => shortName(u).slice(0, 2).toUpperCase();
+
+    // Closeness tiers, innermost first. Ring radii are derived from the container width and the node
+    // sizes in layout(), so the circle always fits its box, from a phone to a wide sidebar.
+    const tiers = [
+        { min: 76, people: [] },
+        { min: 51, people: [] },
+        { min: 26, people: [] },
+        { min: -Infinity, people: [] },
+    ];
+    const MIN_NODE = 22;
+    people.forEach((p) => tiers.find((t) => p.closeness >= t.min).people.push(p));
+
+    function makeNode(label, title, size, extraClass) {
+        const el = document.createElement('button');
+        el.type = 'button';
+        el.className = `person ${extraClass || ''}`;
+        el.style.width = el.style.height = `${size}px`;
+        // Show the name when it can be read; fall back to initials on small nodes.
+        const fontSize = Math.max(9, Math.min(12, size / 4.6));
+        el.style.fontSize = `${fontSize}px`;
+        const span = document.createElement('span');
+        const fitsName = label.length * fontSize * 0.6 <= size - 6;
+        span.textContent = fitsName ? label : initials(label);
+        el.appendChild(span);
+        el.title = title;
+        el.setAttribute('aria-label', title);
+        return el;
+    }
+
+    function place(el, cx, cy, size) {
+        el.style.left = `${cx - size / 2}px`;
+        el.style.top = `${cy - size / 2}px`;
+        container.appendChild(el);
+    }
+
+    function layout() {
+        container.replaceChildren();
+        const S = container.clientWidth;
+        if (!S) return;
+        const half = S / 2;
+        const baseSize = Math.max(26, Math.min(48, S * 0.12));
+        const meSize = Math.max(40, Math.min(64, S * 0.18));
+        const fit = (n, r) => Math.min(baseSize, (2 * Math.PI * r) / (Math.max(n, 1) * 1.12));
+
+        // Outer ring hugs the edge; the inner rings are spaced so neighbouring rings' nodes can't collide.
+        let outerSize = Math.max(MIN_NODE, fit(tiers[3].people.length, half - baseSize / 2 - 2));
+        const r4 = half - outerSize / 2 - 2;
+        const r1 = meSize / 2 + baseSize / 2 + 6;
+        const r3 = r4 - (outerSize / 2 + baseSize / 2 + 6);
+        const radii = [r1, (r1 + r3) / 2, r3, r4];
+
+        tiers.forEach((tier, ti) => {
+            const radius = radii[ti];
+            const orbit = document.createElement('div');
+            orbit.className = 'orbit';
+            orbit.style.width = orbit.style.height = `${radius * 2}px`;
+            container.appendChild(orbit);
+            if (!tier.people.length) return;
+
+            // Shrink nodes on crowded rings so they never overlap; past a floor, collapse the rest into "+N".
+            const circumference = 2 * Math.PI * radius;
+            const minSize = MIN_NODE;
+            let size = fit(tier.people.length, radius);
+            let shown = tier.people;
+            let overflow = 0;
+            if (size < minSize) {
+                size = minSize;
+                const capacity = Math.max(1, Math.floor(circumference / (minSize * 1.12)));
+                shown = tier.people.slice(0, capacity - 1);
+                overflow = tier.people.length - shown.length;
+            }
+            const count = shown.length + (overflow ? 1 : 0);
+            const step = (2 * Math.PI) / count;
+            const offset = -Math.PI / 2 + ti * 0.6; // stagger rings so nodes don't line up radially
+
+            shown.forEach((p, i) => {
+                const a = offset + i * step;
+                const label = shortName(p.username);
+                const el = makeNode(label, `${p.username} · closeness ${p.closeness}`, size, p.is_friend === false ? 'stranger' : '');
+                el.addEventListener('click', (e) => { e.stopPropagation(); openMenu(p, el); });
+                place(el, half + radius * Math.cos(a), half + radius * Math.sin(a), size);
+            });
+            if (overflow) {
+                const a = offset + shown.length * step;
+                const more = makeNode('', `${overflow} more people`, size, 'stranger');
+                more.firstChild.textContent = `+${overflow}`;
+                more.addEventListener('click', () => { window.location.href = '{% url "friends" %}'; });
+                place(more, half + radius * Math.cos(a), half + radius * Math.sin(a), size);
             }
         });
-    }, { threshold: 0.1 });
-    document.querySelectorAll('.scroll-animate').forEach(el => observer.observe(el));
 
-    const isAuthenticated = {{ request.user.is_authenticated|yesno:"true,false" }};
-    if (!isAuthenticated) return;
-
-    const container = document.getElementById('friend-circle-container');
-    const userNodesData = JSON.parse('{{ user_nodes_json|escapejs }}');
-    const currentUser = { id: {{ request.user.id }}, username: '{{ request.user.username }}' };
-    const contextMenu = document.getElementById('context-menu');
-
-    window.addEventListener('click', () => { if (contextMenu.style.display === 'block') contextMenu.style.display = 'none'; });
-
-    const circles = { c1: { r: 100, n: [] }, c2: { r: 175, n: [] }, c3: { r: 250, n: [] }, c4: { r: 300, n: [] } };
-    userNodesData.forEach(node => {
-        if (node.closeness > 75) circles.c1.n.push(node);
-        else if (node.closeness > 50) circles.c2.n.push(node);
-        else if (node.closeness > 25) circles.c3.n.push(node);
-        else if (node.closeness >= 0) circles.c4.n.push(node);
-    });
-
-    const placeNodes = (nodes, radius) => {
-        const angleStep = nodes.length > 1 ? (2 * Math.PI) / nodes.length : 0;
-        nodes.forEach((node, index) => {
-            const angle = index * angleStep;
-            const x = container.offsetWidth / 2 + radius * Math.cos(angle) - 30;
-            const y = container.offsetHeight / 2 + radius * Math.sin(angle) - 30;
-            const nodeEl = document.createElement('div');
-            nodeEl.className = 'user-node';
-            nodeEl.style.left = `${x}px`;
-            nodeEl.style.top = `${y}px`;
-            nodeEl.textContent = node.username.split('@')[0];
-            nodeEl.title = `${node.username} (Closeness: ${node.closeness})`;
-            nodeEl.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                let menu = `<a href="/user/${node.id}/" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">See Profile</a>`;
-                menu += `<a href="/chat/start/${node.id}/" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">Chat</a>`;
-                if (node.is_phone_verified && node.phone) menu += `<a href="https://wa.me/${node.phone}" target="_blank" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">Chat with WhatsApp</a>`;
-                contextMenu.innerHTML = menu;
-                contextMenu.style.top = `${e.pageY}px`;
-                contextMenu.style.left = `${e.pageX}px`;
-                contextMenu.style.display = 'block';
-            });
-            container.appendChild(nodeEl);
-        });
-    };
-
-    const centerNode = document.createElement('a');
-    centerNode.className = 'user-node center-user';
-    centerNode.href = `{% url 'profile' %}`;
-    centerNode.style.left = `50%`;
-    centerNode.style.top = `50%`;
-    centerNode.style.transform = `translate(-50%, -50%)`;
-    centerNode.textContent = currentUser.username.split('@')[0];
-    centerNode.title = 'Your Profile';
-    container.appendChild(centerNode);
-
-    for (const key in circles) {
-        if (circles[key].n.length > 0) placeNodes(circles[key].n, circles[key].r);
+        const meNode = makeNode(shortName(me.username), 'Your profile', meSize, 'me');
+        meNode.addEventListener('click', () => { window.location.href = profileUrl; });
+        place(meNode, half, half, meSize);
     }
+
+    function openMenu(p, anchor) {
+        contextMenu.replaceChildren();
+        const head = document.createElement('div');
+        head.className = 'border-b border-line px-4 py-2 text-xs text-ink-subtle truncate';
+        head.textContent = p.username;
+        contextMenu.appendChild(head);
+        const items = [
+            ['View profile', `/user/${p.id}/`],
+            ['Send a message', `/chat/start/${p.id}/`],
+        ];
+        if (p.is_phone_verified && p.phone) items.push(['WhatsApp', `https://wa.me/${encodeURIComponent(String(p.phone).replace(/[^\d]/g, ''))}`]);
+        items.forEach(([text, href]) => {
+            const a = document.createElement('a');
+            a.className = 'menu-item';
+            a.setAttribute('role', 'menuitem');
+            a.href = href;
+            a.textContent = text;
+            if (href.startsWith('https://')) { a.target = '_blank'; a.rel = 'noopener'; }
+            contextMenu.appendChild(a);
+        });
+        contextMenu.classList.remove('hidden');
+        // Position next to the node, kept inside the viewport.
+        const r = anchor.getBoundingClientRect();
+        const w = contextMenu.offsetWidth, h = contextMenu.offsetHeight, pad = 8;
+        let left = r.right + 6, top = r.top;
+        if (left + w > window.innerWidth - pad) left = Math.max(pad, r.left - w - 6);
+        if (top + h > window.innerHeight - pad) top = Math.max(pad, window.innerHeight - h - pad);
+        contextMenu.style.left = `${left}px`;
+        contextMenu.style.top = `${top}px`;
+        contextMenu.querySelector('a').focus({ preventScroll: true });
+    }
+
+    const closeMenu = () => contextMenu.classList.add('hidden');
+    document.addEventListener('click', (e) => { if (!contextMenu.contains(e.target)) closeMenu(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+    window.addEventListener('scroll', closeMenu, { passive: true });
+
+    let frame;
+    new ResizeObserver(() => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => { closeMenu(); layout(); }); }).observe(container);
+    layout();
 });
 </script>
+{% endif %}
 
 {% endblock %}

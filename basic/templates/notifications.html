@@ -3,17 +3,26 @@
 {% block title %}Your Notifications{% endblock %}
 
 {% block content %}
-    <h2>Your Notifications</h2>
+<div class="mx-auto max-w-2xl">
+    <h1 class="page-title mb-6">Notifications</h1>
 
-    {% for notification in notifications %}
-        <div style="border: 1px solid #eee; padding: 10px; margin-bottom: 10px; border-radius: 5px; {% if not notification.is_read %}background-color: #e6f7ff;{% endif %}">
-            <p>{{ notification.message }}</p>
-            {% if notification.link %}
-                <a href="{{ notification.link }}">View Details</a>
-            {% endif %}
-            <p style="font-size: 0.8em; color: #888;">{{ notification.created_at|date:"d M Y, H:i" }}</p>
-        </div>
-    {% empty %}
-        <p>You have no new notifications.</p>
-    {% endfor %}
+    <ul class="card divide-y divide-line">
+        {% for notification in notifications %}
+            <li class="flex gap-3 px-5 py-4 {% if not notification.is_read %}bg-accent/[0.06]{% endif %}">
+                <span class="mt-2 h-2 w-2 shrink-0 rounded-full {% if not notification.is_read %}bg-accent{% else %}bg-transparent{% endif %}" aria-hidden="true"></span>
+                <div class="min-w-0 flex-1">
+                    <p class="text-[15px] {% if not notification.is_read %}font-medium text-ink{% else %}text-ink-muted{% endif %}">
+                        {% if not notification.is_read %}<span class="sr-only">New: </span>{% endif %}{{ notification.message }}
+                    </p>
+                    <p class="mt-1 text-xs text-ink-subtle">
+                        <time datetime="{{ notification.created_at|date:'c' }}" title="{{ notification.created_at|date:'d M Y, H:i' }}">{{ notification.created_at|timesince }} ago</time>
+                        {% if notification.link %} · <a href="{{ notification.link }}" class="link">View</a>{% endif %}
+                    </p>
+                </div>
+            </li>
+        {% empty %}
+            <li class="px-5 py-12 text-center text-sm text-ink-subtle">You're all caught up.</li>
+        {% endfor %}
+    </ul>
+</div>
 {% endblock %}

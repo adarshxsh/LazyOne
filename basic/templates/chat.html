@@ -4,48 +4,51 @@
 
 {% block content %}
 <style>
-    .chat-container { height: 75vh; display: flex; flex-direction: column; }
-    .message-list { flex-grow: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 1.5rem; }
-    .message { max-width: 75%; padding: 0.75rem 1rem; border-radius: 1.25rem; display: flex; flex-direction: column; line-height: 1.5; }
-    .message.me { background-color: #06b6d4; color: white; align-self: flex-end; border-bottom-right-radius: 0.5rem; }
-    .message.other { background-color: #374151; color: #d1d5db; align-self: flex-start; border-bottom-left-radius: 0.5rem; }
-    .message-author { font-weight: 600; font-size: 0.875rem; margin-bottom: 0.25rem; color: #9ca3af; }
-    .message.me .message-author { color: #cffafe; }
-    .message-content { margin: 0; font-size: 1rem; white-space: pre-wrap; word-wrap: break-word; }
-    .message-timestamp { font-size: 0.75rem; color: #6b7280; text-align: right; margin-top: 0.5rem; }
-    .message.me .message-timestamp { color: #a5f3fc; }
-    .message-wrapper { display: flex; gap: 0.75rem; max-width: 80%; }
-    .message-wrapper.me { align-self: flex-end; flex-direction: row-reverse; }
-    .message-wrapper.other { align-self: flex-start; }
-    .avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background-color: #4b5563; }
+    /* Fill the viewport under the header so only the message list scrolls. */
+    .chat-shell { height: calc(100vh - 6.5rem); height: calc(100dvh - 6.5rem); min-height: 22rem; }
+    @media (min-width: 640px) { .chat-shell { height: calc(100vh - 7.5rem); height: calc(100dvh - 7.5rem); } }
+    .msg-row { display: flex; gap: .625rem; max-width: min(42rem, 85%); }
+    .msg-row.me { align-self: flex-end; flex-direction: row-reverse; }
+    .msg-row.other { align-self: flex-start; }
+    .msg-row.cont { margin-top: -.5rem; }
+    .bubble { padding: .55rem .85rem; border-radius: 1rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .me .bubble { background: rgb(var(--accent) / .14); color: rgb(var(--ink)); border-bottom-right-radius: .35rem; }
+    .other .bubble { background: rgb(var(--raised)); color: rgb(var(--ink)); border-bottom-left-radius: .35rem; }
+    .msg-meta { font-size: .75rem; color: rgb(var(--ink-subtle)); margin-bottom: .2rem; }
+    .me .msg-meta { text-align: right; }
+    .avatar-spacer { width: 2rem; flex-shrink: 0; }
+    .day-divider { align-self: center; font-size: .75rem; color: rgb(var(--ink-subtle)); background: rgb(var(--surface)); padding: .15rem .75rem; border: 1px solid rgb(var(--line)); border-radius: 9999px; }
 </style>
 
-<div class="chat-container">
-    <div class="border-b border-gray-700/50 pb-4 mb-4">
-        <h2 class="text-xl font-bold text-white">Chat for: {{ conversation.task.title|default:"Direct Message" }}</h2>
-        <p class="text-sm text-gray-400">
-            With:
-            {% for participant in conversation.participants.all %}
-                {% if participant.id != request.user.id %}
-                    {{ participant.username }}
-                {% endif %}
-            {% endfor %}
-        </p>
+<div class="chat-shell card flex flex-col overflow-hidden">
+    <div class="flex items-center gap-3 border-b border-line px-4 py-3 sm:px-5">
+        <a href="javascript:history.back()" class="icon-btn -ml-2" aria-label="Back">
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+        </a>
+        <div class="min-w-0 flex-1">
+            <h1 class="truncate font-semibold text-ink">{{ conversation.task.title|default:"Direct message" }}</h1>
+            <p class="truncate text-sm text-ink-subtle">
+                with {% for participant in conversation.participants.all %}{% if participant.id != request.user.id %}{{ participant.username }}{% if not forloop.last %}, {% endif %}{% endif %}{% endfor %}
+            </p>
+        </div>
+        {% if conversation.task %}<span class="badge status-{{ conversation.task.status }} hidden sm:inline-flex">{{ conversation.task.get_status_display }}</span>{% endif %}
     </div>
 
-    <div class="message-list" id="message-list">
-        <p id="loading-messages" class="text-center text-gray-400">Loading chat...</p>
+    <div id="message-list" class="flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-5 sm:px-5" aria-live="polite">
+        <p id="loading-messages" class="m-auto text-sm text-ink-subtle">Loading chat…</p>
     </div>
 
     {% if can_send %}
-    <form class="mt-4 flex items-center space-x-3" id="message-form">
-        <input type="text" id="message-input" placeholder="Type your message..." autocomplete="off" required class="flex-grow w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-full text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
-        <button type="submit" id="message-submit" title="Send Message" class="flex-shrink-0 bg-cyan-500 hover:bg-cyan-600 text-white font-bold rounded-full h-12 w-12 flex items-center justify-center transition-colors">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+    <form id="message-form" class="flex items-end gap-2 border-t border-line p-3 sm:p-4">
+        <label for="message-input" class="sr-only">Message</label>
+        <textarea id="message-input" rows="1" placeholder="Write a message…  (Enter to send, Shift+Enter for a new line)" autocomplete="off" required
+                  class="input max-h-40 min-h-[2.75rem] flex-1 resize-none"></textarea>
+        <button type="submit" id="message-submit" title="Send message" aria-label="Send message" class="btn btn-primary h-11 w-11 shrink-0 p-0">
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5"/></svg>
         </button>
     </form>
     {% else %}
-    <p class="mt-4 text-center text-sm text-gray-400">You can read this chat as a juror or moderator, but you can't post in it.</p>
+    <p class="border-t border-line px-4 py-3 text-center text-sm text-ink-subtle">You can read this chat as a juror or moderator, but you can't post in it.</p>
     {% endif %}
 </div>
 
@@ -85,17 +88,26 @@
         const seen = new Set();
         let lastId = 0;
         let pollTimer = null;
+        let firstLoad = true;
+        let lastAuthor = null;
+        let lastDay = null;
 
         if (messageInput) messageInput.focus();
 
-        function addMessages(list) {
+        // Only follow new messages if the reader is already near the bottom,
+        // so scrolling back through history isn't interrupted.
+        const nearBottom = () => messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight < 120;
+
+        function addMessages(list, forceScroll) {
+            const follow = firstLoad || forceScroll || nearBottom();
             list.forEach(m => {
                 if (seen.has(String(m.id))) return;
                 seen.add(String(m.id));
                 lastId = Math.max(lastId, Number(m.id) || 0);
                 renderMessage(m);
             });
-            scrollToBottom();
+            if (follow) scrollToBottom();
+            firstLoad = false;
         }
 
         async function loadHistory() {
@@ -103,6 +115,10 @@
             if (!r.ok) throw new Error('history ' + r.status);
             const data = await r.json();
             loadingIndicator.style.display = 'none';
+            if (!data.messages.length && !seen.size) {
+                loadingIndicator.textContent = 'No messages yet. Say hello 👋';
+                loadingIndicator.style.display = '';
+            }
             addMessages(data.messages);
         }
 
@@ -134,12 +150,18 @@
             .finally(startRealtime);
 
         if (messageForm) {
+            const autoGrow = () => { messageInput.style.height = 'auto'; messageInput.style.height = Math.min(messageInput.scrollHeight, 160) + 'px'; };
+            messageInput.addEventListener('input', autoGrow);
+            messageInput.addEventListener('keydown', e => {
+                if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); messageForm.requestSubmit(); }
+            });
             messageForm.addEventListener('submit', e => {
                 e.preventDefault();
                 const content = messageInput.value.trim();
                 if (!content || messageSubmitButton.disabled) return;
                 sendMessage(content);
                 messageInput.value = '';
+                autoGrow();
             });
         }
 
@@ -153,7 +175,7 @@
                     body: 'content=' + encodeURIComponent(content)
                 });
                 const data = await r.json().catch(() => ({}));
-                if (r.ok && data.message) addMessages([data.message]);
+                if (r.ok && data.message) { loadingIndicator.style.display = 'none'; addMessages([data.message], true); }
                 else alert(data.error || 'Message could not be sent.');
             } catch (e) {
                 alert('Message could not be sent. Check your connection.');
@@ -163,33 +185,67 @@
             }
         }
 
+        // Built with DOM nodes + textContent so names and message text can never inject HTML.
         function renderMessage(m) {
             const mine = String(m.authorId) === currentUser.id;
-            const name = escapeHTML(m.authorUsername || 'unknown');
-            const when = m.createdAt ? new Date(m.createdAt) : (m.timestamp && m.timestamp.seconds ? new Date(m.timestamp.seconds * 1000) : null);
-            const wrapper = document.createElement('div');
-            wrapper.className = `message-wrapper ${mine ? 'me' : 'other'}`;
-            wrapper.innerHTML = `
-                <img src="https://ui-avatars.com/api/?name=${encodeURIComponent(m.authorUsername || '?')}&background=random" alt="${name}" class="avatar">
-                <div class="message ${mine ? 'me' : 'other'}">
-                    <p class="message-author">${name}</p>
-                    <p class="message-content">${escapeHTML(m.content || '')}</p>
-                    <p class="message-timestamp">${when ? timeSince(when) : 'just now'}</p>
-                </div>`;
-            messageList.appendChild(wrapper);
+            const name = m.authorUsername || 'unknown';
+            const when = m.createdAt ? new Date(m.createdAt) : (m.timestamp && m.timestamp.seconds ? new Date(m.timestamp.seconds * 1000) : new Date());
+
+            const day = when.toDateString();
+            if (day !== lastDay) {
+                const divider = document.createElement('div');
+                divider.className = 'day-divider';
+                divider.textContent = dayLabel(when);
+                messageList.appendChild(divider);
+                lastDay = day;
+                lastAuthor = null;
+            }
+
+            const continued = lastAuthor === String(m.authorId);
+            lastAuthor = String(m.authorId);
+
+            const row = document.createElement('div');
+            row.className = `msg-row ${mine ? 'me' : 'other'}${continued ? ' cont' : ''}`;
+
+            if (!mine) {
+                if (continued) {
+                    const spacer = document.createElement('span');
+                    spacer.className = 'avatar-spacer';
+                    row.appendChild(spacer);
+                } else {
+                    const av = document.createElement('span');
+                    av.className = 'avatar h-8 w-8 text-[11px] mt-5';
+                    av.textContent = name.slice(0, 2);
+                    av.setAttribute('aria-hidden', 'true');
+                    row.appendChild(av);
+                }
+            }
+
+            const body = document.createElement('div');
+            body.className = 'min-w-0';
+            if (!continued) {
+                const meta = document.createElement('p');
+                meta.className = 'msg-meta';
+                meta.textContent = mine ? clock(when) : `${name.split('@')[0]} · ${clock(when)}`;
+                body.appendChild(meta);
+            }
+            const bubble = document.createElement('p');
+            bubble.className = 'bubble';
+            bubble.textContent = m.content || '';
+            bubble.title = when.toLocaleString();
+            body.appendChild(bubble);
+            row.appendChild(body);
+            messageList.appendChild(row);
         }
 
         // --- Utility Functions ---
         function scrollToBottom() { messageList.scrollTop = messageList.scrollHeight; }
-        function escapeHTML(str) { const p = document.createElement("p"); p.appendChild(document.createTextNode(str)); return p.innerHTML; }
-        function timeSince(date) {
-            const seconds = Math.floor((new Date() - date) / 1000);
-            let interval = seconds / 31536000; if (interval > 1) return Math.floor(interval) + " years ago";
-            interval = seconds / 2592000; if (interval > 1) return Math.floor(interval) + " months ago";
-            interval = seconds / 86400; if (interval > 1) return Math.floor(interval) + " days ago";
-            interval = seconds / 3600; if (interval > 1) return Math.floor(interval) + " hours ago";
-            interval = seconds / 60; if (interval > 1) return Math.floor(interval) + " minutes ago";
-            return "just now";
+        function clock(d) { return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
+        function dayLabel(d) {
+            const today = new Date(); const yest = new Date(); yest.setDate(today.getDate() - 1);
+            if (d.toDateString() === today.toDateString()) return 'Today';
+            if (d.toDateString() === yest.toDateString()) return 'Yesterday';
+            return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: d.getFullYear() === today.getFullYear() ? undefined : 'numeric' });
         }
     });
 </script>
