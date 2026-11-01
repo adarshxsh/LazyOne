@@ -83,18 +83,68 @@ def on_members_changed(payload):
     get_publisher().set_conversation_members(conv.public_id, [realtime_uid(uid) for uid in ChatService.reader_ids(conv)])
 
 
+def _dispute(payload):
+    return Dispute.objects.select_related('task__posted_by', 'task__taken_by', 'raised_by').filter(
+        pk=payload['dispute_id']).first()
+
+
+def _other_party(d, user_id):
+    return d.task.posted_by if user_id == d.task.taken_by_id else d.task.taken_by
+
+
 @handler('dispute.opened')
 def on_dispute_opened(payload):
-    d = Dispute.objects.select_related('task__posted_by', 'task__taken_by', 'raised_by').filter(pk=payload['dispute_id']).first()
+    d = _dispute(payload)
     if d is None:
         return
     link = reverse('dispute_detail', args=[d.public_id])
-    other = d.task.posted_by if d.raised_by_id == d.task.taken_by_id else d.task.taken_by
-    notify(other, f"{d.raised_by.username} raised a dispute on '{d.task.title}'. Add your evidence.", link)
-    for seat in d.jurors.select_related('juror'):
-        notify(seat.juror, f"You were selected as a juror for a dispute on '{d.task.title}'.", link)
-    if d.status == Dispute.Status.ESCALATED:
-        _notify_staff(d, link)
+    notify(_other_party(d, d.raised_by_id),
+           f"{d.raised_by.username} raised a dispute on '{d.task.title}'. Accept, counter or reject their offer "
+           f"within 24 h, or it is accepted automatically.", link)
+
+
+@handler('dispute.offer')
+def on_dispute_offer(payload):
+    from .models import SettlementOffer
+    d = _dispute(payload)
+    offer = SettlementOffer.objects.select_related('proposed_by').filter(pk=payload.get('offer_id')).first()
+    if d and offer and offer.proposed_by:
+        notify(_other_party(d, offer.proposed_by_id),
+               f"{offer.proposed_by.username} offered a settlement on '{d.task.title}': taker gets {offer.taker_pct}%.",
+               reverse('dispute_detail', args=[d.public_id]))
+
+
+@handler('dispute.jury')
+def on_dispute_jury(payload):
+    d = _dispute(payload)
+    if d is None:
+        return
+    link = reverse('dispute_detail', args=[d.public_id])
+    label = "appeal jury" if payload.get('round') == 2 else "jury"
+    for seat in d.jurors.filter(round=payload.get('round', 1)).select_related('juror'):
+        notify(seat.juror, f"You were selected for the {label} on '{d.task.title}'. Review the evidence and vote.", link)
+    for user in {d.task.posted_by, d.task.taken_by} - {None}:
+        notify(user, f"'{d.task.title}' went to a {label}. You can still add evidence.", link)
+
+
+@handler('dispute.decided')
+def on_dispute_decided(payload):
+    d = _dispute(payload)
+    if d is None:
+        return
+    link = reverse('dispute_detail', args=[d.public_id])
+    for user in {d.task.posted_by, d.task.taken_by} - {None}:
+        notify(user, f"The jury decided '{d.task.title}': taker gets {d.outcome_pct}%. Appeal within 24 h if you disagree.",
+               link)
+
+
+@handler('dispute.appealed')
+def on_dispute_appealed(payload):
+    d = _dispute(payload)
+    if d and d.appealed_by_id:
+        notify(_other_party(d, d.appealed_by_id),
+               f"The verdict on '{d.task.title}' was appealed. A larger jury will decide.",
+               reverse('dispute_detail', args=[d.public_id]))
 
 
 @handler('dispute.escalated')
@@ -116,6 +166,7 @@ def on_dispute_resolved(payload):
     if d is None:
         return
     link = reverse('dispute_detail', args=[d.public_id])
-    msg = f"The dispute on '{d.task.title}' is closed: {d.get_outcome_display() or d.get_status_display()}."
+    share = f" (taker {d.outcome_pct}%)" if d.outcome_pct is not None else ""
+    msg = f"The dispute on '{d.task.title}' is closed: {d.get_outcome_display() or d.get_status_display()}{share}."
     for user in {d.task.posted_by, d.task.taken_by} - {None}:
         notify(user, msg, link)

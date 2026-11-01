@@ -267,12 +267,21 @@ LAZYONE = {
     'CLOSENESS_WAVE1': 40,
     'AUTO_APPROVE_AFTER': timedelta(hours=48),
     # Disputes / jury
+    # Disputes v2 (docs/Ideation/DISPUTE_RESOLUTION.md)
+    'DISPUTE_SETTLEMENT_WINDOW': timedelta(hours=24),
     'DISPUTE_EVIDENCE_WINDOW': timedelta(hours=24),
     'DISPUTE_VOTING_WINDOW': timedelta(hours=48),
-    'JURY_SIZE': 5,
-    'JURY_QUORUM': 3,
+    'DISPUTE_APPEAL_WINDOW': timedelta(hours=24),
+    'JURY_TIERS': [(50, 1), (300, 3), (None, 5)],  # reward < 50 -> 1 juror, < 300 -> 3, else 5; appeal = 2n+1
     'BOND_PERCENT': 20,
     'BOND_MIN': 50,
+    # Who may serve on a jury
+    'JUROR_MIN_PRESTIGE': int(os.getenv('JUROR_MIN_PRESTIGE', '30')),
+    'JUROR_MIN_ACCOUNT_AGE': timedelta(days=int(os.getenv('JUROR_MIN_ACCOUNT_AGE_DAYS', '14'))),
+    'JUROR_REQUIRE_VERIFIED': os.getenv('JUROR_REQUIRE_VERIFIED', 'True') == 'True',  # phone, or campus-domain community
+    'JUROR_NO_SHOW_COOLDOWN': timedelta(days=30),
+    # Prestige per event; see basic/services/prestige.py DEFAULTS
+    'PRESTIGE': {},
     # Shared secret for /internal/cron/ (Vercel Cron sends it as a Bearer token).
     'CRON_SECRET': os.getenv('CRON_SECRET', ''),
 }

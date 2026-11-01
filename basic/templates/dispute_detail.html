@@ -6,32 +6,66 @@
 <div class="max-w-3xl mx-auto space-y-8 text-gray-300">
     <div>
         <h2 class="text-3xl font-bold text-white mb-1">Dispute: {{ task.title }}</h2>
-        <p class="text-sm text-gray-400">{{ task.reward }} points · created by {{ task.posted_by.username }} · taken by {{ task.taken_by.username|default:"-" }}</p>
+        <p class="text-sm text-gray-400">{{ task.reward }} points · created by {{ task.posted_by.username }} · taken by {{ task.taken_by.username|default:"-" }} · raised by {{ dispute.raised_by.username }} ({{ dispute.get_dispute_type_display }})</p>
     </div>
 
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
-            <p class="text-xs uppercase text-gray-500">Status</p>
-            <p class="text-lg font-semibold {% if dispute.is_active %}text-yellow-300{% else %}text-green-300{% endif %}">{{ dispute.get_status_display }}</p>
-            {% if dispute.outcome %}<p class="text-sm text-gray-400">{{ dispute.get_outcome_display }}</p>{% endif %}
-        </div>
-        <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
-            <p class="text-xs uppercase text-gray-500">Evidence until</p>
-            <p class="text-lg font-semibold text-white">{{ dispute.evidence_deadline|date:"M j, g:i a"|default:"-" }}</p>
-        </div>
-        <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
-            <p class="text-xs uppercase text-gray-500">Voting until</p>
-            <p class="text-lg font-semibold text-white">{{ dispute.voting_deadline|date:"M j, g:i a"|default:"-" }}</p>
-            <p class="text-sm text-gray-400">{{ votes_cast }} of {{ juror_count }} jurors voted</p>
-        </div>
+    <!-- Stage tracker -->
+    <ol class="grid grid-cols-4 gap-2 text-center text-xs">
+        {% with s=dispute.stage %}
+        <li class="rounded-lg p-2 {% if s == 'settlement' %}bg-cyan-600 text-white{% else %}bg-gray-800 text-gray-400{% endif %}">1 · Settle</li>
+        <li class="rounded-lg p-2 {% if s == 'jury' %}bg-cyan-600 text-white{% else %}bg-gray-800 text-gray-400{% endif %}">2 · Jury</li>
+        <li class="rounded-lg p-2 {% if s == 'appeal_window' or s == 'appeal' %}bg-cyan-600 text-white{% else %}bg-gray-800 text-gray-400{% endif %}">3 · Appeal</li>
+        <li class="rounded-lg p-2 {% if s == 'closed' %}bg-green-700 text-white{% else %}bg-gray-800 text-gray-400{% endif %}">4 · Closed</li>
+        {% endwith %}
+    </ol>
+
+    <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4 space-y-1">
+        <p><strong>Status:</strong> {{ dispute.get_status_display }} · {{ dispute.get_stage_display }}{% if dispute.round == 2 %} (appeal round){% endif %}</p>
+        {% if dispute.outcome %}<p><strong>Outcome:</strong> {{ dispute.get_outcome_display }}{% if dispute.outcome_pct is not None %}: taker gets {{ dispute.outcome_pct }}% of the reward{% endif %}</p>
+        {% elif dispute.outcome_pct is not None %}<p><strong>Jury verdict:</strong> taker gets {{ dispute.outcome_pct }}% (final unless appealed by {{ dispute.appeal_deadline|date:"M j, g:i a" }})</p>{% endif %}
+        {% if dispute.stage == 'settlement' %}<p class="text-sm text-gray-400">Settlement deadline: {{ dispute.settlement_deadline|date:"M j, g:i a" }}. If the other side doesn't respond, the opening offer is accepted automatically.</p>{% endif %}
+        {% if dispute.stage == 'jury' or dispute.stage == 'appeal' %}<p class="text-sm text-gray-400">Voting until {{ dispute.voting_deadline|date:"M j, g:i a" }} · {{ votes_cast }} of {{ juror_count }} jurors voted</p>{% endif %}
+        {% if dispute.bond_amount %}<p class="text-xs text-gray-500">Bond held: {{ dispute.bond_amount }} pts{% if dispute.appeal_bond %} + appeal bond {{ dispute.appeal_bond }} pts{% endif %}. Refunded if settled, withdrawn or won; otherwise shared by the jurors who voted with the result.</p>{% endif %}
     </div>
 
     <div>
-        <h3 class="text-xl font-semibold text-cyan-400 mb-2">Reason ({{ dispute.get_dispute_type_display }}), raised by {{ dispute.raised_by.username }}</h3>
+        <h3 class="text-xl font-semibold text-cyan-400 mb-2">Reason</h3>
         <p class="bg-gray-900/50 p-4 rounded-lg border border-gray-700">{{ dispute.reason|linebreaksbr }}</p>
-        {% if dispute.bond_amount %}<p class="text-xs text-gray-500 mt-2">Bond held: {{ dispute.bond_amount }} points. Refunded if the raiser wins or withdraws; otherwise shared by jurors in the majority.</p>{% endif %}
     </div>
 
+    <!-- Settlement -->
+    <div>
+        <h3 class="text-xl font-semibold text-cyan-400 mb-2">Settlement offers</h3>
+        <ul class="space-y-2 text-sm">
+            {% for o in offers %}
+            <li class="bg-gray-900/50 p-3 rounded-lg border border-gray-700 {% if o.status == 'accepted' %}border-green-600{% endif %}">
+                <strong>{{ o.proposed_by.username }}</strong>: taker gets <strong>{{ o.taker_pct }}%</strong>{% if o.message %} - "{{ o.message }}"{% endif %}
+                <span class="text-xs text-gray-500">· {{ o.get_status_display }} · {{ o.created_at|date:"M j, g:i a" }}</span>
+            </li>
+            {% empty %}<li class="text-gray-500">No offers.</li>{% endfor %}
+        </ul>
+        {% if is_party and dispute.stage == 'settlement' and dispute.status == 'open' %}
+        <div class="mt-4 space-y-3">
+            {% if can_accept_offer %}
+            <form action="{% url 'dispute_accept' dispute.public_id %}" method="post" class="inline">{% csrf_token %}
+                <button class="bg-green-600 hover:bg-green-500 text-white font-semibold px-4 py-2 rounded-lg text-sm">Accept: taker gets {{ pending_offer.taker_pct }}%</button>
+            </form>
+            {% endif %}
+            <form action="{% url 'dispute_offer' dispute.public_id %}" method="post" class="flex flex-wrap gap-2 items-center">{% csrf_token %}
+                <select name="taker_pct" class="px-3 py-2 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white text-sm">
+                    {% for v, label in pct_choices %}<option value="{{ v }}">{{ label }}</option>{% endfor %}
+                </select>
+                <input name="message" maxlength="500" placeholder="Message (optional)" class="flex-1 px-3 py-2 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white text-sm">
+                <button class="bg-cyan-600 hover:bg-cyan-500 text-white font-semibold px-4 py-2 rounded-lg text-sm">Counter-offer</button>
+            </form>
+            <form action="{% url 'dispute_reject' dispute.public_id %}" method="post">{% csrf_token %}
+                <button class="bg-red-700 hover:bg-red-600 text-white font-semibold px-4 py-2 rounded-lg text-sm">Reject &amp; send to jury</button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Evidence -->
     <div>
         <h3 class="text-xl font-semibold text-cyan-400 mb-2">Evidence</h3>
         <div class="space-y-3">
@@ -40,66 +74,76 @@
                     <p class="text-xs text-gray-500 mb-1">{{ e.submitted_by.username|default:"deleted user" }} · {{ e.created_at|date:"M j, g:i a" }}</p>
                     <p>{{ e.text|linebreaksbr }}</p>
                 </div>
-            {% empty %}
-                <p class="text-gray-500">No evidence submitted yet.</p>
-            {% endfor %}
+            {% empty %}<p class="text-gray-500">No evidence submitted yet.</p>{% endfor %}
         </div>
         {% if is_party and dispute.is_active %}
-        <form action="{% url 'add_evidence' dispute.public_id %}" method="post" class="mt-4 space-y-2">
-            {% csrf_token %}
-            <textarea name="text" rows="3" required maxlength="4000" placeholder="Add your side: what happened, links to photos, timestamps…" class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white"></textarea>
-            <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white font-semibold px-4 py-2 rounded-lg text-sm">Add Evidence</button>
+        <form action="{% url 'add_evidence' dispute.public_id %}" method="post" class="mt-4 space-y-2">{% csrf_token %}
+            <textarea name="text" rows="4" required maxlength="4000" class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white"
+                placeholder="What was agreed?&#10;What actually happened (times, places)?&#10;Proof: links to photos, receipts, chat lines…"></textarea>
+            <button class="bg-cyan-600 hover:bg-cyan-500 text-white font-semibold px-4 py-2 rounded-lg text-sm">Add evidence</button>
         </form>
         {% endif %}
     </div>
 
-    {% if task.conversation %}
-    <a href="{% url 'chat_view' task.conversation.public_id %}" class="inline-block bg-gray-600 hover:bg-gray-500 text-white font-semibold px-4 py-2 rounded-lg text-sm">Read the task chat</a>
-    {% endif %}
+    <!-- Task timeline (automatic evidence) -->
+    <div>
+        <h3 class="text-xl font-semibold text-cyan-400 mb-2">Task timeline</h3>
+        <ul class="text-sm space-y-1">
+            {% for e in timeline %}<li><span class="text-gray-500">{{ e.created_at|date:"M j, g:i a" }}</span> · {{ e.actor.username|default:"system" }} · {{ e.action }} ({{ e.from_status|default:"-" }} → {{ e.to_status }}){% if e.note %} - {{ e.note }}{% endif %}</li>{% endfor %}
+        </ul>
+        {% if task.conversation %}<a href="{% url 'chat_view' task.conversation.public_id %}" class="inline-block mt-3 bg-gray-600 hover:bg-gray-500 text-white font-semibold px-4 py-2 rounded-lg text-sm">Read the task chat</a>{% endif %}
+    </div>
 
+    <!-- Jury -->
     {% if seat %}
     <div class="bg-red-900/20 border border-red-500/40 rounded-xl p-5">
-        <h3 class="text-xl font-semibold text-red-300 mb-2">You are on the jury</h3>
-        {% if seat.vote %}
-            <p>You voted for the <strong>{{ seat.get_vote_display|lower }}</strong>.{% if seat.reward %} You earned {{ seat.reward }} points for voting with the majority.{% endif %}</p>
-        {% elif dispute.status == 'open' %}
-            <p class="mb-3 text-sm">Read the evidence and chat, then decide who should get the {{ task.reward }} points. Votes are secret until voting closes.</p>
-            <form action="{% url 'cast_vote' dispute.public_id %}" method="post" class="flex gap-3">
-                {% csrf_token %}
-                {% for value, label in vote_choices %}
-                    <button type="submit" name="vote" value="{{ value }}" class="bg-gray-700 hover:bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg text-sm">{{ label }} wins</button>
-                {% endfor %}
+        <h3 class="text-xl font-semibold text-red-300 mb-2">You are on the {% if seat.round == 2 %}appeal {% endif %}jury</h3>
+        {% if seat.has_voted %}
+            <p>You voted: <strong>{{ seat.get_vote_display }}</strong>. "{{ seat.reason }}"</p>
+            {% if seat.coherent %}<p class="text-sm text-green-300 mt-1">You voted with the result: +prestige{% if seat.reward %}, +{{ seat.reward }} points{% endif %}.</p>{% endif %}
+        {% elif can_vote %}
+            <p class="mb-3 text-sm">Read the offers, evidence, timeline and chat. Votes are secret until the round closes. Voting with the result earns prestige; not voting costs prestige.</p>
+            <form action="{% url 'cast_vote' dispute.public_id %}" method="post" class="space-y-3">{% csrf_token %}
+                <div class="flex flex-wrap gap-3">
+                    {% for value, label in vote_choices %}
+                    <label class="flex items-center gap-2 bg-gray-800 px-3 py-2 rounded-lg text-sm"><input type="radio" name="taker_pct" value="{{ value }}" required> {{ label }}</label>
+                    {% endfor %}
+                </div>
+                <input name="reason" required minlength="10" maxlength="500" placeholder="Why? (required, one line)" class="w-full px-3 py-2 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white text-sm">
+                <button class="bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 rounded-lg text-sm">Cast vote</button>
             </form>
-        {% else %}
-            <p>Voting is closed.</p>
-        {% endif %}
+        {% else %}<p>Voting is closed.</p>{% endif %}
     </div>
     {% endif %}
 
     {% if jurors %}
     <div>
-        <h3 class="text-xl font-semibold text-cyan-400 mb-2">Jury</h3>
+        <h3 class="text-xl font-semibold text-cyan-400 mb-2">Jury votes</h3>
         <ul class="space-y-1 text-sm">
-            {% for j in jurors %}<li>{{ j.juror.username }}: {{ j.get_vote_display|default:"did not vote" }}{% if j.reward %} (+{{ j.reward }} pts){% endif %}</li>{% endfor %}
+            {% for j in jurors %}<li>Round {{ j.round }} · {{ j.juror.username }}: {{ j.get_vote_display|default:"did not vote" }}{% if j.reason %} - "{{ j.reason }}"{% endif %}{% if j.reward %} (+{{ j.reward }} pts){% endif %}</li>{% endfor %}
         </ul>
     </div>
+    {% endif %}
+
+    {% if can_appeal %}
+    <form action="{% url 'dispute_appeal' dispute.public_id %}" method="post" class="bg-gray-800/50 border border-yellow-500/40 rounded-xl p-5">{% csrf_token %}
+        <p class="mb-3 text-sm">Disagree with the verdict? Appeal once: a new jury of {{ juror_count|add:juror_count|add:1 }}+ decides and its verdict is final. Appeal bond: {{ appeal_bond }} points, refunded if the appeal improves your result.</p>
+        <button class="bg-yellow-600 hover:bg-yellow-500 text-white font-semibold px-4 py-2 rounded-lg text-sm">Appeal</button>
+    </form>
     {% endif %}
 
     {% if request.user.is_staff and dispute.is_active %}
     <div class="bg-gray-800/50 border border-yellow-500/40 rounded-xl p-5">
         <h3 class="text-lg font-semibold text-yellow-300 mb-2">Moderator decision</h3>
-        <form action="{% url 'moderator_resolve' dispute.public_id %}" method="post" class="flex gap-3">
-            {% csrf_token %}
-            <button name="winner_id" value="{{ task.taken_by_id }}" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm">Taker wins</button>
-            <button name="winner_id" value="{{ task.posted_by_id }}" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm">Creator wins</button>
+        <form action="{% url 'moderator_resolve' dispute.public_id %}" method="post" class="flex flex-wrap gap-2">{% csrf_token %}
+            {% for v, label in pct_choices %}<button name="taker_pct" value="{{ v }}" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm">{{ label }}</button>{% endfor %}
         </form>
     </div>
     {% endif %}
 
     {% if can_withdraw %}
-    <form action="{% url 'withdraw_dispute' dispute.public_id %}" method="post">
-        {% csrf_token %}
-        <button type="submit" class="bg-gray-600 hover:bg-gray-500 text-white font-semibold px-4 py-2 rounded-lg text-sm">Withdraw dispute (bond refunded)</button>
+    <form action="{% url 'withdraw_dispute' dispute.public_id %}" method="post">{% csrf_token %}
+        <button class="bg-gray-600 hover:bg-gray-500 text-white font-semibold px-4 py-2 rounded-lg text-sm">Withdraw dispute (bond refunded)</button>
     </form>
     {% endif %}
 </div>

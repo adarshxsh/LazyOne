@@ -98,6 +98,37 @@ def _refund(task, actor, **kw):
     )
 
 
+def _split(task, actor, taker_pct=None, **kw):
+    """Pay the taker taker_pct % of the reward and refund the rest to the poster."""
+    if taker_pct is None or not 0 < taker_pct < 100:
+        raise TransitionError("A split needs a taker share between 1 and 99 %.")
+    to_taker = task.reward * taker_pct // 100
+    ledger.transfer(
+        [(ledger.task_escrow(task), -task.reward), (ledger.user_account(task.taken_by), to_taker),
+         (ledger.user_account(task.posted_by), task.reward - to_taker)],
+        key=f"task:{task.pk}:settle", reason=Transfer.Reason.TASK_PAYOUT, task=task,
+        description=f"Split {taker_pct}/{100 - taker_pct} for '{task.title}'",
+    )
+
+
+def _prestige_completed(task, actor, **kw):
+    from . import prestige
+    prestige.award(task.taken_by, 'task_completed_taker', key=f"task:{task.pk}:done:taker",
+                   task=task, counterparty=task.posted_by)
+    prestige.award(task.posted_by, 'task_completed_poster', key=f"task:{task.pk}:done:poster",
+                   task=task, counterparty=task.taken_by)
+
+
+def _prestige_abandoned(task, actor, **kw):
+    from . import prestige
+    prestige.award(actor, 'task_abandoned', key=f"task:{task.pk}:abandon:{task.version}", task=task)
+
+
+def _prestige_auto_approved(task, actor, **kw):
+    from . import prestige
+    prestige.award(task.posted_by, 'auto_approved_poster', key=f"task:{task.pk}:auto_approved", task=task)
+
+
 def _concede_dispute(task, actor, **kw):
     from . import disputes
     disputes.close_on_concession(task)
@@ -117,19 +148,21 @@ TRANSITIONS = {
     (S.AVAILABLE, 'expire'):          Rule(S.EXPIRED, _system, (_require_deadline_passed, _refund)),
 
     (S.IN_PROGRESS, 'submit'):        Rule(S.SUBMITTED, _taker, (_submit,)),
-    (S.IN_PROGRESS, 'approve'):       Rule(S.COMPLETED, _poster, (_payout,)),
-    (S.IN_PROGRESS, 'abandon'):       Rule(S.AVAILABLE, _taker, (_unassign,)),
+    (S.IN_PROGRESS, 'approve'):       Rule(S.COMPLETED, _poster, (_payout, _prestige_completed)),
+    (S.IN_PROGRESS, 'abandon'):       Rule(S.AVAILABLE, _taker, (_prestige_abandoned, _unassign)),
     (S.IN_PROGRESS, 'request_cancel'): Rule(S.IN_PROGRESS, _poster, (_flag_cancel,)),
     (S.IN_PROGRESS, 'accept_cancel'): Rule(S.CANCELLED, _taker, (_require_cancel_flag, _refund)),
     (S.IN_PROGRESS, 'dispute'):       Rule(S.DISPUTED, _party),
 
-    (S.SUBMITTED, 'approve'):         Rule(S.COMPLETED, _poster, (_payout,)),
-    (S.SUBMITTED, 'auto_approve'):    Rule(S.COMPLETED, _system, (_require_auto_approve_due, _payout)),
+    (S.SUBMITTED, 'approve'):         Rule(S.COMPLETED, _poster, (_payout, _prestige_completed)),
+    (S.SUBMITTED, 'auto_approve'):    Rule(S.COMPLETED, _system, (_require_auto_approve_due, _payout,
+                                                                  _prestige_completed, _prestige_auto_approved)),
     (S.SUBMITTED, 'dispute'):         Rule(S.DISPUTED, _party),
 
     (S.DISPUTED, 'approve'):          Rule(S.COMPLETED, _poster, (_payout, _concede_dispute)),
     (S.DISPUTED, 'withdraw_dispute'): Rule(S.IN_PROGRESS, _party),
     (S.DISPUTED, 'verdict_taker'):    Rule(S.COMPLETED, _system, (_payout,)),
+    (S.DISPUTED, 'verdict_split'):    Rule(S.COMPLETED, _system, (_split,)),
     (S.DISPUTED, 'verdict_poster'):   Rule(S.CANCELLED, _system, (_refund,)),
 }
 
@@ -139,7 +172,7 @@ def allowed_actions(task, actor):
             if status == task.status and rule.actor(task, actor)]
 
 
-def apply(task, action, actor=None, *, note=''):
+def apply(task, action, actor=None, *, note='', **params):
     """Apply `action` to `task` (instance or pk). Returns the updated task."""
     pk = getattr(task, 'pk', task)
     with transaction.atomic():
@@ -154,7 +187,7 @@ def apply(task, action, actor=None, *, note=''):
 
         from_status = task.status
         for effect in rule.effects:
-            effect(task, actor, note=note)
+            effect(task, actor, note=note, **params)
         task.status = rule.to
         task.version += 1
         task.save()

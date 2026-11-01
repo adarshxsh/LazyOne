@@ -69,3 +69,13 @@ def age_task(task, minutes):
     Task.objects.filter(pk=task.pk).update(
         opened_at=F('opened_at') + shift,
         wave1_at=F('wave1_at') + shift, wave2_at=F('wave2_at') + shift, wave3_at=F('wave3_at') + shift)
+
+
+def make_juror(name, prestige=50, community=None):
+    """A user who meets jury requirements: verified phone, account > 14 days, prestige >= 30."""
+    from datetime import timedelta as _td
+    u = make_user(name, community=community)
+    User.objects.filter(pk=u.pk).update(date_joined=timezone.now() - _td(days=30))
+    UserProfile.objects.filter(user=u).update(is_phone_verified=True, prestige=prestige)
+    u.refresh_from_db()
+    return u

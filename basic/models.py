@@ -59,6 +59,8 @@ class UserProfile(models.Model):
     firebase_uid = models.CharField(max_length=128, blank=True, null=True, unique=True)
     friends = models.ManyToManyField('self', through='Friendship', symmetrical=False, blank=True)
     community = models.ForeignKey(Community, null=True, blank=True, on_delete=models.SET_NULL, related_name='members')
+    # Reputation. Matters more than points: gates jury duty, shown as a tier. Cached sum of PrestigeEvent.
+    prestige = models.IntegerField(default=0)
 
     def __str__(self):
         return self.user.username
@@ -183,11 +185,24 @@ class Dispute(models.Model):
         WITHDRAWN = 'withdrawn', 'Withdrawn'
         ESCALATED = 'escalated', 'Escalated to moderator'
 
+    class Stage(models.TextChoices):
+        SETTLEMENT = 'settlement', 'Settlement (parties negotiate)'
+        JURY = 'jury', 'Jury voting'
+        APPEAL_WINDOW = 'appeal_window', 'Verdict given - appeal window open'
+        APPEAL = 'appeal', 'Appeal jury voting'
+        CLOSED = 'closed', 'Closed'
+
     class Outcome(models.TextChoices):
-        TAKER = 'taker', 'Decided for task taker'
-        POSTER = 'poster', 'Decided for task creator'
+        SETTLED = 'settled', 'Settled between the parties'
+        DEFAULT = 'default', 'Decided by default (no response)'
+        JURY = 'jury', 'Decided by jury'
+        APPEAL = 'appeal', 'Decided by appeal jury'
+        MODERATOR = 'moderator', 'Decided by moderator'
         CONCEDED = 'conceded', 'Creator approved payment'
         WITHDRAWN = 'withdrawn', 'Withdrawn'
+        # v1 values kept for old rows
+        TAKER = 'taker', 'Decided for task taker'
+        POSTER = 'poster', 'Decided for task creator'
 
     class DisputeType(models.TextChoices):
         PAYMENT = 'payment', 'Payment Issue'
@@ -208,6 +223,15 @@ class Dispute(models.Model):
     jury_seed = models.CharField(max_length=32, blank=True)
     outcome = models.CharField(max_length=20, choices=Outcome.choices, blank=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
+    # v2: settlement -> jury -> (appeal) -> closed. Outcomes are the taker's share of the reward in %.
+    stage = models.CharField(max_length=20, choices=Stage.choices, default=Stage.SETTLEMENT)
+    round = models.PositiveSmallIntegerField(default=1)
+    settlement_deadline = models.DateTimeField(null=True, blank=True)
+    outcome_pct = models.PositiveSmallIntegerField(null=True, blank=True)  # provisional after round 1, final when closed
+    appeal_deadline = models.DateTimeField(null=True, blank=True)
+    appealed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='appeals')
+    appeal_bond = models.PositiveIntegerField(default=0)
+    round1_pct = models.PositiveSmallIntegerField(null=True, blank=True)
 
     class Meta:
         constraints = [
@@ -233,19 +257,62 @@ class DisputeEvidence(models.Model):
         ordering = ['created_at']
 
 
+class SettlementOffer(models.Model):
+    """A proposed outcome during the settlement stage: the taker gets `taker_pct` % of the reward."""
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        ACCEPTED = 'accepted', 'Accepted'
+        REJECTED = 'rejected', 'Rejected'
+        SUPERSEDED = 'superseded', 'Superseded'
+
+    dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='offers')
+    proposed_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL)
+    taker_pct = models.PositiveSmallIntegerField()
+    message = models.CharField(max_length=500, blank=True)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at', 'id']
+        constraints = [models.CheckConstraint(condition=models.Q(taker_pct__lte=100), name='offer_pct_max_100')]
+
+
 class JurorAssignment(models.Model):
-    class Vote(models.TextChoices):
-        POSTER = 'poster', 'Task creator'
-        TAKER = 'taker', 'Task taker'
+    VOTE_CHOICES = [(0, 'Task creator wins (full refund)'), (50, 'Split 50/50'), (100, 'Task taker wins (full payment)')]
 
     dispute = models.ForeignKey(Dispute, on_delete=models.CASCADE, related_name='jurors')
     juror = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jury_duties')
-    vote = models.CharField(max_length=10, choices=Vote.choices, blank=True)
+    round = models.PositiveSmallIntegerField(default=1)
+    taker_pct = models.PositiveSmallIntegerField(null=True, blank=True)  # the juror's vote
+    reason = models.CharField(max_length=500, blank=True)               # required with the vote
     voted_at = models.DateTimeField(null=True, blank=True)
-    reward = models.PositiveIntegerField(default=0)
+    reward = models.PositiveIntegerField(default=0)                     # points from a forfeited bond
+    coherent = models.BooleanField(null=True)                           # voted the round's result
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['dispute', 'juror'], name='unique_juror_per_dispute')]
+
+    @property
+    def has_voted(self):
+        return self.taker_pct is not None
+
+    def get_vote_display(self):
+        return dict(self.VOTE_CHOICES).get(self.taker_pct, '')
+
+
+class PrestigeEvent(models.Model):
+    """Append-only reputation history. UserProfile.prestige caches the sum."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='prestige_events')
+    delta = models.IntegerField()
+    reason = models.CharField(max_length=40)
+    key = models.CharField(max_length=128, unique=True)  # idempotency: each event counts once
+    task = models.ForeignKey(Task, null=True, blank=True, on_delete=models.SET_NULL)
+    dispute = models.ForeignKey(Dispute, null=True, blank=True, on_delete=models.SET_NULL)
+    counterparty = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
 
 
 class FriendRequest(models.Model):

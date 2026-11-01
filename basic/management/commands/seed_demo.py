@@ -36,6 +36,10 @@ class Command(BaseCommand):
                 EmailAddress.objects.get_or_create(user=u, email=u.email, defaults={'verified': True, 'primary': True})
             users[n] = u
 
+        # Demo users qualify as jurors: verified, account older than 14 days, some prestige.
+        User.objects.filter(pk__in=[u.pk for u in users.values()]).update(date_joined=timezone.now() - timedelta(days=30))
+        UserProfile.objects.filter(user__in=users.values(), prestige__lt=40).update(is_phone_verified=True, prestige=40)
+
         def friends(a, b, closeness):
             pa, pb = users[a].userprofile, users[b].userprofile
             Friendship.objects.get_or_create(from_user=pa, to_user=pb, defaults={'closeness': closeness})
@@ -58,10 +62,19 @@ class Command(BaseCommand):
                                       reward=100, deadline=deadline, wave_policy='community_now')
             marketplace.apply(t, 'accept', users['hina'])
             marketplace.apply(t, 'submit', users['hina'], note='Left it at your door')
-            d = disputes.raise_dispute(t, users['gopal'], 'Nothing was at my door.', 'quality')
+            # Dispute in the settlement stage: gopal (poster) offers a full refund; hina can accept/counter/reject.
+            d = disputes.raise_dispute(t, users['gopal'], 'Nothing was at my door.', 'quality', taker_pct=0)
             disputes.add_evidence(d, users['hina'], 'Photo sent in chat at 8:10pm.')
-            jurors = ', '.join(d.jurors.values_list('juror__username', flat=True))
-            self.stdout.write(f"Dispute {d.public_id} jurors: {jurors}")
+            self.stdout.write(f"Dispute {d.public_id}: settlement stage (log in as hina or gopal)")
+            # Dispute already at the jury.
+            t2 = marketplace.post_task(users['ira'], title='Pick up parcel from gate', description='',
+                                       reward=120, deadline=deadline, wave_policy='community_now')
+            marketplace.apply(t2, 'accept', users['jay'])
+            d2 = disputes.raise_dispute(t2, users['jay'], 'Delivered, but no approval for 2 days.', 'payment')
+            disputes.make_offer(d2, users['ira'], 50, 'The parcel was damaged')
+            disputes.reject_offers(d2, users['jay'])
+            jurors = ', '.join(d2.jurors.values_list('juror__username', flat=True))
+            self.stdout.write(f"Dispute {d2.public_id}: at the jury - jurors: {jurors}")
 
         self.stdout.write(self.style.SUCCESS(
             f"Seeded {len(users)} users (password '{PASSWORD}'). Log in as asha/bala/chen/dev to see waves."))

@@ -45,9 +45,11 @@ def _visible_task(user, public_id):
 def me(request):
     profile = request.user.userprofile
     community = profile.get_community()
+    from basic.services import prestige
     return Response({
         'id': request.user.pk, 'username': request.user.username, 'email': request.user.email,
         'balance': ledger.balance_of(request.user),
+        'prestige': profile.prestige, 'tier': prestige.tier(profile.prestige),
         'community': {'slug': community.slug, 'name': community.name},
         'phone_verified': profile.is_phone_verified,
     })
@@ -124,7 +126,8 @@ def raise_dispute(request, public_id):
     task = get_object_or_404(Task, public_id=public_id)
     try:
         d = disputes.raise_dispute(task, request.user, request.data.get('reason'),
-                                   request.data.get('dispute_type') or Dispute.DisputeType.OTHER)
+                                   request.data.get('dispute_type') or Dispute.DisputeType.OTHER,
+                                   taker_pct=request.data.get('taker_pct'))
     except TransitionError as e:
         return _error(e)
     return Response(DisputeSerializer(d, context={'request': request}).data, status=201)
@@ -153,7 +156,15 @@ def dispute_action(request, public_id, action):
         if action == 'evidence':
             disputes.add_evidence(d, request.user, request.data.get('text'))
         elif action == 'vote':
-            disputes.cast_vote(d, request.user, request.data.get('vote'))
+            disputes.cast_vote(d, request.user, request.data.get('taker_pct'), request.data.get('reason'))
+        elif action == 'offer':
+            disputes.make_offer(d, request.user, request.data.get('taker_pct'), request.data.get('message'))
+        elif action == 'accept':
+            disputes.accept_offer(d, request.user)
+        elif action == 'reject':
+            disputes.reject_offers(d, request.user)
+        elif action == 'appeal':
+            disputes.appeal(d, request.user)
         elif action == 'withdraw':
             disputes.withdraw(d, request.user)
         else:

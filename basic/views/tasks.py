@@ -81,11 +81,13 @@ def raise_dispute(request, public_id):
         return redirect('my_tasks')  # the modal is handled client-side
     try:
         dispute = disputes.raise_dispute(task, request.user, request.POST.get('reason'),
-                                         request.POST.get('dispute_type') or Dispute.DisputeType.OTHER)
+                                         request.POST.get('dispute_type') or Dispute.DisputeType.OTHER,
+                                         taker_pct=request.POST.get('taker_pct') or None)
     except TransitionError as e:
         messages.error(request, str(e))
         return redirect('my_tasks')
-    messages.success(request, f"Dispute raised. A bond of {dispute.bond_amount} points is held until it is decided.")
+    messages.success(request, f"Dispute raised. The other side has 24 h to settle; a refundable bond of "
+                              f"{dispute.bond_amount} points is held.")
     return redirect('dispute_detail', public_id=dispute.public_id)
 
 
@@ -94,7 +96,10 @@ def my_tasks(request):
     posted_tasks = Task.objects.filter(posted_by=request.user).select_related('taken_by', 'conversation').order_by('-created_at')
     taken_tasks = Task.objects.filter(taken_by=request.user).select_related('posted_by', 'conversation').order_by('-created_at')
     jury_duties = (request.user.jury_duties.select_related('dispute__task')
-                   .filter(dispute__status=Dispute.Status.OPEN).order_by('dispute__voting_deadline'))
+                   .filter(dispute__status=Dispute.Status.OPEN, dispute__stage__in=['jury', 'appeal'])
+                   .order_by('dispute__voting_deadline'))
+    from ..services import prestige
+    score = prestige.of(request.user)
     context = {'posted_tasks': posted_tasks, 'taken_tasks': taken_tasks, 'jury_duties': jury_duties,
-               'dispute_types': Dispute.DisputeType.choices}
+               'dispute_types': Dispute.DisputeType.choices, 'my_prestige': score, 'my_tier': prestige.tier(score)}
     return render(request, 'my_tasks.html', context)

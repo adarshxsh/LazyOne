@@ -94,24 +94,30 @@ class ApiTests(World, TestCase):
         self.assertEqual(self.a3.get(f'/api/v1/conversations/{conv}/messages/').status_code, 404)
         self.assertEqual(self.a3.post(f'/api/v1/conversations/{conv}/messages/', {'content': 'x'}).status_code, 403)
 
-    def test_dispute_api_hides_votes_until_closed(self):
-        jurors = [make_user(f'j{i}') for i in range(5)]
+    def test_dispute_api_v2_flow(self):
+        from .base import make_juror
+        for i in range(5):
+            make_juror(f'j{i}')
         self.a2.post(f'/api/v1/tasks/{self.task.public_id}/accept/')
-        r = self.a2.post(f'/api/v1/tasks/{self.task.public_id}/disputes/', {'reason': 'late'})
+        r = self.a2.post(f'/api/v1/tasks/{self.task.public_id}/disputes/', {'reason': 'late', 'taker_pct': 80})
         self.assertEqual(r.status_code, 201, r.content)
         did = r.json()['public_id']
-        self.assertEqual(r.json()['tally'], {'jurors': 5, 'votes_cast': 0})
-        self.assertEqual(self.a3.get(f'/api/v1/disputes/{did}/').status_code,
-                         200 if Dispute.objects.get(public_id=did).jurors.filter(juror=self.user3).exists() else 404)
-        seats = Dispute.objects.get(public_id=did).jurors.select_related('juror')
-        for seat in seats:
+        self.assertEqual((r.json()['stage'], r.json()['offers'][0]['taker_pct']), ('settlement', 80))
+        r = self.a1.post(f'/api/v1/disputes/{did}/reject/')
+        self.assertEqual(r.json()['stage'], 'jury')
+        self.assertEqual(r.json()['tally'], {'jurors': 3, 'votes_cast': 0})
+        for seat in Dispute.objects.get(public_id=did).jurors.select_related('juror'):
             c = APIClient(); c.force_authenticate(seat.juror)
-            resp = c.post(f'/api/v1/disputes/{did}/vote/', {'vote': 'taker'})
+            resp = c.post(f'/api/v1/disputes/{did}/vote/', {'taker_pct': 100, 'reason': 'Delivered per chat'})
             self.assertEqual(resp.status_code, 200, resp.content)
-        final = self.a1.get(f'/api/v1/disputes/{did}/').json()
-        self.assertEqual(final['status'], 'resolved')
-        self.assertEqual(final['tally'], {'taker': 5, 'poster': 0})
+        d = self.a1.get(f'/api/v1/disputes/{did}/').json()
+        self.assertEqual((d['stage'], d['outcome_pct'], d['can_appeal']), ('appeal_window', 100, True))
+        self.assertEqual(len(d['tally']['votes']), 3)
         self.assertLedgerConsistent()
+
+    def test_me_shows_prestige(self):
+        r = self.a1.get('/api/v1/me/').json()
+        self.assertEqual((r['prestige'], r['tier']), (0, 'Newcomer'))
 
     def test_ledger_history(self):
         r = self.a1.get('/api/v1/ledger/').json()

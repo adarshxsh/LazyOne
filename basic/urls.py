@@ -31,6 +31,10 @@ from .views import (
     add_evidence,
     cast_vote,
     moderator_resolve,
+    make_offer,
+    accept_offer,
+    reject_offers,
+    appeal,
     message_history,
     realtime_token,
 )
@@ -62,6 +66,10 @@ urlpatterns = [
     path('dispute/evidence/<str:public_id>/', add_evidence, name='add_evidence'),
     path('dispute/vote/<str:public_id>/', cast_vote, name='cast_vote'),
     path('dispute/resolve/<str:public_id>/', moderator_resolve, name='moderator_resolve'),
+    path('dispute/offer/<str:public_id>/', make_offer, name='dispute_offer'),
+    path('dispute/accept/<str:public_id>/', accept_offer, name='dispute_accept'),
+    path('dispute/reject/<str:public_id>/', reject_offers, name='dispute_reject'),
+    path('dispute/appeal/<str:public_id>/', appeal, name='dispute_appeal'),
     path('my_tasks/', my_tasks, name='my_tasks'),
 
     # Chat URLs
