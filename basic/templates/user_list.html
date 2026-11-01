@@ -1,12 +1,14 @@
 {% extends 'base.html' %}
 
-{% block title %}Find Friends{% endblock %}
+{% block title %}Find people{% endblock %}
 {% block content %}
-<div class="mx-auto max-w-3xl">
-    <div class="mb-6">
-        <h1 class="page-title">Find people</h1>
-        <p class="mt-1 text-ink-muted">Discover and connect with other people on LazyOne.</p>
-    </div>
+<div class="page-medium">
+    <header class="page-head">
+        <div>
+            <h1 class="page-title">Find people</h1>
+            <p class="page-sub">Discover and connect with other people on LazyOne.</p>
+        </div>
+    </header>
 
     <form method="get" class="mb-4 flex gap-2">
         <input type="search" name="q" value="{{ search_query }}" placeholder="Search by username" class="input flex-1" maxlength="50">

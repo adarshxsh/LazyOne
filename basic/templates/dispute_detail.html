@@ -1,17 +1,17 @@
 {% extends 'base.html' %}
 
-{% block title %}Dispute Details - {{ block.super }}{% endblock %}
+{% block title %}Dispute: {{ task.title }}{% endblock %}
 
 {% block content %}
-<div class="mx-auto max-w-3xl space-y-6">
-    <div>
-        <a href="{% url 'my_tasks' %}" class="text-sm text-ink-subtle hover:text-ink">← My tasks</a>
-        <div class="mt-2 flex flex-wrap items-center gap-2">
+<div class="page-medium space-y-6">
+    <header>
+        <a href="{% url 'my_tasks' %}" class="back-link">← My tasks</a>
+        <div class="flex flex-wrap items-center gap-2">
             <h1 class="page-title">{{ task.title }}</h1>
             <span class="badge status-{{ dispute.status }}">{{ dispute.get_status_display }}</span>
         </div>
         <p class="mt-1 text-sm text-ink-subtle">{{ task.reward }} pts · created by {{ task.posted_by.username }} · taken by {{ task.taken_by.username|default:"-" }} · raised by {{ dispute.raised_by.username }} ({{ dispute.get_dispute_type_display }})</p>
-    </div>
+    </header>
 
     <!-- Stage tracker -->
     <ol class="grid grid-cols-4 gap-1.5 text-center text-xs font-medium" aria-label="Dispute stage">
@@ -33,13 +33,13 @@
     </section>
 
     <section>
-        <h2 class="section-title mb-2">Reason</h2>
+        <h2 class="section-title mb-3">Reason</h2>
         <p class="card p-4 text-[15px] leading-relaxed text-ink-muted">{{ dispute.reason|linebreaksbr }}</p>
     </section>
 
     <!-- Settlement -->
     <section>
-        <h2 class="section-title mb-2">Settlement offers</h2>
+        <h2 class="section-title mb-3">Settlement offers</h2>
         <ul class="space-y-2 text-sm">
             {% for o in offers %}
             <li class="card p-3.5 {% if o.status == 'accepted' %}border-ok/50{% endif %}">
@@ -73,7 +73,7 @@
 
     <!-- Evidence -->
     <section>
-        <h2 class="section-title mb-2">Evidence</h2>
+        <h2 class="section-title mb-3">Evidence</h2>
         <div class="space-y-2">
             {% for e in evidence %}
                 <div class="card p-4">
@@ -94,7 +94,7 @@
 
     <!-- Task timeline (automatic evidence) -->
     <section>
-        <h2 class="section-title mb-2">Task timeline</h2>
+        <h2 class="section-title mb-3">Task timeline</h2>
         <ol class="card divide-y divide-line text-sm">
             {% for e in timeline %}
                 <li class="px-4 py-2.5 text-ink-muted"><span class="tabular-nums text-ink-subtle">{{ e.created_at|date:"M j, g:i a" }}</span> · {{ e.actor.username|default:"system" }} · {{ e.action }} ({{ e.from_status|default:"-" }} → {{ e.to_status }}){% if e.note %} · {{ e.note }}{% endif %}</li>
@@ -108,7 +108,7 @@
     <!-- Jury -->
     {% if seat %}
     <section class="card border-accent/40 p-5">
-        <h2 class="section-title mb-2">You are on the {% if seat.round == 2 %}appeal {% endif %}jury</h2>
+        <h2 class="section-title mb-3">You are on the {% if seat.round == 2 %}appeal {% endif %}jury</h2>
         {% if seat.has_voted %}
             <p class="text-sm text-ink-muted">You voted: <strong class="text-ink">{{ seat.get_vote_display }}</strong>. “{{ seat.reason }}”</p>
             {% if seat.coherent %}<p class="mt-1 text-sm text-ok">You voted with the result: +prestige{% if seat.reward %}, +{{ seat.reward }} points{% endif %}.</p>{% endif %}
@@ -133,7 +133,7 @@
 
     {% if jurors %}
     <section>
-        <h2 class="section-title mb-2">Jury votes</h2>
+        <h2 class="section-title mb-3">Jury votes</h2>
         <ul class="card divide-y divide-line text-sm">
             {% for j in jurors %}<li class="px-4 py-2.5 text-ink-muted"><span class="text-ink-subtle">Round {{ j.round }}</span> · {{ j.juror.username }}: <span class="text-ink">{{ j.get_vote_display|default:"did not vote" }}</span>{% if j.reason %} · “{{ j.reason }}”{% endif %}{% if j.reward %} <span class="text-ok">(+{{ j.reward }} pts)</span>{% endif %}</li>{% endfor %}
         </ul>
@@ -149,7 +149,7 @@
 
     {% if request.user.is_staff and dispute.is_active %}
     <section class="card border-warn/40 p-5">
-        <h2 class="section-title mb-2">Moderator decision</h2>
+        <h2 class="section-title mb-3">Moderator decision</h2>
         <form action="{% url 'moderator_resolve' dispute.public_id %}" method="post" class="flex flex-wrap gap-2">{% csrf_token %}
             {% for v, label in pct_choices %}<button name="taker_pct" value="{{ v }}" class="btn btn-secondary">{{ label }}</button>{% endfor %}
         </form>

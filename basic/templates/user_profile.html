@@ -1,9 +1,9 @@
 {% extends 'base.html' %}
 
-{% block title %}{{ viewed_profile.user.username }}'s Profile{% endblock %}
+{% block title %}{{ viewed_profile.user.username }}{% endblock %}
 
 {% block content %}
-<div class="mx-auto max-w-4xl space-y-8">
+<div class="page-medium space-y-8">
     <section class="card flex flex-col gap-5 p-6 sm:flex-row sm:items-center">
         <span class="avatar h-16 w-16 text-xl" aria-hidden="true">{{ viewed_profile.user.username|slice:":2" }}</span>
         <div class="min-w-0 flex-1">
@@ -41,7 +41,7 @@
                                 <h3 class="font-semibold leading-snug text-ink">{{ task.title }}</h3>
                                 <span class="badge status-{{ task.status }}">{{ task.get_status_display }}</span>
                             </div>
-                            <p class="mt-1 text-sm text-ink-subtle">{{ task.created_at|timesince }} ago</p>
+                            <p class="mt-1 text-sm text-ink-subtle">{% include "partials/ago.html" with when=task.created_at %}</p>
                         </div>
                         <span class="points">{{ task.reward }}<small>pts</small></span>
                     </div>

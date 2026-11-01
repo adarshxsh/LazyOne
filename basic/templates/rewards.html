@@ -1,13 +1,15 @@
 {% extends 'base.html' %}
 
-{% block title %}My Rewards{% endblock %}
+{% block title %}Rewards{% endblock %}
 
 {% block content %}
-<div class="mx-auto max-w-4xl space-y-8">
-    <div>
-        <h1 class="page-title">Rewards</h1>
-        <p class="mt-1 text-ink-muted">Your points and every transaction behind them.</p>
-    </div>
+<div class="page-medium space-y-8">
+    <header class="page-head">
+        <div>
+            <h1 class="page-title">Rewards</h1>
+            <p class="page-sub">Your points and every transaction behind them.</p>
+        </div>
+    </header>
 
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div class="card p-5">

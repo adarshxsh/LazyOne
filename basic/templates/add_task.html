@@ -1,13 +1,15 @@
 {% extends 'base.html' %}
 
-{% block title %}Add Task{% endblock %}
+{% block title %}New task{% endblock %}
 
 {% block content %}
-<div class="mx-auto max-w-2xl">
-    <div class="mb-6">
-        <h1 class="page-title">New task</h1>
-        <p class="mt-1 text-ink-muted">You have <strong class="font-semibold tabular-nums text-accent">{{ request.user.userprofile.rewards }}</strong> points available.</p>
-    </div>
+<div class="page-narrow">
+    <header class="page-head">
+        <div>
+            <h1 class="page-title">New task</h1>
+            <p class="page-sub">You have <strong class="font-semibold tabular-nums text-accent">{{ request.user.userprofile.rewards }}</strong> points available.</p>
+        </div>
+    </header>
 
     <form method="post" class="card space-y-5 p-5 sm:p-6">
         {% csrf_token %}

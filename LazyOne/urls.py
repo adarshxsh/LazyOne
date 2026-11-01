@@ -18,9 +18,13 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from django.templatetags.static import static as static_url
+from django.views.generic.base import RedirectView
 
 urlpatterns = [
     path(settings.ADMIN_URL, admin.site.urls),
+    # Browsers request /favicon.ico directly (e.g. for non-HTML responses); point it at the brand icon.
+    path('favicon.ico', RedirectView.as_view(url=static_url('brand/favicon.ico'), permanent=True)),
     path('accounts/', include('allauth.urls')),
     path('api/v1/', include('api.urls')),
     path('', include('basic.urls')),

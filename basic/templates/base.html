@@ -4,7 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="light dark">
-    <title>{% block title %}LazyOne{% endblock %}</title>
+    <meta name="theme-color" content="#f7f5f1" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#171614" media="(prefers-color-scheme: dark)">
+    {# Every page title reads "<Page> · LazyOne"; pages only fill in the first part. #}
+    <title>{% block title %}Home{% endblock %} · LazyOne</title>
+    {% load static %}
+    <link rel="icon" href="{% static 'brand/favicon.svg' %}" type="image/svg+xml">
+    <link rel="icon" href="{% static 'brand/favicon-32.png' %}" type="image/png" sizes="32x32">
+    <link rel="apple-touch-icon" href="{% static 'brand/apple-touch-icon.png' %}">
 
     <script>
         // Apply the saved theme before first paint so the page never flashes the wrong colours.
@@ -30,6 +37,8 @@
                         line: token('line'),
                         ink: { DEFAULT: token('ink'), muted: token('ink-muted'), subtle: token('ink-subtle') },
                         accent: { DEFAULT: token('accent'), hover: token('accent-hover'), ink: token('accent-ink') },
+                        // Brand fill: identical in light and dark, same as the favicon/logo.
+                        brand: { DEFAULT: token('brand'), hover: token('brand-hover'), ink: token('brand-ink') },
                         ok: token('ok'),
                         bad: token('bad'),
                         warn: token('warn'),
@@ -54,6 +63,9 @@
                 --accent: 161 98 7;
                 --accent-hover: 133 77 14;
                 --accent-ink: 255 255 255;
+                --brand: 214 168 92;
+                --brand-hover: 199 150 72;
+                --brand-ink: 28 25 20;
                 --ok: 22 122 60;
                 --bad: 185 38 38;
                 --warn: 180 70 15;
@@ -73,6 +85,9 @@
                     --accent: 214 168 92;
                     --accent-hover: 228 186 116;
                     --accent-ink: 28 25 20;
+                    --brand: 214 168 92;
+                    --brand-hover: 228 186 116;
+                    --brand-ink: 28 25 20;
                     --ok: 134 186 144;
                     --bad: 226 128 120;
                     --warn: 222 150 92;
@@ -91,6 +106,9 @@
                 --accent: 214 168 92;
                 --accent-hover: 228 186 116;
                 --accent-ink: 28 25 20;
+                    --brand: 214 168 92;
+                    --brand-hover: 228 186 116;
+                    --brand-ink: 28 25 20;
                 --ok: 134 186 144;
                 --bad: 226 128 120;
                 --warn: 222 150 92;
@@ -114,6 +132,14 @@
 
         @layer components {
             .card { @apply bg-surface border border-line rounded-xl; }
+            /* Page layout. Every page uses one of three widths and the same header pattern:
+               <header class="page-head"><div><h1 class="page-title">…</h1><p class="page-sub">…</p></div> [action]</header> */
+            .page-narrow { @apply mx-auto w-full max-w-2xl; }   /* forms, single lists */
+            .page-medium { @apply mx-auto w-full max-w-4xl; }   /* dashboards, detail pages */
+            .page-auth { @apply mx-auto flex min-h-[70vh] w-full max-w-sm flex-col justify-center; }
+            .page-head { @apply mb-6 flex flex-wrap items-end justify-between gap-3; }
+            .page-sub { @apply mt-1 text-ink-muted; }
+            .back-link { @apply mb-2 inline-flex items-center gap-1 text-sm text-ink-subtle hover:text-ink; }
             .page-title { @apply text-2xl sm:text-3xl font-semibold tracking-tight text-ink; }
             .section-title { @apply text-base font-semibold text-ink; }
             .eyebrow { @apply text-xs font-medium uppercase tracking-wider text-ink-subtle; }
@@ -121,7 +147,7 @@
 
             .btn { @apply inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50; }
             .btn-lg { @apply px-5 py-2.5 text-[15px]; }
-            .btn-primary { @apply bg-accent text-accent-ink hover:bg-accent-hover; }
+            .btn-primary { @apply bg-brand text-brand-ink hover:bg-brand-hover; }
             .btn-secondary { @apply border border-line bg-raised text-ink hover:border-ink-subtle/60; }
             .btn-ghost { @apply text-ink-muted hover:bg-raised hover:text-ink; }
             .btn-danger { @apply border border-bad/35 bg-bad/10 text-bad hover:bg-bad/15; }
@@ -169,7 +195,8 @@
     <header class="sticky top-0 z-40 border-b border-line bg-canvas/90 backdrop-blur">
         <div class="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4 sm:px-6">
             <a href="{% url 'home' %}" class="flex items-center gap-2 text-lg font-semibold tracking-tight text-ink">
-                <span class="grid h-7 w-7 place-items-center rounded-lg bg-accent text-sm font-bold text-accent-ink" aria-hidden="true">L</span>
+                {# Same artwork as static/brand/favicon.svg, so the tab icon and the logo always match. #}
+                <svg class="h-7 w-7" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#D6A85C"/><path d="M10.5 7.5h4.75v12.25h7.25v4.75h-12z" fill="#1C1914"/></svg>
                 LazyOne
             </a>
 
@@ -194,7 +221,7 @@
                        aria-label="Notifications{% if unread_notifications_count %}, {{ unread_notifications_count }} unread{% endif %}" title="Notifications">
                         <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"/></svg>
                         {% if unread_notifications_count %}
-                            <span class="absolute -right-0.5 -top-0.5 min-w-[1.1rem] rounded-full bg-accent px-1 text-center text-[10px] font-semibold leading-[1.1rem] text-accent-ink">{{ unread_notifications_count }}</span>
+                            <span class="absolute -right-0.5 -top-0.5 min-w-[1.1rem] rounded-full bg-brand px-1 text-center text-[10px] font-semibold leading-[1.1rem] text-brand-ink">{{ unread_notifications_count }}</span>
                         {% endif %}
                     </a>
                 {% endif %}

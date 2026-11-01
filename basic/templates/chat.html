@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}Chat for: {{ conversation.task.title|default:"Direct Message" }}{% endblock %}
+{% block title %}{{ conversation.task.title|default:"Direct message" }}{% endblock %}
 
 {% block content %}
 <style>

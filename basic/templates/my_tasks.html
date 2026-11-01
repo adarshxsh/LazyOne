@@ -1,16 +1,16 @@
 {% extends 'base.html' %}
 
-{% block title %}My Tasks{% endblock %}
+{% block title %}My tasks{% endblock %}
 
 {% block content %}
-<div class="mx-auto max-w-4xl">
-    <div class="mb-6 flex flex-wrap items-end justify-between gap-3">
+<div class="page-medium">
+    <header class="page-head">
         <div>
             <h1 class="page-title">My tasks</h1>
-            <p class="mt-1 text-sm text-ink-muted">Prestige <strong class="font-semibold tabular-nums text-ink">{{ my_prestige }}</strong> · {{ my_tier }}</p>
+            <p class="page-sub">Prestige <strong class="font-semibold tabular-nums text-ink">{{ my_prestige }}</strong> · {{ my_tier }}</p>
         </div>
         <a href="{% url 'add_task' %}" class="btn btn-primary">New task</a>
-    </div>
+    </header>
 
     {% if jury_duties %}
     <section class="card mb-6" aria-labelledby="jury-heading">

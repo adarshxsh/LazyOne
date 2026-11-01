@@ -8,7 +8,7 @@
     <section class="card mb-6 flex flex-col items-start gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
         <div>
             <h1 class="page-title">Welcome to LazyOne</h1>
-            <p class="mt-1 text-ink-muted">Post small tasks, help classmates out, and earn points along the way.</p>
+            <p class="page-sub">Post small tasks, help classmates out, and earn points along the way.</p>
         </div>
         <a href="{% url 'account_login' %}" class="btn btn-primary btn-lg">Log in to get started</a>
     </section>
@@ -37,7 +37,7 @@
             <div>
                 <h1 id="tasks-heading" class="page-title">Available tasks</h1>
                 {% if search_query %}
-                    <p class="mt-1 text-sm text-ink-muted">
+                    <p class="page-sub text-sm">
                         {{ available_tasks|length }} result{{ available_tasks|length|pluralize }} for “{{ search_query }}” ·
                         <a href="{% url 'home' %}" class="link">Clear</a>
                     </p>
@@ -57,7 +57,7 @@
                     <div class="flex items-start justify-between gap-4">
                         <div class="min-w-0">
                             <h3 class="font-semibold leading-snug text-ink">{{ task.title }}</h3>
-                            <p class="mt-1 text-sm text-ink-subtle">{{ task.posted_by.username }} · {{ task.created_at|timesince }} ago</p>
+                            <p class="mt-1 text-sm text-ink-subtle">{{ task.posted_by.username }} · {% include "partials/ago.html" with when=task.created_at %}</p>
                         </div>
                         <span class="points">{{ task.reward }}<small>pts</small></span>
                     </div>
@@ -161,7 +161,7 @@
               padding: 2px; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
     .person:hover, .person:focus-visible { border-color: rgb(var(--accent)); box-shadow: 0 0 0 3px rgb(var(--accent) / .18); z-index: 20; outline: none; }
     .person.stranger { background: transparent; border-style: dashed; color: rgb(var(--ink-subtle)); }
-    .person.me { background: rgb(var(--accent)); border-color: rgb(var(--accent)); color: rgb(var(--accent-ink)); z-index: 10; }
+    .person.me { background: rgb(var(--brand)); border-color: rgb(var(--brand)); color: rgb(var(--brand-ink)); z-index: 10; }
     .person span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .menu-item { display: block; width: 100%; padding: .5rem 1rem; text-align: left; font-size: .875rem; color: rgb(var(--ink-muted)); }
     .menu-item:hover, .menu-item:focus-visible { background: rgb(var(--raised)); color: rgb(var(--ink)); outline: none; }

@@ -1,13 +1,15 @@
 {% extends 'base.html' %}
 
-{% block title %}Your Friends{% endblock %}
+{% block title %}Friends{% endblock %}
 
 {% block content %}
-<div class="space-y-10">
-    <div>
-        <h1 class="page-title">Friends</h1>
-        <p class="mt-1 text-ink-muted">Closeness decides how early your friends see the tasks you post.</p>
-    </div>
+<div class="page-medium space-y-10">
+    <header class="page-head">
+        <div>
+            <h1 class="page-title">Friends</h1>
+            <p class="page-sub">Closeness decides how early your friends see the tasks you post.</p>
+        </div>
+    </header>
 
     {% if friend_requests %}
     <section aria-labelledby="requests-heading">

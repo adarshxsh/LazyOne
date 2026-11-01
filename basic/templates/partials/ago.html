@@ -1,0 +1,2 @@
+{# Relative time that reads "just now" instead of "0 minutes ago". Usage: {% include "partials/ago.html" with when=obj.created_at %} #}
+{% with t=when|timesince %}{% if t == "0 minutes" %}just now{% else %}{{ t }} ago{% endif %}{% endwith %}

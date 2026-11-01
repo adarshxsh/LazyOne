@@ -1,13 +1,15 @@
 {% extends 'base.html' %}
 
-{% block title %}Profile{% endblock %}
+{% block title %}Your profile{% endblock %}
 
 {% block content %}
-<div class="mx-auto max-w-2xl">
-    <div class="mb-6">
-        <h1 class="page-title">Your profile</h1>
-        <p class="mt-1 text-ink-muted">This is what classmates see when they open your profile.</p>
-    </div>
+<div class="page-narrow">
+    <header class="page-head">
+        <div>
+            <h1 class="page-title">Your profile</h1>
+            <p class="page-sub">This is what classmates see when they open your profile.</p>
+        </div>
+    </header>
 
 <form method="post" class="space-y-6">
     {% csrf_token %}
