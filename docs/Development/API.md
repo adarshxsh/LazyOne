@@ -19,7 +19,7 @@ Base path: `/api/v1/` · Code: [`api/`](../../api/) · Used by the Android (Flut
 ### Me & ledger
 | Method | Path | Returns |
 |--------|------|---------|
-| GET | `/me/` | id, username, email, `balance`, community, `phone_verified` |
+| GET | `/me/` | id, username, email, `balance`, `prestige`, `tier`, community, `phone_verified` |
 | GET | `/ledger/` | balance + last 100 entries (amount, reason, task, time) |
 
 ### Tasks
@@ -37,11 +37,15 @@ Task objects include `status`, `version`, `allowed_actions` (for the caller), `c
 ### Disputes
 | Method | Path | Notes |
 |--------|------|-------|
-| POST | `/tasks/{id}/disputes/` | `{reason, dispute_type?}`; takes a bond of max(20 % of reward, 50) |
-| GET | `/disputes/{id}/` | Parties, jurors, staff only. `tally` shows counts only while open; votes revealed after close |
+| POST | `/tasks/{id}/disputes/` | `{reason, dispute_type?, taker_pct?}` → settlement stage with the opening offer; bond max(20 % of reward, 50) |
+| GET | `/disputes/{id}/` | Parties, jurors, staff only. Includes `stage`, `round`, `offers`, `outcome_pct`, `can_appeal`; `tally` shows counts while voting, votes + reasons after the round |
+| POST | `/disputes/{id}/offer/` | `{taker_pct, message?}` - settlement stage, parties |
+| POST | `/disputes/{id}/accept/` | Accept the other side's pending offer → settled |
+| POST | `/disputes/{id}/reject/` | Refuse to settle → jury |
 | POST | `/disputes/{id}/evidence/` | `{text}`; parties, before `evidence_deadline` |
-| POST | `/disputes/{id}/vote/` | `{vote: "taker"|"poster"}`; jurors, before `voting_deadline` |
-| POST | `/disputes/{id}/withdraw/` | Raiser only; bond refunded |
+| POST | `/disputes/{id}/vote/` | `{taker_pct: 0|50|100, reason}` (reason ≥ 10 chars); current-round jurors |
+| POST | `/disputes/{id}/appeal/` | Losing side, within the appeal window; appeal bond = 2 × bond |
+| POST | `/disputes/{id}/withdraw/` | Raiser only, settlement/jury stage; bond refunded |
 
 ### Chat & realtime
 | Method | Path | Notes |

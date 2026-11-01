@@ -3,7 +3,9 @@
 > Updated 2026-11-01. Local-first: everything here is built and verified locally before deployment.
 
 ## Next
-- [ ] **Dispute resolution deep-dive** (review v1 rules, edge cases, then lock like waves)
+- [x] Dispute resolution v2 + prestige ([design](../Ideation/DISPUTE_RESOLUTION.md))
+- [ ] Answer the open dispute questions, then lock disputes v2
+- [ ] Show prestige/tier on profiles and the navbar
 - [ ] Fix home graph leaking non-friends' phone numbers ([SECURITY #3](SECURITY.md))
 - [ ] Sybil protection: verification before bonus / jury duty ([SECURITY #2](SECURITY.md))
 - [ ] `social` service (friend requests, acceptor sets own closeness)

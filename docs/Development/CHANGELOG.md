@@ -13,8 +13,9 @@ All notable changes to the LazyOne project are documented in this file.
 - Transactional outbox (`outbox` app) + `run_jobs` / `/internal/cron/`.
 - REST API `/api/v1` (Firebase token auth, idempotency keys, throttling) and communities by email domain.
 - Wave distribution 🔒 v1: adaptive schedule, cached circles, 3.5–4.5× faster feed.
-- Peer-jury disputes: bond, evidence, conflict-free jury draw, hidden votes, escalation.
-- `seed_demo`, `LOCAL_DEV.md`, CI on Postgres, 98 tests.
+- Disputes v2: settlement offers with split outcomes, default judgment, jury sized by reward, required vote reasons, median verdict, one appeal, moderator.
+- Prestige: reputation log, tiers, juror eligibility, anti-farming pair cap.
+- `seed_demo`, `LOCAL_DEV.md`, CI on Postgres, 115 tests.
 
 ## [2.0.1] - 2026-10
 ### Changed

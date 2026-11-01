@@ -1,6 +1,6 @@
 # LazyOne Docs - Start Here
 
-> Snapshot **2026-11-01** · branch `arch-v2/phase0` (local, not pushed, not deployed) · 98 tests green on SQLite + Postgres
+> Snapshot **2026-11-01** · branch `arch-v2/phase0` (local, not pushed, not deployed) · 115 tests green on SQLite + Postgres
 
 ## Status at a glance
 
@@ -10,7 +10,7 @@
 | Ledger, task state machine, outbox | ✅ done |
 | API v1 + communities | ✅ done |
 | **Wave distribution** | 🔒 **locked v1** - adaptive schedule, optimized feed, measured |
-| Dispute resolution (peer jury) | ✅ v1 built - **next to review in depth** |
+| Dispute resolution v2 + prestige | ✅ built - settlement → jury → appeal; review then lock |
 | Push (FCM), sync endpoint, chat safety poll | 📝 designed, not built |
 | Deployment | ⏳ after local work; hosting not chosen |
 | Security | ⚠️ core protected; open items before launch |
@@ -23,6 +23,7 @@
 | Understand the overall system | [Ideation/ARCHITECTURE_V2.md](Ideation/ARCHITECTURE_V2.md) |
 | Understand the business rules | [Development/BUSINESS_LAYER.md](Development/BUSINESS_LAYER.md) |
 | Understand waves (core idea) | [Ideation/WAVE_DISTRIBUTION.md](Ideation/WAVE_DISTRIBUTION.md) 🔒 |
+| Understand disputes & prestige | [Ideation/DISPUTE_RESOLUTION.md](Ideation/DISPUTE_RESOLUTION.md) |
 | Know how messages/notifications reach users | [Ideation/DELIVERY_AND_REALTIME.md](Ideation/DELIVERY_AND_REALTIME.md) |
 | Build the Android app | [Development/API.md](Development/API.md) |
 | Know what's secure and what isn't | [Development/SECURITY.md](Development/SECURITY.md) |
@@ -46,6 +47,8 @@ Android app ─────┼─HTTPS─▶ Django ─services─┤           
 - **Wave** - ring of people who can see a task; closest friends first, whole community last.
 - **Circle** - for one viewer: which posters rated them (and how close) + friends-of-friends.
 - **Escrow** - ledger account holding a task's reward until it's paid or refunded.
-- **Bond** - points the dispute raiser locks; refunded if they win, shared by majority jurors if they lose.
+- **Bond** - points the dispute raiser locks; refunded if settled or they win, shared by coherent jurors if they lose.
+- **Prestige** - reputation score; matters more than points, gates jury duty, shown as a tier (Newcomer → Elder).
+- **Settlement** - first dispute stage: the parties trade offers (taker's share %) before any jury.
 - **Outbox** - DB table of side effects, executed after commit with retries.
 - **Community** - campus/hostel group; all marketplace data is scoped to one.

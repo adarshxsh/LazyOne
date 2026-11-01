@@ -24,7 +24,8 @@ Data           Django models on PostgreSQL
 |--------|----------------|---------------|
 | [`ledger/services.py`](../../ledger/services.py) | Double-entry points: wallets, task escrow, dispute bonds | `transfer(legs, key, reason)`, `user_account`, `task_escrow`, `dispute_bond`, `check_invariants` |
 | [`basic/services/marketplace.py`](../../basic/services/marketplace.py) | Task lifecycle state machine + audit | `TRANSITIONS`, `apply(task, action, actor)`, `post_task`, `allowed_actions` |
-| [`basic/services/disputes.py`](../../basic/services/disputes.py) | Peer-jury disputes | `raise_dispute`, `add_evidence`, `draw_jury`, `cast_vote`, `tally`, `withdraw`, `moderator_resolve` |
+| [`basic/services/disputes.py`](../../basic/services/disputes.py) | Disputes v2: settlement → jury → appeal → moderator ([design](../Ideation/DISPUTE_RESOLUTION.md)) | `raise_dispute`, `make_offer`, `accept_offer`, `reject_offers`, `cast_vote`, `appeal`, `withdraw`, `moderator_resolve`, `close_due_disputes` |
+| [`basic/services/prestige.py`](../../basic/services/prestige.py) | Reputation (matters more than points) | `award(user, reason, key=…)`, `tier`, `of` |
 | [`basic/services/feed.py`](../../basic/services/feed.py) | Wave distribution (🔒 locked v1) | `wave_schedule`, `viewer_circle`, `feed_for`, `can_see` |
 | [`basic/services/messaging.py`](../../basic/services/messaging.py) | Chat, Postgres first | `send`, `history`, `serialize` |
 | [`basic/services/permissions.py`](../../basic/services/permissions.py) | Who can read/send/view | `ChatService.can_read/can_send/reader_ids`, `DisputeService` |
@@ -49,7 +50,7 @@ cancelled/expired         ▼             disputed ──verdict_poster──▶
 | Poster | cancel, approve, request_cancel |
 | Taker | submit, abandon, accept_cancel |
 | Either party | dispute, withdraw_dispute |
-| System only | expire, auto_approve, verdict_taker, verdict_poster |
+| System only | expire, auto_approve, verdict_taker, verdict_split, verdict_poster |
 
 ## Money safety (ledger keys)
 
@@ -59,9 +60,10 @@ Every logical movement has a fixed idempotency key, so it can happen **at most o
 |-----|----------|
 | `user:<id>:open` | Opening balance |
 | `task:<id>:fund` | Poster → task escrow |
-| `task:<id>:settle` | Escrow → taker (payout) **or** → poster (refund). One key for both, so never both |
+| `task:<id>:settle` | Escrow → taker (payout), → poster (refund) **or** split between them. One key, so only once |
 | `dispute:<id>:bond` | Raiser → bond account |
-| `dispute:<id>:bond_settle` | Bond → raiser (refund) or → majority jurors (forfeit) |
+| `dispute:<id>:appeal_bond` | Appellant → bond account |
+| `dispute:<id>:bond_settle` | All bonds → refunds and/or coherent jurors, in one transfer |
 
 Plus: rows locked with `SELECT … FOR UPDATE (of self)`, `CHECK (balance >= 0)`, and at most one active dispute per task (partial unique constraint).
 
@@ -72,4 +74,4 @@ Plus: rows locked with `SELECT … FOR UPDATE (of self)`, `CHECK (balance >= 0)`
 | Friends (request/accept/closeness) | `views/friends.py` | Logic + notifications in the view; acceptor can't set own closeness |
 | Profile, phone verification | `views/profile.py`, `services/phone_verification.py` | Not reviewed; verification gates nothing |
 | Home friend-circle graph | `views/home.py` | **Leaks non-friends' phone numbers** (see [SECURITY.md](SECURITY.md)) |
-| Sybil protection | - | 1500-point sign-up bonus can be farmed |
+| Sybil protection | partial | Prestige gates jury duty and pair-caps farming; the 1500-point sign-up bonus itself is still farmable |

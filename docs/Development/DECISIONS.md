@@ -16,6 +16,8 @@
 | D10 | 2026-11-01 | **No per-user queue, no API gateway** | Fan-out-on-read is cheaper and always fresh; edge + Django cover gateway duties | [DELIVERY_AND_REALTIME](../Ideation/DELIVERY_AND_REALTIME.md) |
 | D11 | 2026-11-01 | **WebSockets deferred**; FCM required for closed apps regardless | Not possible on Vercel; swap point exists (`RealtimePublisher`) | [DELIVERY_AND_REALTIME](../Ideation/DELIVERY_AND_REALTIME.md) |
 | D12 | 2026-11-01 | **Caddy or Cloudflare Tunnel** as edge if self-hosting | Auto-HTTPS, slow-client buffering, static files | [DEPLOYMENT](../Ideation/DEPLOYMENT.md) |
+| D13 | 2026-11-01 | **Prestige matters more than points**: reputation log with tiers; most incentives/penalties are prestige; prestige gates jury duty | Trust is the product; blocks fresh/alt accounts from judging | [DISPUTE_RESOLUTION](../Ideation/DISPUTE_RESOLUTION.md) |
+| D14 | 2026-11-01 | **Disputes v2** (supersedes D6): settlement with split offers → jury sized by reward with required reasons and median result → one appeal (2n+1, double bond) → moderator | Most disputes settle without judges (Fiverr/Upwork); proportional juries + appeals (Kleros); juror quality bar (eBay) | [DISPUTE_RESOLUTION](../Ideation/DISPUTE_RESOLUTION.md) |
 
 To change a locked area, add a new row here explaining what changes and why.
 

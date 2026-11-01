@@ -258,6 +258,8 @@ sequenceDiagram
 
 ### 4.5 Disputes and jury (G4)
 
+> **Superseded by Disputes v2 + prestige**: see [DISPUTE_RESOLUTION.md](DISPUTE_RESOLUTION.md). The text below is the original v1 proposal.
+
 The 300+ open PRs explore this heavily (bonds, juror selection, voting). The consolidated design:
 
 1. **Raise:** either party, while ASSIGNED/SUBMITTED. Both parties post a **bond** into dispute escrow, using the semantics already merged in #167 on `master`: `max(20% of reward, 50 pts)`, refunded to the winner and forfeited by the loser. This discourages frivolous disputes.

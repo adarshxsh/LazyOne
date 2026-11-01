@@ -22,7 +22,7 @@
 | # | Issue | Risk | Fix | Status |
 |---|-------|------|-----|--------|
 | 1 | `firestore.rules` written but **not deployed**; console rules likely permissive (old chat wrote from the browser) | Anyone with the public Firebase config may read/write existing Firestore data **now** | `firebase deploy --only firestore:rules` | ⛔ needs owner |
-| 2 | Sybil point farming: every new account gets 1500 points | Alt accounts funnel points to a main account / stack juries | Gate bonus + jury duty behind phone or campus-email verification | open |
+| 2 | Sybil point farming: every new account gets 1500 points | Alt accounts funnel points to a main account | Gate the bonus behind phone or campus-email verification | **partly fixed**: jury duty needs verification + prestige ≥ 30 + 14-day account; prestige farming pair-capped |
 | 3 | Home friend-circle graph sends phone/Instagram of up to 100 **non-friends** (`basic/views/home.py`) | PII exposure to any logged-in user | Contact details for accepted friends only | open |
 | 4 | `claim-jules-pr.yml` on `master` interpolates `head_ref` into shell under `pull_request_target` | Script injection with a write token | Delete the workflow | ⛔ needs owner |
 | 5 | Rate limits per process, API only | Ineffective with >1 worker; web forms unlimited | Redis-backed limits or Cloudflare rules | deploy-time |
