@@ -289,6 +289,7 @@ SOCIALACCOUNT_PROVIDERS = {
         ],
         'AUTH_PARAMS': {
             'access_type': 'online',
+            'prompt': 'select_account',  # always show Google's account chooser (college vs personal)
         },
         'VERIFIED_EMAIL': True,  # Google only returns verified addresses
     }
