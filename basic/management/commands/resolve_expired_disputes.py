@@ -2,11 +2,13 @@ from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from django.db import transaction
+from django.db.models import Q
 from django.urls import reverse
 from basic.models import Dispute, RewardLedger, Notification
 
+
 class Command(BaseCommand):
-    help = 'Resolves expired open disputes, refunds/forfeits escrowed bonds, and settles task points.'
+    help = 'Automatically resolves open disputes that have passed their expiration deadline, refunds/forfeits escrowed bonds, and settles task points.'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -17,22 +19,28 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        days = options['days']
+        days = options.get('days', 7)
         now = timezone.now()
         expiry_threshold = now - timedelta(days=days)
 
-        # Find open disputes created before the expiration window
-        expired_disputes = Dispute.objects.filter(status='open', created_at__lte=expiry_threshold)
+        expired_disputes = Dispute.objects.filter(status='open').filter(
+            Q(expires_at__lte=now) | Q(created_at__lte=expiry_threshold)
+        )
+        resolved_count = 0
 
-        count = 0
         for dispute in expired_disputes:
-            task = dispute.task
             with transaction.atomic():
-                dispute.status = 'resolved'
-                dispute.save()
+                # Re-fetch with select_for_update to avoid race conditions
+                dispute_obj = Dispute.objects.select_for_update().get(id=dispute.id)
+                if dispute_obj.status != 'open':
+                    continue
 
-                if dispute.raised_by == task.posted_by:
-                    # Poster challenged an unresponsive taker: cancel task, refund task reward, forfeit bond
+                task = dispute_obj.task
+                dispute_obj.status = 'resolved'
+                dispute_obj.save()
+
+                if dispute_obj.raised_by == task.posted_by:
+                    # Poster challenged an unresponsive taker: cancel task, refund task reward, refund bond
                     poster_profile = task.posted_by.userprofile
                     poster_profile.rewards += task.reward
                     poster_profile.save()
@@ -48,9 +56,22 @@ class Command(BaseCommand):
                         description=f"Refund for expired dispute on task: '{task.title}'"
                     )
 
-                    # Handle escrow bond refund / forfeiture
-                    if dispute.escrow_status == 'held':
-                        dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
+                    # Handle escrow bond refund
+                    if dispute_obj.escrow_status == 'held':
+                        dispute_obj.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
+
+                    dispute_link = reverse('dispute_detail', args=[dispute_obj.id])
+                    Notification.objects.create(
+                        recipient=task.posted_by,
+                        message=f"Dispute for task '{task.title}' has expired and was automatically resolved in your favor. {task.reward} points have been refunded to you.",
+                        link=dispute_link
+                    )
+                    if task.taken_by:
+                        Notification.objects.create(
+                            recipient=task.taken_by,
+                            message=f"Dispute for task '{task.title}' has expired and was automatically resolved.",
+                            link=dispute_link
+                        )
                 else:
                     # Taker raised dispute: award reward to taker, complete task, and refund bond
                     if task.taken_by:
@@ -63,27 +84,27 @@ class Command(BaseCommand):
                             task=task,
                             amount=task.reward,
                             transaction_type='task_completion',
-                            description=f"Awarded reward for auto-resolved expired dispute on task: '{task.title}'"
+                            description=f"Auto-resolved expired dispute for task: '{task.title}'"
                         )
+
+                        Notification.objects.create(
+                            recipient=task.taken_by,
+                            message=f"Dispute for task '{task.title}' has expired and was automatically resolved. {task.reward} points have been credited to you.",
+                            link=reverse('dispute_detail', args=[dispute_obj.id])
+                        )
+
                     task.status = 'completed'
                     task.save()
 
-                    if dispute.escrow_status == 'held':
-                        dispute.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
+                    if dispute_obj.escrow_status == 'held':
+                        dispute_obj.refund_deposit(reason_description=f"Deposit bond refunded on auto-resolved dispute for task '{task.title}'")
 
-                # Notify participants
-                participants = [task.posted_by]
-                if task.taken_by and task.taken_by not in participants:
-                    participants.append(task.taken_by)
-
-                dispute_link = reverse('dispute_detail', args=[dispute.id])
-                for participant in participants:
                     Notification.objects.create(
-                        recipient=participant,
-                        message=f"Dispute for task '{task.title}' has expired ({days}d SLA) and was automatically resolved.",
-                        link=dispute_link
+                        recipient=task.posted_by,
+                        message=f"Dispute for task '{task.title}' has expired and was automatically resolved in favor of the task taker.",
+                        link=reverse('dispute_detail', args=[dispute_obj.id])
                     )
 
-                count += 1
+                resolved_count += 1
 
-        self.stdout.write(self.style.SUCCESS(f"Successfully processed {count} expired dispute(s)."))
+        self.stdout.write(self.style.SUCCESS(f"Successfully auto-resolved {resolved_count} expired dispute(s)."))
