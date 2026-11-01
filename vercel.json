@@ -1,0 +1,11 @@
+{
+  "builds": [
+    { "src": "LazyOne/wsgi.py", "use": "@vercel/python", "config": { "maxLambdaSize": "250mb" } }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "LazyOne/wsgi.py" }
+  ],
+  "crons": [
+    { "path": "/internal/cron/", "schedule": "0 3 * * *" }
+  ]
+}

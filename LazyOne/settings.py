@@ -49,9 +49,6 @@ CSRF_TRUSTED_ORIGINS = _env_list('CSRF_TRUSTED_ORIGINS', ['https://*.ngrok-free.
 
 # Application definition
 
-STATIC_URL = 'static/'
-
-
 
 INSTALLED_APPS = [
     'basic.apps.BasicConfig',
@@ -115,6 +112,10 @@ WSGI_APPLICATION = 'LazyOne.wsgi.application'
 # Set DATABASE_URL (e.g. postgres://user:pass@host:5432/db) in production.
 # SQLite is only for local development: serverless filesystems (Vercel) are ephemeral.
 import dj_database_url
+import sys as _sys
+if not DEBUG and not os.getenv('DATABASE_URL') and 'test' not in _sys.argv:
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured("DATABASE_URL must be set when DEBUG is off (serverless disks are ephemeral).")
 DATABASES = {
     'default': dj_database_url.config(
         default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
@@ -165,6 +166,14 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+WHITENOISE_USE_FINDERS = True  # serverless: serve app/admin static files without collectstatic
+
+# Shared cache (rate limits, wave circles). Required in production with more than one
+# process/instance; set REDIS_URL (e.g. Upstash rediss://...). Local: per-process memory.
+if os.getenv('REDIS_URL'):
+    CACHES = {'default': {'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+                          'LOCATION': os.getenv('REDIS_URL')}}
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -172,11 +181,21 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Firebase Admin SDK (for backend)
+# Local: FIREBASE_SERVICE_ACCOUNT_KEY_PATH=path/to/key.json (gitignored).
+# Vercel: FIREBASE_SERVICE_ACCOUNT_JSON=<the key JSON, raw or base64> as a secret env var.
 FIREBASE_SERVICE_ACCOUNT_KEY_PATH = os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY_PATH')
-if FIREBASE_SERVICE_ACCOUNT_KEY_PATH:
+_firebase_json = os.getenv('FIREBASE_SERVICE_ACCOUNT_JSON', '').strip()
+_firebase_cred = None
+if _firebase_json:
+    import base64, json as _json
+    _raw = _firebase_json if _firebase_json.startswith('{') else base64.b64decode(_firebase_json).decode()
+    _firebase_cred = credentials.Certificate(_json.loads(_raw))
+elif FIREBASE_SERVICE_ACCOUNT_KEY_PATH:
+    _firebase_cred = credentials.Certificate(FIREBASE_SERVICE_ACCOUNT_KEY_PATH)
+if _firebase_cred:
+    FIREBASE_SERVICE_ACCOUNT_KEY_PATH = FIREBASE_SERVICE_ACCOUNT_KEY_PATH or 'env'
     if not firebase_admin._apps:
-        cred = credentials.Certificate(FIREBASE_SERVICE_ACCOUNT_KEY_PATH)
-        firebase_admin.initialize_app(cred)
+        firebase_admin.initialize_app(_firebase_cred)
     db = firestore.client()
 else:
     print("WARNING: Firebase Admin SDK credentials not found. Backend Firebase features will be disabled.")
@@ -207,6 +226,10 @@ if not DEBUG:
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '0'))  # enable once HTTPS is permanent
     SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = SECURE_HSTS_SECONDS > 0
+    SECURE_REFERRER_POLICY = 'same-origin'
+    X_FRAME_OPTIONS = 'DENY'
+    ACCOUNT_DEFAULT_HTTP_PROTOCOL = 'https'  # OAuth redirect URIs use https behind the proxy
 
 # Allauth Settings
 SITE_ID = 1
@@ -216,13 +239,19 @@ ACCOUNT_EMAIL_VERIFICATION = 'mandatory'
 ACCOUNT_LOGIN_METHODS = {'email'}
 ACCOUNT_SIGNUP_FIELDS = ['email*', 'password1*', 'password2*']
 
-# Email settings (Console backend for local development)
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-EMAIL_HOST = 'localhost'
-EMAIL_PORT = 25
-EMAIL_HOST_USER = ''
-EMAIL_HOST_PASSWORD = ''
-EMAIL_USE_TLS = False
+# Email: real SMTP when EMAIL_HOST is set (e.g. Gmail app password, Brevo, Resend, SES);
+# otherwise emails (verification links) are printed to the console.
+EMAIL_HOST = os.getenv('EMAIL_HOST', '')
+EMAIL_BACKEND = ('django.core.mail.backends.smtp.EmailBackend' if EMAIL_HOST
+                 else 'django.core.mail.backends.console.EmailBackend')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'LazyOne <no-reply@localhost>')
+
+# Admin lives at a non-default path in production (set ADMIN_URL, e.g. 'manage-7f3k/').
+ADMIN_URL = os.getenv('ADMIN_URL', 'admin/')
 
 SOCIALACCOUNT_PROVIDERS = {
     'google': {
@@ -267,6 +296,10 @@ LAZYONE = {
     'CLOSENESS_WAVE1': 40,
     # Prestige head start on the community wave only (D15); highest floor first.
     'PRESTIGE_HEAD_START': [(500, timedelta(minutes=30)), (200, timedelta(minutes=20)), (50, timedelta(minutes=10))],
+    # Sign-up bonus (UserProfile.rewards default): unverified accounts start with a small
+    # amount; the rest is released on phone verification or for campus-email communities.
+    'SIGNUP_BONUS_REQUIRES_VERIFICATION': os.getenv('SIGNUP_BONUS_REQUIRES_VERIFICATION', 'True') == 'True',
+    'UNVERIFIED_STARTER_POINTS': int(os.getenv('UNVERIFIED_STARTER_POINTS', '100')),
     'AUTO_APPROVE_AFTER': timedelta(hours=48),
     # Disputes / jury
     # Disputes v2 (docs/Ideation/DISPUTE_RESOLUTION.md)
@@ -299,6 +332,8 @@ import sys
 TESTING = 'test' in sys.argv
 if TESTING:
     PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']  # fast tests only
+    # Most tests create unverified users with a given balance; the bonus hold has its own tests.
+    LAZYONE['SIGNUP_BONUS_REQUIRES_VERIFICATION'] = False
 # Realtime mirror on/off. Tests never talk to Firebase; set REALTIME_ENABLED=False to keep
 # local development away from your real Firestore project.
 REALTIME_ENABLED = (not TESTING) and os.getenv('REALTIME_ENABLED', 'True') == 'True'

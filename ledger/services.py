@@ -8,6 +8,7 @@ The only code allowed to move points. See ARCHITECTURE_V2 §4.1.
 - The idempotency key makes every logical movement happen at most once: calling
   transfer() again with the same key returns the original Transfer and moves nothing.
 """
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Sum
 
@@ -42,10 +43,24 @@ def dispute_bond(dispute):
     return _get_or_create(f"dispute:{dispute.pk}", Account.Kind.DISPUTE_BOND)
 
 
+def _is_verified(profile):
+    """Phone verified, or member of a campus community (email domain checked at sign-up)."""
+    return bool(profile and (profile.is_phone_verified or (profile.community_id and profile.community.email_domain)))
+
+
+def bonus_hold(user):
+    """Sign-up bonus held until the user verifies (anti fake-account farming)."""
+    return _get_or_create(f"bonus_hold:{user.pk}", Account.Kind.SYSTEM)
+
+
 def user_account(user):
     """
     The user's wallet. Opened on first use by minting the user's current
     UserProfile.rewards (sign-up bonus, or legacy balance from before the ledger).
+
+    When SIGNUP_BONUS_REQUIRES_VERIFICATION is on and the user isn't verified yet, only
+    UNVERIFIED_STARTER_POINTS go to the wallet; the rest waits in bonus_hold:<id> and is
+    released by release_bonus() once the user verifies.
     """
     try:
         return Account.objects.get(key=f"user:{user.pk}")
@@ -53,15 +68,35 @@ def user_account(user):
         pass
     account = _get_or_create(f"user:{user.pk}", Account.Kind.USER, user=user)
     from basic.models import UserProfile
-    opening = UserProfile.objects.filter(user=user).values_list('rewards', flat=True).first() or 0
+    profile = UserProfile.objects.select_related('community').filter(user=user).first()
+    opening = (profile.rewards if profile else 0) or 0
     if opening:
-        transfer(
-            [(system_account(), -opening), (account, opening)],
-            key=f"user:{user.pk}:open", reason=Transfer.Reason.INITIAL_POINTS,
-            description="Initial points",
-        )
+        cfg = settings.LAZYONE
+        held = 0
+        if cfg.get('SIGNUP_BONUS_REQUIRES_VERIFICATION') and not _is_verified(profile):
+            held = max(0, opening - cfg.get('UNVERIFIED_STARTER_POINTS', 0))
+        legs = [(system_account(), -opening), (account, opening - held)]
+        if held:
+            legs.append((bonus_hold(user), held))
+        transfer(legs, key=f"user:{user.pk}:open", reason=Transfer.Reason.INITIAL_POINTS,
+                 description="Initial points" + (f" ({held} held until verified)" if held else ""))
         account.refresh_from_db()
     return account
+
+
+def release_bonus(user):
+    """Move a held sign-up bonus to the wallet once the user is verified. Safe to call repeatedly."""
+    from basic.models import UserProfile
+    profile = UserProfile.objects.select_related('community').filter(user=user).first()
+    if not _is_verified(profile):
+        return 0
+    hold = Account.objects.filter(key=f"bonus_hold:{user.pk}").first()
+    if not hold or hold.balance <= 0:
+        return 0
+    amount = hold.balance
+    transfer([(hold, -amount), (user_account(user), amount)], key=f"user:{user.pk}:bonus_release",
+             reason=Transfer.Reason.INITIAL_POINTS, description="Sign-up bonus released after verification")
+    return amount
 
 
 def balance_of(user):

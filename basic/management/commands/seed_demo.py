@@ -39,6 +39,9 @@ class Command(BaseCommand):
         # Demo users qualify as jurors: verified, account older than 14 days, some prestige.
         User.objects.filter(pk__in=[u.pk for u in users.values()]).update(date_joined=timezone.now() - timedelta(days=30))
         UserProfile.objects.filter(user__in=users.values(), prestige__lt=40).update(is_phone_verified=True, prestige=40)
+        from ledger.services import release_bonus
+        for u in users.values():
+            release_bonus(u)
 
         def friends(a, b, closeness):
             pa, pb = users[a].userprofile, users[b].userprofile

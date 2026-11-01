@@ -73,5 +73,4 @@ Plus: rows locked with `SELECT … FOR UPDATE (of self)`, `CHECK (balance >= 0)`
 |------|----------|-------|
 | Friends (request/accept/closeness) | `views/friends.py` | Logic + notifications in the view; acceptor can't set own closeness |
 | Profile, phone verification | `views/profile.py`, `services/phone_verification.py` | Not reviewed; verification gates nothing |
-| Home friend-circle graph | `views/home.py` | **Leaks non-friends' phone numbers** (see [SECURITY.md](SECURITY.md)) |
-| Sybil protection | partial | Prestige gates jury duty and pair-caps farming; the 1500-point sign-up bonus itself is still farmable |
+| Sybil protection | `ledger.services.release_bonus` | Bonus held until verification; prestige gates jury duty and pair-caps farming |

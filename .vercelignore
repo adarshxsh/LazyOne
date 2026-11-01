@@ -1,0 +1,19 @@
+# Never upload secrets or local data to Vercel
+.env
+.env.*
+!.env.example
+serviceAccountKey.json
+*.json.key
+db.sqlite3
+*.sqlite3
+venv/
+.venv/
+__pycache__/
+*.pyc
+.idea/
+.vscode/
+.DS_Store
+staticfiles/
+media/
+docs/
+test_env.py

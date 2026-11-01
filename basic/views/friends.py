@@ -6,25 +6,32 @@ from ..models import UserProfile, FriendRequest, Friendship, Notification
 from django.contrib.auth.models import User
 from django.urls import reverse
 import json
+from ..ratelimit import ratelimit
 
 @login_required(login_url='/login/')
 def user_list(request):
+    """
+    People in the viewer's community they aren't connected to yet. Server-rendered from
+    Postgres: only public fields (username, name, tier); never phone, Instagram or roll no.
+    (The old page read the whole Firestore `users` collection in the browser.)
+    """
+    from ..services import prestige
     user_profile = get_object_or_404(UserProfile, user=request.user)
+    query = request.GET.get('q', '').strip()[:50]
 
-    # Get Firebase UIDs of users to exclude (friends, pending requests, self)
-    friend_uids = list(user_profile.friends.all().values_list('firebase_uid', flat=True))
-    sent_request_uids = list(FriendRequest.objects.filter(from_user=request.user).values_list('to_user__userprofile__firebase_uid', flat=True))
-    received_request_uids = list(FriendRequest.objects.filter(to_user=request.user).values_list('from_user__userprofile__firebase_uid', flat=True))
+    exclude_ids = set(user_profile.friends.values_list('user_id', flat=True))
+    exclude_ids |= set(FriendRequest.objects.filter(from_user=request.user).values_list('to_user_id', flat=True))
+    exclude_ids |= set(FriendRequest.objects.filter(to_user=request.user).values_list('from_user_id', flat=True))
+    exclude_ids.add(request.user.id)
 
-    # Combine all UIDs to exclude, including the current user's
-    exclude_uids = set(friend_uids) | set(sent_request_uids) | set(received_request_uids)
-    if user_profile.firebase_uid:
-        exclude_uids.add(user_profile.firebase_uid)
-
-    context = {
-        'exclude_uids_json': json.dumps(list(exclude_uids))
-    }
-    return render(request, 'user_list.html', context)
+    people = (UserProfile.objects.filter(community=user_profile.get_community(), user__is_active=True)
+              .exclude(user_id__in=exclude_ids).select_related('user'))
+    if query:
+        people = people.filter(user__username__icontains=query)
+    people = list(people.order_by('-prestige', 'user__username')[:50])
+    for p in people:
+        p.tier = prestige.tier(p.prestige)
+    return render(request, 'user_list.html', {'people': people, 'search_query': query})
 
 @login_required(login_url='/login/')
 def friends_view(request):
@@ -46,6 +53,7 @@ def friends_view(request):
 
 @login_required(login_url='/login/')
 @require_POST
+@ratelimit('friend_request', '30/hour')
 def send_friend_request(request, user_id):
     if request.method == 'POST':
         to_user = get_object_or_404(User, id=user_id)

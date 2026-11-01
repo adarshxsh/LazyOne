@@ -5,51 +5,39 @@ from ..models import UserProfile, Task
 from django.contrib.auth.models import User
 import json
 from django.http import JsonResponse
-from firebase_admin import auth
-from LazyOne.settings import db # Import the Firestore client
+import logging
+from ..ratelimit import ratelimit
+
+logger = logging.getLogger(__name__)
 
 @login_required(login_url='/login/')
 def profile_view(request):
     profile, created = UserProfile.objects.get_or_create(user=request.user)
     if request.method == 'POST':
         # Update Django model
-        profile.first_name = request.POST.get('first_name', '')
-        profile.last_name = request.POST.get('last_name', '')
-        profile.bio = request.POST.get('bio', '')
-        profile.college = request.POST.get('college', '')
-        profile.major = request.POST.get('major', '')
-        profile.roll_no = request.POST.get('roll_no', '')
-        profile.batch = request.POST.get('batch', 2029)
+        def field(name, limit):
+            return request.POST.get(name, '').strip()[:limit]
+        profile.first_name = field('first_name', 50)
+        profile.last_name = field('last_name', 50)
+        profile.bio = field('bio', 300)
+        profile.college = field('college', 100)
+        profile.major = field('major', 100)
+        profile.roll_no = field('roll_no', 30)
+        try:
+            profile.batch = max(2000, min(2100, int(request.POST.get('batch') or profile.batch or 2029)))
+        except (TypeError, ValueError):
+            pass
         
         # Check if phone number has changed
-        new_phone_number = request.POST.get('phone_number', '')
+        new_phone_number = field('phone_number', 20)
         if new_phone_number != profile.phone_number:
             profile.phone_number = new_phone_number
             profile.is_phone_verified = False # Reset verification status
 
-        profile.instagram_username = request.POST.get('instagram_username', '')
+        profile.instagram_username = field('instagram_username', 30).lstrip('@')
         profile.save()
 
-        # Update Firestore document
-        if db and request.user.userprofile.firebase_uid:
-            try:
-                user_ref = db.collection('users').document(request.user.userprofile.firebase_uid)
-                user_ref.set({
-                    'username': request.user.username,
-                    'first_name': profile.first_name,
-                    'last_name': profile.last_name,
-                    'bio': profile.bio,
-                    'college': profile.college,
-                    'major': profile.major,
-                    'roll_no': profile.roll_no,
-                    'batch': profile.batch,
-                    'phone_number': profile.phone_number,
-                    'is_phone_verified': profile.is_phone_verified,
-                    'instagram_username': profile.instagram_username,
-                }, merge=True) # merge=True prevents overwriting the whole document
-                messages.success(request, 'Profile updated in Firebase.')
-            except Exception as e:
-                messages.error(request, f'Error updating Firebase profile: {e}')
+        # Profile data stays in Postgres only; it is never copied to Firestore (personal data).
 
         messages.success(request, 'Profile updated successfully.')
         return redirect('profile')
@@ -72,7 +60,12 @@ def user_profile_view(request, user_id):
 
 from basic.services.phone_verification import PhoneVerificationService
 
-@login_required(login_url='/accounts/login/')
+from django.views.decorators.http import require_POST
+
+
+@require_POST
+@login_required
+@ratelimit('verify_phone', '10/hour')
 def verify_phone_token(request):
     if request.method == 'POST':
         try:
@@ -86,21 +79,12 @@ def verify_phone_token(request):
                 phone_number = result['phone_number']
                 
                 # Mark as verified in Django DB
+                if UserProfile.objects.filter(phone_number=phone_number, is_phone_verified=True).exclude(user=request.user).exists():
+                    # One phone number verifies one account (blocks fake-account farming).
+                    return JsonResponse({'success': False, 'error': 'This phone number is already verified on another account.'}, status=400)
                 success = PhoneVerificationService.mark_user_phone_verified(request.user, phone_number)
                 if not success:
                     return JsonResponse({'success': False, 'error': 'Failed to update user profile.'}, status=500)
-
-                # Also update the phone number in Firestore
-                user_profile = request.user.userprofile
-                if db and user_profile.firebase_uid:
-                    try:
-                        user_ref = db.collection('users').document(user_profile.firebase_uid)
-                        user_ref.set({
-                            'phone_number': phone_number,
-                            'is_phone_verified': True
-                        }, merge=True)
-                    except Exception as e:
-                        print(f"Error updating phone number in Firebase: {e}") # Log error
 
                 return JsonResponse({'success': True})
             else:
@@ -108,8 +92,8 @@ def verify_phone_token(request):
 
         except json.JSONDecodeError:
             return JsonResponse({'success': False, 'error': 'Invalid JSON.'}, status=400)
-        except Exception as e:
-            print(f"Error in verify_phone_token: {e}") # Log error
-            return JsonResponse({'success': False, 'error': str(e)}, status=500)
+        except Exception:
+            logger.exception("verify_phone_token failed")
+            return JsonResponse({'success': False, 'error': 'Verification failed. Please try again.'}, status=500)
 
     return JsonResponse({'success': False, 'error': 'Invalid request method.'}, status=405)

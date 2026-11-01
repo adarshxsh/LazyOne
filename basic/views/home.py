@@ -36,32 +36,40 @@ def home(request):
         context['recent_conversations'] = Conversation.objects.filter(participants=request.user).order_by('-last_message_at')[:10]
 
         # --- Data for Friend Circle Visualization ---
+        # Contact details (phone, Instagram) go only to MUTUAL friends. Other people in the
+        # community appear with username only, never contact details (SECURITY.md #3).
         user_nodes = []
-        friendships = Friendship.objects.filter(from_user=user_profile)
-        friend_ids = [friendship.to_user.user.id for friendship in friendships]
-        
+        friendships = list(Friendship.objects.filter(from_user=user_profile).select_related('to_user__user'))
+        friend_pids = [f.to_user_id for f in friendships]
+        mutual = set(Friendship.objects.filter(from_user_id__in=friend_pids, to_user=user_profile)
+                     .values_list('from_user_id', flat=True))
         for friendship in friendships:
+            friend = friendship.to_user
+            share = friend.pk in mutual
             user_nodes.append({
-                'id': friendship.to_user.user.id,
-                'username': friendship.to_user.user.username,
+                'id': friend.user.id,
+                'username': friend.user.username,
                 'closeness': friendship.closeness,
-                'phone': friendship.to_user.phone_number,
-                'is_phone_verified': friendship.to_user.is_phone_verified,
-                'instagram': friendship.to_user.instagram_username
+                'is_friend': True,
+                'phone': friend.phone_number if share else None,
+                'is_phone_verified': friend.is_phone_verified if share else False,
+                'instagram': friend.instagram_username if share else None,
             })
 
         max_nodes = 100
         if len(user_nodes) < max_nodes:
-            exclude_ids = friend_ids + [request.user.id]
-            other_users = UserProfile.objects.exclude(user__id__in=exclude_ids)[:max_nodes - len(user_nodes)]
-            for other_user in other_users:
+            others = (UserProfile.objects.filter(community=user_profile.get_community(), user__is_active=True)
+                      .exclude(pk__in=friend_pids + [user_profile.pk]).select_related('user')
+                      [:max_nodes - len(user_nodes)])
+            for other in others:
                 user_nodes.append({
-                    'id': other_user.user.id,
-                    'username': other_user.user.username,
+                    'id': other.user.id,
+                    'username': other.user.username,
                     'closeness': 0,
-                    'phone': other_user.phone_number,
-                    'is_phone_verified': other_user.is_phone_verified,
-                    'instagram': other_user.instagram_username
+                    'is_friend': False,
+                    'phone': None,
+                    'is_phone_verified': False,
+                    'instagram': None,
                 })
         context['user_nodes_json'] = json.dumps(user_nodes)
 

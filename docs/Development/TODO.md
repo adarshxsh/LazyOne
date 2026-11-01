@@ -8,8 +8,8 @@
 - [ ] Lock disputes v2
 - [ ] AI dispute assistance behind a kill switch ([plan](../Ideation/DISPUTE_RESOLUTION.md#next-iteration-ai-assistance-planned-not-built), D16)
 - [ ] Show prestige/tier on profiles and the navbar
-- [ ] Fix home graph leaking non-friends' phone numbers ([SECURITY #3](SECURITY.md))
-- [ ] Sybil protection: verification before bonus / jury duty ([SECURITY #2](SECURITY.md))
+- [x] Fix home graph / Find people PII leaks
+- [x] Sybil protection: bonus held until verification, one phone per account
 - [ ] `social` service (friend requests, acceptor sets own closeness)
 
 ## Delivery & realtime ([design](../Ideation/DELIVERY_AND_REALTIME.md))
@@ -25,7 +25,9 @@
 - [ ] Locust load test at 1,000 users · Redis cache/throttles
 
 ## Needs owner action
+- [ ] **Purge `db.sqlite3` (real user data) from git history** + notify affected people
 - [ ] Deploy `firestore.rules` · delete `claim-jules-pr.yml` · close duplicate bot PRs · unify `master`/`deployment` · push branch
 
 ## Deployment ([plan](../Ideation/DEPLOYMENT.md))
-- [ ] Choose hosting A/B · production checklist
+- [x] Hosting: Vercel; code production-ready
+- [ ] Neon/Supabase + Upstash + SMTP + external cron; deploy

@@ -10,6 +10,7 @@ from django.views.decorators.http import require_POST
 from ..models import Dispute, Task
 from ..services import disputes, marketplace
 from ..services.marketplace import TransitionError
+from ..ratelimit import ratelimit
 
 
 def _default_deadline():
@@ -24,6 +25,7 @@ def _render_add(request, status=200):
 
 
 @login_required(login_url='/login/')
+@ratelimit('post_task', '30/hour')
 def add_task(request):
     if request.method != 'POST':
         return _render_add(request)
@@ -72,6 +74,7 @@ abandon_task = _transition_view('abandon', "You have abandoned the task. It is n
 
 
 @login_required(login_url='/login/')
+@ratelimit('raise_dispute', '10/hour')
 def raise_dispute(request, public_id):
     task = get_object_or_404(Task, public_id=public_id)
     existing = task.disputes.filter(status__in=[Dispute.Status.OPEN, Dispute.Status.ESCALATED]).first()

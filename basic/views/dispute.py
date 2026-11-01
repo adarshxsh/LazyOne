@@ -7,6 +7,7 @@ from django.views.decorators.http import require_POST
 from ..models import Dispute, JurorAssignment
 from ..services import disputes, prestige
 from ..services.marketplace import TransitionError
+from ..ratelimit import ratelimit
 
 
 def _get(public_id):
@@ -67,6 +68,7 @@ def _act(request, public_id, fn, success):
 
 @login_required(login_url='/login/')
 @require_POST
+@ratelimit('dispute_offer', '30/hour')
 def make_offer(request, public_id):
     return _act(request, public_id, lambda d: disputes.make_offer(d, request.user, request.POST.get('taker_pct'),
                                                                   request.POST.get('message')), "Offer sent.")
@@ -88,6 +90,7 @@ def reject_offers(request, public_id):
 
 @login_required(login_url='/login/')
 @require_POST
+@ratelimit('dispute_evidence', '30/hour')
 def add_evidence(request, public_id):
     return _act(request, public_id, lambda d: disputes.add_evidence(d, request.user, request.POST.get('text')),
                 "Evidence added.")

@@ -16,7 +16,11 @@ All notable changes to the LazyOne project are documented in this file.
 - Disputes v2: settlement offers with split outcomes, default judgment, jury sized by reward, required vote reasons, median verdict, one appeal, moderator.
 - Prestige: reputation log, tiers, juror eligibility, anti-farming pair cap.
 - Waves v1.1 (D15): prestige head start on the community wave (zero extra queries).
-- `seed_demo`, `LOCAL_DEV.md`, CI on Postgres, 117 tests.
+- `seed_demo`, `LOCAL_DEV.md`, CI on Postgres, 123 tests.
+### Security & production readiness (2026-11-01)
+- Fixed PII leaks: home graph and "Find people" no longer expose phone/Instagram/roll numbers; profile data no longer copied to Firestore.
+- Sign-up bonus held until verification; one phone number per account; web rate limits.
+- Vercel-ready: `vercel.json`, `.python-version`, `.vercelignore`, Firebase key via env, Redis cache, SMTP email, hidden admin path, security headers, trimmed `requirements.txt`.
 
 ## [2.0.1] - 2026-10
 ### Changed

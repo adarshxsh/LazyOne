@@ -25,3 +25,11 @@ ENV/
 
 # macOS
 .DS_Store
+
+# Secrets and local data (never commit)
+.env.*
+!.env.example
+serviceAccountKey*.json
+*.sqlite3
+staticfiles/
+.vercel/

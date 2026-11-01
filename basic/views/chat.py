@@ -12,6 +12,7 @@ from ..services.permissions import ChatService
 from ..services import messaging
 from ..services.marketplace import TransitionError
 from ..realtime import create_custom_token
+from ..ratelimit import ratelimit
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ def chat_view(request, public_id):
 
 @login_required(login_url='/login/')
 @require_POST
+@ratelimit('send_message', '60/minute')
 def send_message(request, public_id):
     conversation = get_object_or_404(Conversation, public_id=public_id)
     try:

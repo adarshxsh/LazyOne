@@ -1,6 +1,6 @@
 # Deployment Plan
 
-> Status: **not deployed.** Workflow is local-first ([LOCAL_DEV.md](../Development/LOCAL_DEV.md)); hosting is chosen after local work is complete.
+> Status: **not deployed.** Hosting chosen 2026-11-01: **Vercel (option A)**. The code is production-ready; follow [Deploy to Vercel](#deploy-to-vercel-step-by-step) after the owner-only security steps in [SECURITY.md](../Development/SECURITY.md).
 
 ## Target load: 1,000 concurrent users
 
@@ -23,6 +23,37 @@
 | Realtime | Firestore only (no WebSockets on Vercel) | Firestore, or Channels WebSockets later |
 | Edge | Vercel | **Caddy** or **Cloudflare Tunnel** |
 | Weak spots | cold starts, free-tier limits, cron frequency limits | single machine → backups + uptime monitor |
+
+## Deploy to Vercel (step by step)
+
+**0. Before anything:** purge `db.sqlite3` from the git history and deploy `firestore.rules` ([SECURITY.md](../Development/SECURITY.md) #1, #2). Recommended: a **new Firebase project** for production.
+
+**1. Free managed services**
+
+| Need | Service (free tier) | Env var |
+|------|---------------------|---------|
+| Postgres | Neon or Supabase, **pooled** connection string | `DATABASE_URL`, `DB_CONN_MAX_AGE=0` |
+| Shared cache | Upstash Redis | `REDIS_URL` |
+| Email | Brevo / Resend / Gmail app password (SMTP) | `EMAIL_HOST`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `DEFAULT_FROM_EMAIL` |
+| Frequent jobs | cron-job.org (every 1–5 min) → `GET https://<app>/internal/cron/` with header `Authorization: Bearer <CRON_SECRET>` | `CRON_SECRET` |
+
+Vercel Hobby cron runs **once a day** only; `vercel.json` registers a daily backstop, and the external cron does the real work (expiry, 48 h auto-approve, jury deadlines, wave alerts, outbox retries).
+
+**2. Vercel project:** import the GitHub repo → set every variable from the Production block in [`.env.example`](../../.env.example) (Production scope only, not Preview) → deploy. Files: [`vercel.json`](../../vercel.json), [`.python-version`](../../.python-version) (3.12), [`.vercelignore`](../../.vercelignore) (keeps `.env`, key files, databases out of uploads).
+
+**3. Database schema** (from your laptop, once per release):
+```bash
+DATABASE_URL='<direct (non-pooled) URL>' python manage.py migrate
+DATABASE_URL='<direct URL>' python manage.py createsuperuser
+```
+
+**4. Google sign-in:** in Google Cloud Console add `https://<app>.vercel.app/accounts/google/login/callback/` (and your domain) to the OAuth client's redirect URIs. In Django admin, set **Sites** → domain to your production host.
+
+**5. Firebase (realtime chat + phone verification):** put the service-account JSON in `FIREBASE_SERVICE_ACCOUNT_JSON`, the web config in `FIREBASE_*`, add the Vercel domain to Firebase Auth → Authorized domains.
+
+**6. Check:** `/healthz/` returns `{"ok": true}`; sign up, verify email, post a task from a second account; run `python manage.py check_ledger` against production.
+
+**7. After HTTPS works on the final domain:** `SECURE_HSTS_SECONDS=31536000`.
 
 ## Edge: Caddy (option B)
 

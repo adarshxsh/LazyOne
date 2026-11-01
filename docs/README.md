@@ -1,6 +1,6 @@
 # LazyOne Docs - Start Here
 
-> Snapshot **2026-11-01** · branch `arch-v2/phase0` (local, not pushed, not deployed) · 117 tests green on SQLite + Postgres
+> Snapshot **2026-11-01** · branch `arch-v2/phase0` (local, not pushed, not deployed) · 123 tests green on SQLite + Postgres
 
 ## Status at a glance
 
@@ -12,8 +12,8 @@
 | **Wave distribution** | 🔒 **locked v1.1** - adaptive schedule, optimized feed, prestige head start (D15) |
 | Dispute resolution v2 + prestige | ✅ built - settlement → jury → appeal; questions answered, ready to lock · AI assist planned (D16) |
 | Push (FCM), sync endpoint, chat safety poll | 📝 designed, not built |
-| Deployment | ⏳ after local work; hosting not chosen |
-| Security | ⚠️ core protected; open items before launch |
+| Deployment | ⏳ Vercel chosen; code production-ready ([steps](Ideation/DEPLOYMENT.md#deploy-to-vercel-step-by-step)) |
+| Security | ⚠️ code fixed; **owner steps left**: purge git history (real user data), deploy Firestore rules |
 
 ## Read by purpose
 
