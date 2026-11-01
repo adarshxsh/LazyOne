@@ -28,6 +28,13 @@
                 <input type="number" id="reward" name="reward" required min="1" class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
             </div>
             <div>
+                <label for="wave_policy" class="block text-sm font-medium text-gray-300 mb-2">Who sees it first?</label>
+                <select id="wave_policy" name="wave_policy" class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-cyan-400">
+                    {% for value, label in wave_policies %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                </select>
+                <p class="text-xs text-gray-500 mt-1">By default your closest friends see the task first, then it spreads to wider circles over ~2 hours.</p>
+            </div>
+            <div>
                 <label for="deadline" class="block text-sm font-medium text-gray-300 mb-2">Deadline</label>
                 <input type="datetime-local" id="deadline" name="deadline" required value="{{ default_deadline }}" class="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
             </div>

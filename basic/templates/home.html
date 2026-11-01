@@ -8,8 +8,8 @@
 {% if disputed_tasks %}
 <div class="mb-12">
     <div class="text-center mb-6">
-        <h2 class="text-3xl font-bold text-red-400">Disputed Tasks - Community Review</h2>
-        <p class="text-gray-400 mt-2">The following tasks are in dispute. Community members are encouraged to review the chat and help mediate.</p>
+        <h2 class="text-3xl font-bold text-red-400">Your Jury Duty</h2>
+        <p class="text-gray-400 mt-2">You were randomly selected (with no close ties to either side) to decide these disputes. Review the evidence and chat, then vote.</p>
     </div>
     <div class="space-y-4">
         {% for task in disputed_tasks %}
@@ -26,7 +26,8 @@
                     </div>
                 </div>
                 <div class="mt-4">
-                    <a href="{% url 'chat_view' task.conversation.public_id %}" class="inline-block bg-red-600 text-white font-semibold px-5 py-2 rounded-lg hover:bg-red-500 transition-colors">View Dispute Chat</a>
+                    <a href="{% url 'dispute_detail' task.dispute.public_id %}" class="inline-block bg-red-600 text-white font-semibold px-5 py-2 rounded-lg hover:bg-red-500 transition-colors">Review &amp; Vote</a>
+                    <a href="{% url 'chat_view' task.conversation.public_id %}" class="inline-block bg-gray-600 text-white font-semibold px-5 py-2 rounded-lg hover:bg-gray-500 transition-colors">View Chat</a>
                 </div>
             </div>
         {% endfor %}

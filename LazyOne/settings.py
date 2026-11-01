@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import os
+from datetime import timedelta
 from pathlib import Path
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -65,6 +66,10 @@ INSTALLED_APPS = [
     'allauth.account',
     'allauth.socialaccount',
     'allauth.socialaccount.providers.google',
+    'rest_framework',
+    'ledger',
+    'outbox',
+    'api',
 ]
 
 MIDDLEWARE = [
@@ -194,12 +199,14 @@ INSTAGRAM_APP_SECRET = os.getenv('INSTAGRAM_APP_SECRET')
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# Security Settings for Vercel
-if os.getenv('VERCEL') == '1':
+# Security: on whenever DEBUG is off (TLS is terminated by Vercel / Caddy in front of Django).
+if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-    SECURE_SSL_REDIRECT = False # Vercel handles this
+    SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', 'False') == 'True'  # usually done by the proxy
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '0'))  # enable once HTTPS is permanent
+    SECURE_CONTENT_TYPE_NOSNIFF = True
 
 # Allauth Settings
 SITE_ID = 1
@@ -234,3 +241,52 @@ SOCIALACCOUNT_PROVIDERS = {
         }
     }
 }
+
+
+# --- REST API (ARCHITECTURE_V2 Phase 3) ---
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'api.authentication.FirebaseAuthentication',   # mobile: Bearer <Firebase ID token>
+        'rest_framework.authentication.SessionAuthentication',  # web (CSRF enforced)
+    ],
+    'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'],
+    'DEFAULT_THROTTLE_CLASSES': ['rest_framework.throttling.UserRateThrottle'],
+    'DEFAULT_THROTTLE_RATES': {
+        'user': os.getenv('THROTTLE_USER', '240/min'),
+        'post_task': os.getenv('THROTTLE_POST_TASK', '30/hour'),
+        'messages': os.getenv('THROTTLE_MESSAGES', '60/min'),
+    },
+}
+
+# --- LazyOne domain settings (ARCHITECTURE_V2 §4) ---
+LAZYONE = {
+    # Wave distribution: delay after opening before each wave sees the task.
+    'WAVE_DELAYS': [timedelta(0), timedelta(minutes=10), timedelta(minutes=30), timedelta(hours=2)],
+    'CLOSENESS_WAVE0': 80,
+    'CLOSENESS_WAVE1': 40,
+    'AUTO_APPROVE_AFTER': timedelta(hours=48),
+    # Disputes / jury
+    'DISPUTE_EVIDENCE_WINDOW': timedelta(hours=24),
+    'DISPUTE_VOTING_WINDOW': timedelta(hours=48),
+    'JURY_SIZE': 5,
+    'JURY_QUORUM': 3,
+    'BOND_PERCENT': 20,
+    'BOND_MIN': 50,
+    # Shared secret for /internal/cron/ (Vercel Cron sends it as a Bearer token).
+    'CRON_SECRET': os.getenv('CRON_SECRET', ''),
+}
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {'console': {'class': 'logging.StreamHandler'}},
+    'root': {'handlers': ['console'], 'level': os.getenv('LOG_LEVEL', 'INFO')},
+}
+
+import sys
+TESTING = 'test' in sys.argv
+if TESTING:
+    PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']  # fast tests only
+# Realtime mirror on/off. Tests never talk to Firebase; set REALTIME_ENABLED=False to keep
+# local development away from your real Firestore project.
+REALTIME_ENABLED = (not TESTING) and os.getenv('REALTIME_ENABLED', 'True') == 'True'

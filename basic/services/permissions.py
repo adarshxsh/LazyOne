@@ -1,101 +1,62 @@
+"""
+Authorization policies, shared by web views, the API and the Firestore member list.
+
+Dispute privacy (ARCHITECTURE_V2 §4.5): a disputed task's chat and evidence are visible
+to the two parties, the drawn jurors and staff - not to every logged-in user.
+"""
 from django.contrib.auth.models import User
-from basic.models import Dispute, Task, UserProfile, RewardLedger
-from django.db import transaction
-from django.db.models import F
+
+from ..models import Dispute, JurorAssignment, Task
+from . import disputes
+
 
 class DisputeService:
-    @staticmethod
-    def can_view(user, dispute):
-        """
-        Anyone who is authenticated can view a dispute.
-        """
-        return user.is_authenticated
+    """Backwards-compatible facade over services.disputes."""
 
-    @classmethod
-    def can_withdraw(cls, user: User, dispute: Dispute) -> bool:
-        """
-        Only the user who raised the dispute can withdraw it.
-        """
-        return user == dispute.raised_by
-
-    @classmethod
-    def resolve_dispute(cls, dispute: Dispute, winner: User):
-        """
-        Forcefully resolves a dispute, transferring rewards to the winner.
-        Currently meant to be called by admins/moderators, or future voting mechanism.
-        """
-        with transaction.atomic():
-            dispute = Dispute.objects.select_for_update().get(pk=dispute.pk)
-            task = Task.objects.select_for_update().get(pk=dispute.task_id)
-            if dispute.status != Dispute.Status.OPEN or task.status != Task.Status.DISPUTED:
-                raise ValueError("Can only resolve an open dispute on a disputed task.")
-            if winner.id not in (task.posted_by_id, task.taken_by_id):
-                raise ValueError("Winner must be the task creator or the assignee.")
-
-            if winner.id == task.taken_by_id:
-                # Assignee wins, gets the reward
-                UserProfile.objects.filter(user_id=task.taken_by_id).update(rewards=F('rewards') + task.reward)
-                RewardLedger.objects.create(
-                    user_id=task.taken_by_id, task=task, amount=task.reward,
-                    transaction_type='task_completion', description=f"Won dispute for task: '{task.title}'"
-                )
-                task.status = Task.Status.COMPLETED
-            else:
-                # Creator wins, gets refund; the task ends.
-                UserProfile.objects.filter(user_id=task.posted_by_id).update(rewards=F('rewards') + task.reward)
-                RewardLedger.objects.create(
-                    user_id=task.posted_by_id, task=task, amount=task.reward,
-                    transaction_type='task_cancellation', description=f"Won dispute refund for task: '{task.title}'"
-                )
-                task.status = Task.Status.CANCELLED
-
-            task.save()
-            dispute.status = Dispute.Status.RESOLVED
-            dispute.save()
-        return dispute
+    can_view = staticmethod(disputes.can_view)
+    can_withdraw = staticmethod(disputes.can_withdraw)
 
     @staticmethod
     def can_vote(user, dispute):
-        """
-        Anyone who is authenticated can vote, except the task creator and assignee.
-        """
-        if not user.is_authenticated:
-            return False
-        return user not in [dispute.task.posted_by, dispute.task.taken_by]
+        return disputes.is_juror(user, dispute) and dispute.status == Dispute.Status.OPEN
+
+    @staticmethod
+    def resolve_dispute(dispute: Dispute, winner: User, moderator: User = None):
+        return disputes.moderator_resolve(dispute, winner, moderator)
 
 
 class ChatService:
     @staticmethod
+    def _active_jurors(conversation):
+        if not conversation.task_id:
+            return JurorAssignment.objects.none()
+        return JurorAssignment.objects.filter(
+            dispute__task_id=conversation.task_id,
+            dispute__status__in=[Dispute.Status.OPEN, Dispute.Status.ESCALATED],
+        )
+
+    @staticmethod
     def can_read(user, conversation):
-        """
-        A user can read the chat if they are a participant.
-        If the task is disputed, any authenticated user can read it.
-        Staff/Moderators can always read chats.
-        """
         if not user.is_authenticated:
             return False
-            
-        if user in conversation.participants.all():
+        if conversation.participants.filter(pk=user.pk).exists():
             return True
-            
-        if conversation.task and conversation.task.status == 'disputed':
+        if user.is_staff:
             return True
-            
-        return user.is_staff
+        return ChatService._active_jurors(conversation).filter(juror=user).exists()
 
     @staticmethod
     def can_send(user, conversation):
-        """
-        A user can send a message if they are a participant.
-        If the task is disputed, staff/moderators can also send messages.
-        """
         if not user.is_authenticated:
             return False
-            
-        if user in conversation.participants.all():
+        if conversation.participants.filter(pk=user.pk).exists():
             return True
-            
-        if conversation.task and conversation.task.status == 'disputed':
-            return user.is_staff
-            
-        return False
+        # Moderators may step into a disputed task's chat.
+        return bool(user.is_staff and conversation.task_id and conversation.task.status == Task.Status.DISPUTED)
+
+    @staticmethod
+    def reader_ids(conversation):
+        """Everyone allowed to read: participants + active jurors + (staff use the web UI)."""
+        ids = set(conversation.participants.values_list('pk', flat=True))
+        ids.update(ChatService._active_jurors(conversation).values_list('juror_id', flat=True))
+        return ids

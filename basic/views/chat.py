@@ -9,6 +9,9 @@ from django.utils import timezone
 from django.contrib import messages # Import messages
 import logging
 from ..services.permissions import ChatService
+from ..services import messaging
+from ..services.marketplace import TransitionError
+from ..realtime import create_custom_token
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +54,8 @@ def chat_view(request, public_id):
     except Exception as e:
         logger.error(f"ERROR at Step 4 (Marking notifications): {e}")
 
-    context = {'conversation': conversation, 'messages': messages_list}
+    context = {'conversation': conversation, 'messages': messages_list,
+               'can_send': ChatService.can_send(request.user, conversation)}
     
     logger.info(f"--- CHAT_VIEW END: Successfully rendering template. ---")
     return render(request, 'chat.html', context)
@@ -60,32 +64,37 @@ def chat_view(request, public_id):
 @login_required(login_url='/login/')
 @require_POST
 def send_message(request, public_id):
+    conversation = get_object_or_404(Conversation, public_id=public_id)
     try:
-        conversation = get_object_or_404(Conversation, public_id=public_id)
-        if not ChatService.can_send(request.user, conversation):
-            return HttpResponseForbidden("You are not authorized to send messages in this chat.")
-        
-        content = request.POST.get('content')
-        if content:
-            Message.objects.create(
-                conversation=conversation,
-                sender=request.user,
-                content=content
-            )
-            conversation.last_message_at = timezone.now()
-            conversation.save()
-            for participant in conversation.participants.all():
-                if participant != request.user:
-                    Notification.objects.create(
-                        recipient=participant,
-                        message=f"New message from {request.user.username}",
-                        link=reverse('chat_view', args=[public_id])
-                    )
-            return JsonResponse({'status': 'success'})
-    except Exception:
-        logger.exception("send_message failed for conversation %s", public_id)
-        return JsonResponse({'status': 'error'}, status=500)
-    return JsonResponse({'status': 'error'}, status=400)
+        msg = messaging.send(conversation, request.user, request.POST.get('content'))
+    except PermissionError as e:
+        return HttpResponseForbidden(str(e))
+    except TransitionError as e:
+        return JsonResponse({'status': 'error', 'error': str(e)}, status=400)
+    return JsonResponse({'status': 'success', 'message': messaging.serialize(msg)})
+
+
+@login_required(login_url='/login/')
+def message_history(request, public_id):
+    """JSON history; also the polling fallback when realtime is unavailable."""
+    conversation = get_object_or_404(Conversation, public_id=public_id)
+    if not ChatService.can_read(request.user, conversation):
+        return HttpResponseForbidden("Not allowed.")
+    try:
+        after = int(request.GET.get('after') or 0) or None
+    except ValueError:
+        after = None
+    return JsonResponse({'messages': messaging.history(conversation, after_id=after)})
+
+
+@login_required(login_url='/login/')
+def realtime_token(request):
+    """Firebase custom token for read-only Firestore access (see firestore.rules)."""
+    token = create_custom_token(request.user)
+    if token is None:
+        return JsonResponse({'token': None}, status=503)
+    return JsonResponse({'token': token})
+
 
 @login_required(login_url='/login/')
 def start_chat(request, user_id):

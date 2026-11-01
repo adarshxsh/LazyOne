@@ -29,8 +29,8 @@
                 <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4 flex items-center justify-between">
                     <p class="text-gray-300"><strong class="text-white">{{ request.from_user.username }}</strong> wants to be your friend.</p>
                     <div class="flex items-center space-x-3">
-                        <a href="{% url 'accept_friend_request' request.id %}" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors text-sm">Accept</a>
-                        <a href="{% url 'decline_friend_request' request.id %}" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white font-semibold rounded-lg transition-colors text-sm">Decline</a>
+                        <form action="{% url 'accept_friend_request' request.id %}" method="post" class="inline">{% csrf_token %}<button type="submit" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors text-sm">Accept</button></form>
+                        <form action="{% url 'decline_friend_request' request.id %}" method="post" class="inline">{% csrf_token %}<button type="submit" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white font-semibold rounded-lg transition-colors text-sm">Decline</button></form>
                     </div>
                 </div>
             {% empty %}

@@ -1,54 +1,90 @@
-from django.shortcuts import render, get_object_or_404, redirect
-from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from ..models import Dispute, Task
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User
+from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
-from django.db import transaction
-from ..services.permissions import DisputeService
+
+from ..models import Dispute, JurorAssignment
+from ..services import disputes
+from ..services.marketplace import TransitionError
+
+
+def _get(public_id):
+    return get_object_or_404(Dispute.objects.select_related('task__posted_by', 'task__taken_by', 'raised_by'),
+                             public_id=public_id)
+
 
 @login_required(login_url='/login/')
 def dispute_detail_view(request, public_id):
-    """
-    Displays the details of a specific dispute.
-    """
-    dispute = get_object_or_404(Dispute, public_id=public_id)
-    task = dispute.task
-
-    # Authorization: Use DisputeService
-    if not DisputeService.can_view(request.user, dispute):
-        messages.error(request, "You are not authorized to view this dispute.")
+    dispute = _get(public_id)
+    if not disputes.can_view(request.user, dispute):
+        messages.error(request, "Only the people involved, the jury and moderators can view this dispute.")
         return redirect('home')
-
+    seat = dispute.jurors.filter(juror=request.user).first()
+    closed = not dispute.is_active
     context = {
         'dispute': dispute,
-        'task': task
+        'task': dispute.task,
+        'evidence': dispute.evidence.select_related('submitted_by'),
+        'is_party': disputes.is_party(request.user, dispute),
+        'seat': seat,
+        'can_withdraw': disputes.can_withdraw(request.user, dispute),
+        'jurors': dispute.jurors.select_related('juror') if (closed or request.user.is_staff) else None,
+        'juror_count': dispute.jurors.count(),
+        'votes_cast': dispute.jurors.exclude(vote='').count(),
+        'vote_choices': JurorAssignment.Vote.choices,
     }
     return render(request, 'dispute_detail.html', context)
 
+
 @login_required(login_url='/login/')
-@require_POST # Ensures this view only accepts POST requests
+@require_POST
 def withdraw_dispute(request, public_id):
-    """
-    Allows the user who raised a dispute to withdraw it.
-    """
-    with transaction.atomic():
-        dispute = get_object_or_404(Dispute.objects.select_for_update(), public_id=public_id)
-        task = Task.objects.select_for_update().get(pk=dispute.task_id)
-
-        if not DisputeService.can_withdraw(request.user, dispute):
-            messages.error(request, "You are not authorized to perform this action.")
-            return redirect('my_tasks')
-
-        # Only an open dispute on a disputed task can be withdrawn. Without this check a
-        # resolved dispute could be "withdrawn", re-opening a task that was already paid out.
-        if dispute.status != Dispute.Status.OPEN or task.status != Task.Status.DISPUTED:
-            messages.error(request, "This dispute is no longer open.")
-            return redirect('my_tasks')
-
-        task.status = Task.Status.IN_PROGRESS
-        task.save()
-        dispute.status = Dispute.Status.WITHDRAWN
-        dispute.save()
-
-    messages.success(request, f"You have successfully withdrawn the dispute for '{task.title}'.")
+    dispute = _get(public_id)
+    try:
+        disputes.withdraw(dispute, request.user)
+    except TransitionError as e:
+        messages.error(request, str(e))
+    else:
+        messages.success(request, f"You have withdrawn the dispute for '{dispute.task.title}'. Your bond was refunded.")
     return redirect('my_tasks')
+
+
+@login_required(login_url='/login/')
+@require_POST
+def add_evidence(request, public_id):
+    dispute = _get(public_id)
+    try:
+        disputes.add_evidence(dispute, request.user, request.POST.get('text'))
+    except TransitionError as e:
+        messages.error(request, str(e))
+    else:
+        messages.success(request, "Evidence added.")
+    return redirect('dispute_detail', public_id=public_id)
+
+
+@login_required(login_url='/login/')
+@require_POST
+def cast_vote(request, public_id):
+    dispute = _get(public_id)
+    try:
+        disputes.cast_vote(dispute, request.user, request.POST.get('vote'))
+    except TransitionError as e:
+        messages.error(request, str(e))
+    else:
+        messages.success(request, "Your vote was recorded. Votes stay hidden until the dispute closes.")
+    return redirect('dispute_detail', public_id=public_id)
+
+
+@login_required(login_url='/login/')
+@require_POST
+def moderator_resolve(request, public_id):
+    dispute = _get(public_id)
+    winner = get_object_or_404(User, pk=request.POST.get('winner_id'))
+    try:
+        disputes.moderator_resolve(dispute, winner, moderator=request.user)
+    except (TransitionError, ValueError) as e:
+        messages.error(request, str(e))
+    else:
+        messages.success(request, "Dispute resolved.")
+    return redirect('dispute_detail', public_id=public_id)

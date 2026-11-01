@@ -1,24 +1,24 @@
 from django.shortcuts import render
 from django.db.models import Q
-from ..models import UserProfile, Task, Friendship, Conversation
+from ..models import UserProfile, Task, Friendship, Conversation, Dispute
+from ..services.feed import feed_for, public_feed
 import json
 
 def home(request):
-    # --- Disputed Tasks ---
-    disputed_tasks = Task.objects.filter(status='disputed').order_by('-created_at')
-
-    # --- Search Logic for Available Tasks ---
     query = request.GET.get('q', '')
-    available_tasks = Task.objects.filter(status='available')
-    if query:
-        available_tasks = available_tasks.filter(
-            Q(title__icontains=query) | Q(description__icontains=query)
-        )
-    available_tasks = available_tasks.order_by('-created_at')[:20]
+    if request.user.is_authenticated:
+        # Wave-filtered feed: closest friends see a task first (ARCHITECTURE_V2 §4.3).
+        available_tasks = feed_for(request.user, query)[:20]
+        disputed_tasks = (Task.objects.filter(disputes__status=Dispute.Status.OPEN,
+                                              disputes__jurors__juror=request.user)
+                          .select_related('posted_by', 'taken_by', 'conversation').distinct())
+        recent_tasks = Task.objects.filter(Q(posted_by=request.user) | Q(taken_by=request.user),
+                                           status__in=Task.ACTIVE_STATUSES).order_by('-created_at')
+    else:
+        available_tasks = public_feed(query)[:20]
+        disputed_tasks = Task.objects.none()
+        recent_tasks = Task.objects.none()
 
-    # --- All non-completed tasks for the new section ---
-    recent_tasks = Task.objects.exclude(status__in=['completed', 'cancelled']).order_by('-created_at')
-    
     # Initialize context for anonymous users
     context = {
         'disputed_tasks': disputed_tasks,

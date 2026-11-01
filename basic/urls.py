@@ -27,7 +27,14 @@ from .views import (
     raise_dispute,
     dispute_detail_view,
     withdraw_dispute,
+    submit_task,
+    add_evidence,
+    cast_vote,
+    moderator_resolve,
+    message_history,
+    realtime_token,
 )
+from .views.internal import cron, healthz
 
 urlpatterns = [
     path('', home, name='home'),
@@ -40,6 +47,7 @@ urlpatterns = [
     # Task Lifecycle URLs
     path('add_task/', add_task, name='add_task'),
     path('task/take/<str:public_id>/', take_task, name='take_task'),
+    path('task/submit/<str:public_id>/', submit_task, name='submit_task'),
     path('task/complete/<str:public_id>/', complete_task, name='complete_task'),
     path('task/cancel/<str:public_id>/', cancel_task, name='cancel_task'),
     path('task/cancel/request/<str:public_id>/', request_cancellation, name='request_cancellation'),
@@ -48,12 +56,21 @@ urlpatterns = [
     path('task/dispute/<str:public_id>/', raise_dispute, name='raise_dispute'),
     path('dispute/<str:public_id>/', dispute_detail_view, name='dispute_detail'),
     path('dispute/withdraw/<str:public_id>/', withdraw_dispute, name='withdraw_dispute'),
+    path('dispute/evidence/<str:public_id>/', add_evidence, name='add_evidence'),
+    path('dispute/vote/<str:public_id>/', cast_vote, name='cast_vote'),
+    path('dispute/resolve/<str:public_id>/', moderator_resolve, name='moderator_resolve'),
     path('my_tasks/', my_tasks, name='my_tasks'),
 
     # Chat URLs
     path('chat/start/<int:user_id>/', start_chat, name='start_chat'),
     path('chat/<str:public_id>/', chat_view, name='chat_view'),
     path('chat/send/<str:public_id>/', send_message, name='send_message'),
+    path('chat/history/<str:public_id>/', message_history, name='message_history'),
+    path('realtime/token/', realtime_token, name='realtime_token'),
+
+    # Ops
+    path('internal/cron/', cron, name='cron'),
+    path('healthz/', healthz, name='healthz'),
 
     # User & Friend URLs
     path('users/', user_list, name='user_list'),

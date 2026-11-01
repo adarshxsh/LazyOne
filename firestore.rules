@@ -1,0 +1,27 @@
+rules_version = '2';
+// Postgres is the source of truth; Firestore is a server-written, read-only mirror
+// (docs/Ideation/ARCHITECTURE_V2.md §4.4). Clients sign in with a custom token from
+// /realtime/token/ whose uid is "django:<user id>"; the server maintains member_uids.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isMember(convId) {
+      return request.auth != null &&
+        request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.member_uids;
+    }
+
+    match /conversations/{convId} {
+      allow read: if isMember(convId);
+      allow write: if false;
+
+      match /messages/{msgId} {
+        allow read: if isMember(convId);
+        allow write: if false;
+      }
+    }
+
+    // Everything else is server-only.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

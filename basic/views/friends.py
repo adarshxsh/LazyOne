@@ -1,3 +1,4 @@
+from django.views.decorators.http import require_POST
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -44,6 +45,7 @@ def friends_view(request):
     return render(request, 'friends.html', context)
 
 @login_required(login_url='/login/')
+@require_POST
 def send_friend_request(request, user_id):
     if request.method == 'POST':
         to_user = get_object_or_404(User, id=user_id)
@@ -66,6 +68,7 @@ def send_friend_request(request, user_id):
     return redirect('friends')
 
 @login_required(login_url='/login/')
+@require_POST
 def accept_friend_request(request, request_id):
     friend_request = get_object_or_404(FriendRequest, id=request_id)
     if friend_request.to_user == request.user:
@@ -94,6 +97,7 @@ def accept_friend_request(request, request_id):
     return redirect('friends')
 
 @login_required(login_url='/login/')
+@require_POST
 def decline_friend_request(request, request_id):
     friend_request = get_object_or_404(FriendRequest, id=request_id)
     if friend_request.to_user == request.user:

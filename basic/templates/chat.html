@@ -37,12 +37,16 @@
         <p id="loading-messages" class="text-center text-gray-400">Loading chat...</p>
     </div>
 
+    {% if can_send %}
     <form class="mt-4 flex items-center space-x-3" id="message-form">
         <input type="text" id="message-input" placeholder="Type your message..." autocomplete="off" required class="flex-grow w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-full text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 transition-shadow duration-200">
         <button type="submit" id="message-submit" title="Send Message" class="flex-shrink-0 bg-cyan-500 hover:bg-cyan-600 text-white font-bold rounded-full h-12 w-12 flex items-center justify-center transition-colors">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
         </button>
     </form>
+    {% else %}
+    <p class="mt-4 text-center text-sm text-gray-400">You can read this chat as a juror or moderator, but you can't post in it.</p>
+    {% endif %}
 </div>
 
 <!-- Firebase SDKs -->
@@ -61,88 +65,117 @@
             messagingSenderId: "{{ FIREBASE_MESSAGING_SENDER_ID }}",
             appId: "{{ FIREBASE_APP_ID }}"
         };
-        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        if (firebaseConfig.apiKey && !firebase.apps.length) firebase.initializeApp(firebaseConfig);
 
-        // Globals
-        const db = firebase.firestore();
+        // Postgres is the source of truth. The browser never writes to Firestore:
+        // it sends via Django and reads a server-written mirror (firestore.rules),
+        // falling back to polling Django if realtime is unavailable.
         const conversationId = "{{ conversation.public_id }}";
-        const currentUser = { id: "{{ request.user.id }}", username: "{{ request.user.username }}" };
+        const currentUser = { id: "{{ request.user.id }}" };
+        const historyUrl = "{% url 'message_history' conversation.public_id %}";
+        const sendUrl = "{% url 'send_message' conversation.public_id %}";
+        const tokenUrl = "{% url 'realtime_token' %}";
+        const csrfToken = "{{ csrf_token }}";
 
-        // DOM Elements
         const messageList = document.getElementById('message-list');
         const messageForm = document.getElementById('message-form');
         const messageInput = document.getElementById('message-input');
         const messageSubmitButton = document.getElementById('message-submit');
         const loadingIndicator = document.getElementById('loading-messages');
+        const seen = new Set();
+        let lastId = 0;
+        let pollTimer = null;
 
-        messageInput.focus();
+        if (messageInput) messageInput.focus();
 
-        // --- Firestore Real-Time Listener ---
-        const messagesRef = db.collection('conversations').doc(conversationId).collection('messages').orderBy('timestamp');
-        messagesRef.onSnapshot(snapshot => {
-            loadingIndicator.style.display = 'none';
-            snapshot.docChanges().forEach(change => {
-                if (change.type === 'added') {
-                    renderMessage(change.doc.data());
-                }
+        function addMessages(list) {
+            list.forEach(m => {
+                if (seen.has(String(m.id))) return;
+                seen.add(String(m.id));
+                lastId = Math.max(lastId, Number(m.id) || 0);
+                renderMessage(m);
             });
             scrollToBottom();
-        }, error => {
-            console.error("Error listening for messages: ", error);
-            loadingIndicator.textContent = "Error loading chat. Please refresh.";
-        });
-
-        // --- Form Submission ---
-        messageForm.addEventListener('submit', e => {
-            e.preventDefault();
-            const messageContent = messageInput.value;
-            if (messageContent.trim() === '' || messageSubmitButton.disabled) return;
-            
-            sendMessage(messageContent);
-            messageInput.value = '';
-        });
-
-        function sendMessage(content) {
-            messageSubmitButton.disabled = true;
-
-            // Save to Firestore
-            db.collection('conversations').doc(conversationId).collection('messages').add({
-                authorId: currentUser.id,
-                authorUsername: currentUser.username,
-                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                content: content
-            }).catch(console.error);
-
-            // Notify Django backend for notifications and timestamps
-            fetch(`{% url 'send_message' conversation.public_id %}`, {
-                method: 'POST',
-                headers: {
-                    'X-CSRFToken': '{{ csrf_token }}',
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: 'content=' + encodeURIComponent(content)
-            });
-
-            setTimeout(() => { 
-                messageSubmitButton.disabled = false; 
-                messageInput.focus(); 
-            }, 500);
         }
 
-        function renderMessage(messageData) {
-            const wrapper = document.createElement('div');
-            wrapper.className = `message-wrapper ${messageData.authorId == currentUser.id ? 'me' : 'other'}`;
-            const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(messageData.authorUsername)}&background=random`;
-            const timeAgo = messageData.timestamp ? timeSince(new Date(messageData.timestamp.seconds * 1000)) : 'just now';
+        async function loadHistory() {
+            const r = await fetch(historyUrl + (lastId ? `?after=${lastId}` : ''), { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('history ' + r.status);
+            const data = await r.json();
+            loadingIndicator.style.display = 'none';
+            addMessages(data.messages);
+        }
 
+        function startPolling() {
+            if (pollTimer) return;
+            pollTimer = setInterval(() => loadHistory().catch(console.error), 3000);
+        }
+
+        async function startRealtime() {
+            if (!firebaseConfig.apiKey) return startPolling();
+            try {
+                const r = await fetch(tokenUrl, { credentials: 'same-origin' });
+                const { token } = await r.json();
+                if (!token) return startPolling();
+                await firebase.auth().signInWithCustomToken(token);
+                firebase.firestore().collection('conversations').doc(conversationId)
+                    .collection('messages').orderBy('timestamp')
+                    .onSnapshot(snap => {
+                        addMessages(snap.docChanges().filter(c => c.type === 'added').map(c => c.doc.data()));
+                    }, err => { console.warn('Realtime unavailable, polling instead', err); startPolling(); });
+            } catch (e) {
+                console.warn('Realtime unavailable, polling instead', e);
+                startPolling();
+            }
+        }
+
+        loadHistory()
+            .catch(() => { loadingIndicator.textContent = "Error loading chat. Please refresh."; })
+            .finally(startRealtime);
+
+        if (messageForm) {
+            messageForm.addEventListener('submit', e => {
+                e.preventDefault();
+                const content = messageInput.value.trim();
+                if (!content || messageSubmitButton.disabled) return;
+                sendMessage(content);
+                messageInput.value = '';
+            });
+        }
+
+        async function sendMessage(content) {
+            messageSubmitButton.disabled = true;
+            try {
+                const r = await fetch(sendUrl, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: 'content=' + encodeURIComponent(content)
+                });
+                const data = await r.json().catch(() => ({}));
+                if (r.ok && data.message) addMessages([data.message]);
+                else alert(data.error || 'Message could not be sent.');
+            } catch (e) {
+                alert('Message could not be sent. Check your connection.');
+            } finally {
+                messageSubmitButton.disabled = false;
+                messageInput.focus();
+            }
+        }
+
+        function renderMessage(m) {
+            const mine = String(m.authorId) === currentUser.id;
+            const name = escapeHTML(m.authorUsername || 'unknown');
+            const when = m.createdAt ? new Date(m.createdAt) : (m.timestamp && m.timestamp.seconds ? new Date(m.timestamp.seconds * 1000) : null);
+            const wrapper = document.createElement('div');
+            wrapper.className = `message-wrapper ${mine ? 'me' : 'other'}`;
             wrapper.innerHTML = `
-                <img src="${avatarUrl}" alt="${messageData.authorUsername}" class="avatar">
-                <div class="message ${messageData.authorId == currentUser.id ? 'me' : 'other'}">
-                    <p class="message-author">${messageData.authorUsername}</p>
-                    <p class="message-content">${escapeHTML(messageData.content || '')}</p>
-                    <p class="message-timestamp">${timeAgo}</p>
-                </div>
-            `;
+                <img src="https://ui-avatars.com/api/?name=${encodeURIComponent(m.authorUsername || '?')}&background=random" alt="${name}" class="avatar">
+                <div class="message ${mine ? 'me' : 'other'}">
+                    <p class="message-author">${name}</p>
+                    <p class="message-content">${escapeHTML(m.content || '')}</p>
+                    <p class="message-timestamp">${when ? timeSince(when) : 'just now'}</p>
+                </div>`;
             messageList.appendChild(wrapper);
         }
 

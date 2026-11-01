@@ -1,6 +1,7 @@
 # LazyOne Architecture v2: Proposal
 
-> Status: **Proposed**, 2026-10-31. Replaces [ARCHITECTURE.md](ARCHITECTURE.md), which no longer matches the code (it describes Channels + Redis; the code runs plain WSGI with Firestore).
+> Status: **Phases 0–5 implemented locally** (branch `arch-v2/phase0`, 87 tests on SQLite + Postgres), 2026-11-01. Not yet deployed. See §11 for where the build differs from this plan.
+> Originally proposed 2026-10-31. Replaces [ARCHITECTURE.md](ARCHITECTURE.md), which no longer matches the code (it describes Channels + Redis; the code runs plain WSGI with Firestore).
 > Scope: how LazyOne should be structured so it delivers the core idea (*hand small tasks to people you trust, for points, with fair dispute resolution*) correctly, cheaply, and in a way that can grow from one campus to many.
 
 ---
@@ -351,3 +352,16 @@ See [PR_REVIEW_2026-10-31.md](../Development/PR_REVIEW_2026-10-31.md) for the fu
 2. Bond size for disputes: a flat amount or a % of the reward?
 3. Hosting: stay on Vercel (cron-based outbox retry) or move to an always-on host?
 4. Should points ever be purchasable or redeemable? (That changes the regulatory picture; recommend **no** for v2.)
+
+## 11. Implementation notes (2026-11-01)
+
+Where the build differs from the plan above, and why:
+
+- **Modules:** `ledger`, `outbox` and `api` are separate Django apps. Marketplace, disputes, feed, messaging and identity are service modules in `basic/services/` (moving existing models across apps would mean painful migrations for no runtime benefit).
+- **Waves:** the audience is computed in the feed query (closeness subquery + friend-of-friend `EXISTS`), not a precomputed `Audience` table. Add the table only if the feed query shows up in profiling.
+- **Bond:** only the person raising the dispute posts a bond (PR #167 semantics). Jurors are paid only from forfeited bonds, so no points are minted.
+- **Voting:** jurors may vote any time before `voting_deadline`; the dispute settles early once every juror has voted.
+- **Firestore:** member lists use custom-token uids `django:<user id>` from `/realtime/token/`, so realtime works for every login method. Chat falls back to polling Django when realtime is off or unavailable.
+- **Scheduler:** `manage.py run_jobs` (local `--loop`) or `GET /internal/cron/` with `Authorization: Bearer $CRON_SECRET`.
+
+Key code: `ledger/services.py`, `basic/services/{marketplace,feed,disputes,messaging,identity,jobs}.py`, `basic/handlers.py`, `outbox/services.py`, `api/`.
