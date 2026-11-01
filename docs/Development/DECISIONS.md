@@ -1,5 +1,28 @@
 # Architectural Decisions
 
+## Decision log (2026)
+
+| # | Date | Decision | Why | Details |
+|---|------|----------|-----|---------|
+| D1 | 2026-10-31 | **Modular monolith**: one Django app, services per domain; no microservices | 1,000 users fit one box; distributed transactions would break the points guarantees | [ARCHITECTURE_V2 §3](../Ideation/ARCHITECTURE_V2.md) |
+| D2 | 2026-10-31 | **Double-entry ledger** with escrow + idempotent transfers; profile balance is a mirror | Makes double payout / minting structurally impossible | [BUSINESS_LAYER](BUSINESS_LAYER.md) |
+| D3 | 2026-10-31 | **Single transition table** owns `Task.status`; new `submitted` (48 h auto-approve) and `expired` states | Ends ad-hoc status edits; poster can't stall payment forever | [BUSINESS_LAYER](BUSINESS_LAYER.md) |
+| D4 | 2026-11-01 | **Transactional outbox in Postgres**; no broker (RabbitMQ/Kafka/Celery) | Side effects exist iff the change committed; one less service | [DELIVERY_AND_REALTIME](../Ideation/DELIVERY_AND_REALTIME.md) |
+| D5 | 2026-11-01 | **Postgres authoritative; Firestore server-written, client read-only** (custom-token uid `django:<id>`) | Closes the browser-write bypass; one source of truth | [DELIVERY_AND_REALTIME](../Ideation/DELIVERY_AND_REALTIME.md) |
+| D6 | 2026-11-01 | **Peer-jury disputes**: raiser bond max(20 %, 50), 5 jurors excluding 2-hop neighbourhood, hidden votes, majority or escalate | Fair without the owner judging; no points minted | [ARCHITECTURE_V2 §4.5](../Ideation/ARCHITECTURE_V2.md) |
+| D7 | 2026-11-01 | **Same backend for Android**; `/api/v1` never breaks | One set of rules; old app versions stay installed | [API](API.md) |
+| D8 | 2026-11-01 | **Local-first**: build and verify locally, choose hosting afterwards | Avoid infra work before the product is solid | [LOCAL_DEV](LOCAL_DEV.md) |
+| D9 | 2026-11-01 | 🔒 **Wave distribution locked (v1)**: adaptive schedule (empty waves skipped), cached circle, feed computed on read | Measured 3.5–4.5× faster than v0; ~4–6 % of a core at 1,000 users | [WAVE_DISTRIBUTION](../Ideation/WAVE_DISTRIBUTION.md) |
+| D10 | 2026-11-01 | **No per-user queue, no API gateway** | Fan-out-on-read is cheaper and always fresh; edge + Django cover gateway duties | [DELIVERY_AND_REALTIME](../Ideation/DELIVERY_AND_REALTIME.md) |
+| D11 | 2026-11-01 | **WebSockets deferred**; FCM required for closed apps regardless | Not possible on Vercel; swap point exists (`RealtimePublisher`) | [DELIVERY_AND_REALTIME](../Ideation/DELIVERY_AND_REALTIME.md) |
+| D12 | 2026-11-01 | **Caddy or Cloudflare Tunnel** as edge if self-hosting | Auto-HTTPS, slow-client buffering, static files | [DEPLOYMENT](../Ideation/DEPLOYMENT.md) |
+
+To change a locked area, add a new row here explaining what changes and why.
+
+---
+
+## Original design notes (2025)
+
 This document logs architectural design decisions made during the development of LazyOne.
 
 

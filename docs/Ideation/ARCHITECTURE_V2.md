@@ -1,7 +1,7 @@
-# LazyOne Architecture v2: Proposal
+# LazyOne Architecture v2
 
-> Status: **Phases 0–5 implemented locally** (branch `arch-v2/phase0`, 87 tests on SQLite + Postgres), 2026-11-01. Not yet deployed. See §11 for where the build differs from this plan.
-> Originally proposed 2026-10-31. Replaces [ARCHITECTURE.md](ARCHITECTURE.md), which no longer matches the code (it describes Channels + Redis; the code runs plain WSGI with Firestore).
+> Status (2026-11-01): **Phases 0–5 implemented locally** (branch `arch-v2/phase0`, 98 tests on SQLite + Postgres); not deployed. Wave distribution is 🔒 locked v1.
+> Deeper docs: [BUSINESS_LAYER](../Development/BUSINESS_LAYER.md) · [WAVE_DISTRIBUTION](WAVE_DISTRIBUTION.md) · [DELIVERY_AND_REALTIME](DELIVERY_AND_REALTIME.md) · [DEPLOYMENT](DEPLOYMENT.md) · [SECURITY](../Development/SECURITY.md) · [API](../Development/API.md). §11 lists where the build differs from this original plan.
 > Scope: how LazyOne should be structured so it delivers the core idea (*hand small tasks to people you trust, for points, with fair dispute resolution*) correctly, cheaply, and in a way that can grow from one campus to many.
 
 ---
@@ -51,7 +51,7 @@ Taken from [Project Contract](Project%20Contract.md) and [REQUIREMENTS](REQUIREM
 - **SQLite on Vercel** ([settings.py:129](../../LazyOne/settings.py#L129)): Vercel's filesystem is ephemeral and per-instance, so production data is lost or forked between instances. This is the single biggest blocker to real usage.
 - **Firebase Admin initialised twice** ([models.py:14](../../basic/models.py#L14) and [settings.py:187](../../LazyOne/settings.py#L187)). Importing models has network side effects.
 - **Duplicate settings blocks** (security headers at L74 and L214, allauth providers at L90 and L239).
-- **Dead code that misleads contributors:** [routers.py](../../basic/routers.py) (`FriendsRouter` for a `friends_db` that is not configured), [consumers.py](../../basic/consumers.py) and [routing.py](../../basic/routing.py) (empty), plus `channels`, `daphne`, `channels_redis`, `cookiecutter`, and `django-tailwind` in requirements, all unused.
+- **Dead code that misleads contributors:** `routers.py` (`FriendsRouter` for a `friends_db` that is not configured), `consumers.py` and `routing.py` (empty; all three deleted in Phase 0), plus `channels`, `daphne`, `channels_redis`, `cookiecutter`, and `django-tailwind` in requirements, all unused.
 - **Business logic in views:** 226 lines of task state changes in [views/tasks.py](../../basic/views/tasks.py), with notifications created inline everywhere.
 - **The core idea, "wave" distribution (G3), is not implemented.** Closeness is stored but only used to sort the friends list.
 - **PR backlog:** 315 open PRs (almost all automated `stitch/*` branches proposing overlapping dispute/jury designs). See §9.

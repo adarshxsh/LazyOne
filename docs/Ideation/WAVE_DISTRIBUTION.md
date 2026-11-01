@@ -2,7 +2,9 @@
 
 > LazyOne's core idea: a task reaches the poster's closest friends first, then spreads outward.
 > Code: [`basic/services/feed.py`](../../basic/services/feed.py) · Tests: [`basic/tests/test_feed.py`](../../basic/tests/test_feed.py)
-> Status (2026-11-01): adaptive schedule + optimized feed **implemented**; sections 6–9 are **proposals awaiting decisions**.
+> **🔒 LOCKED - v1 (2026-11-01).** Sections 1–5 and 10 describe the frozen behaviour: implemented, tested
+> (98 tests, SQLite + Postgres) and benchmarked. Changing them needs a new decision entry in
+> [DECISIONS.md](../Development/DECISIONS.md). Sections 6–9 are **future (v2) ideas, not part of the lock**.
 
 ## 1. The model
 
@@ -82,7 +84,11 @@ The scripts generate a synthetic campus in a throwaway database (`createdb lazyo
 
 Delayed outbox events (`task.wave`) fire at each wave's stored start time and notify friends in that wave. They are skipped if the task was taken, cancelled or re-opened since scheduling (the event carries `opened_at`). `community_now` notifies all friends at once. Wave 3 (whole community) sends no push - it only appears in the feed.
 
-## 6. Proposal - trust-based closeness (decision needed)
+---
+
+# Future (v2) - not locked
+
+## 6. Trust-based closeness
 
 Today closeness is a number chosen once, and accepting a friend request copies the **requester's** rating into both directions.
 
@@ -91,17 +97,17 @@ Proposed:
 - `effective_closeness = clamp(manual + 5 × tasks completed together − 15 × disputes lost against them, 0, 100)`.
 - Always explainable in the UI: *"You're in asha's first wave: close friend, 3 tasks done together."*
 
-## 7. Proposal - per-community configuration (decision needed)
+## 7. Per-community configuration
 
 Move the knobs from `settings.LAZYONE` to a `WaveConfig` model per community (thresholds, delays, notification caps), editable in Django admin. Each campus tunes without a deploy; `settings` stays the default.
 
-## 8. Proposal - notification fatigue (decision needed)
+## 8. Notification fatigue
 
 - At most **N wave notifications per user per day** (suggested 10), quiet hours (e.g. 23:00–07:00).
 - Users who ignore many waves in a row get lower priority.
 - Feed visibility is **not** affected - only push/in-app alerts.
 
-## 9. Proposal - measure to tune (recommended next)
+## 9. Measure to tune (recommended first v2 item)
 
 Record the taker's wave at acceptance (`TaskEvent.note` or a `taken_in_wave` field). Admin view:
 - time-to-accept per wave, % of tasks taken per wave, % expired,
@@ -109,7 +115,9 @@ Record the taker's wave at acceptance (`TaskEvent.note` or a `taken_in_wave` fie
 
 Tune `WAVE_DELAYS` / thresholds from these numbers instead of guesses.
 
-## 10. Known limits
+---
+
+## 10. Known limits of v1 (locked)
 
 - `YOUNG_SCAN_LIMIT = 500`: a viewer inspects at most the 500 newest not-yet-community-wide tasks per request. Above ~500 tasks opened within 2 h in one community, an older circle task could be missed until it reaches wave 3. Raise the limit or add pagination if a campus gets there.
 - The circle cache uses Django's default per-process cache; with several app processes, use a shared cache (Redis) so invalidation reaches every process (stale for at most 60 s otherwise).

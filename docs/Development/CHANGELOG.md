@@ -2,7 +2,21 @@
 
 All notable changes to the LazyOne project are documented in this file.
 
-## [2.0.1] - Unreleased
+## [3.0.0-dev] - Unreleased (branch `arch-v2/phase0`)
+### Security & correctness
+- Fixed: double payout on double-click, points minted on accepted cancellation, re-payout via withdrawing a resolved dispute, GET-triggerable task actions (CSRF), hardcoded secret key, chat username XSS.
+- Disputes and disputed chats now private to parties, jurors and staff; browser can no longer write Firestore.
+- Fixed `/login/` 404 and logout crash; friend accept/decline are POST-only.
+### Added
+- Double-entry points ledger (`ledger` app) with escrow, bonds, `check_ledger`.
+- Task state machine with audit trail; `submitted` (48 h auto-approve) and `expired` states.
+- Transactional outbox (`outbox` app) + `run_jobs` / `/internal/cron/`.
+- REST API `/api/v1` (Firebase token auth, idempotency keys, throttling) and communities by email domain.
+- Wave distribution 🔒 v1: adaptive schedule, cached circles, 3.5–4.5× faster feed.
+- Peer-jury disputes: bond, evidence, conflict-free jury draw, hidden votes, escalation.
+- `seed_demo`, `LOCAL_DEV.md`, CI on Postgres, 98 tests.
+
+## [2.0.1] - 2026-10
 ### Changed
 - Swapped out internal database IDs for secure, 16-character `public_id`s across Tasks, Chats, and Disputes.
 - Fixed a sneaky loophole where task cancellations could bypass active disputes.

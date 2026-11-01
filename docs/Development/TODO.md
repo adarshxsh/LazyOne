@@ -1,15 +1,27 @@
-# Todo List
+# TODO
 
-## High Priority
-- [ ] Implement production database migration (e.g. migrate from SQLite to PostgreSQL/MySQL for scalability).
-- [ ] Set up secure production Redis deployment (TLS enabled, auth tokens).
-- [ ] Add rate limiting on task posting and authentication endpoints.
+> Updated 2026-11-01. Local-first: everything here is built and verified locally before deployment.
 
-## Medium Priority
-- [ ] Implement automated push notifications via Firebase Cloud Messaging (FCM).
-- [ ] Enhance Social Circle visualization with interactive canvas controls (pan, zoom).
-- [ ] Add integration testing for real-time WebSocket channels.
+## Next
+- [ ] **Dispute resolution deep-dive** (review v1 rules, edge cases, then lock like waves)
+- [ ] Fix home graph leaking non-friends' phone numbers ([SECURITY #3](SECURITY.md))
+- [ ] Sybil protection: verification before bonus / jury duty ([SECURITY #2](SECURITY.md))
+- [ ] `social` service (friend requests, acceptor sets own closeness)
 
-## Low Priority
-- [ ] Add dark mode theme styling.
-- [ ] Support custom emojis in chat.
+## Delivery & realtime ([design](../Ideation/DELIVERY_AND_REALTIME.md))
+- [ ] Chat safety poll (20 s) + adaptive polling
+- [ ] Notification `delivered_at`/`read_at`, `/api/v1/sync?since=`
+- [ ] FCM device tokens + push handler; minimum-app-version endpoint; App Check
+
+## Waves v2 (not locked, [ideas](../Ideation/WAVE_DISTRIBUTION.md#future-v2---not-locked))
+- [ ] Record taker's wave + admin metrics (first)
+- [ ] Trust-based closeness · per-community `WaveConfig` · notification caps
+
+## Scale (local)
+- [ ] Locust load test at 1,000 users · Redis cache/throttles
+
+## Needs owner action
+- [ ] Deploy `firestore.rules` · delete `claim-jules-pr.yml` · close duplicate bot PRs · unify `master`/`deployment` · push branch
+
+## Deployment ([plan](../Ideation/DEPLOYMENT.md))
+- [ ] Choose hosting A/B · production checklist

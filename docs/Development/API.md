@@ -1,59 +1,61 @@
-# LazyOne API 
+# LazyOne API v1
 
-Here is our new RESTful API design! We’re moving away from scattered URLs and internal database IDs. Instead, we’re using a clean `/api/v1/` namespace and secure `public_id`s (like `A7F9K2M8XQ4L1ZPW`) to keep our database keys hidden. 
+Base path: `/api/v1/` · Code: [`api/`](../../api/) · Used by the Android (Flutter) app and any future SPA. Same backend and rules as the website.
 
-### The Standard Response
-Every endpoint returns a predictable JSON response. No surprises:
-```json
-{
-  "status": "success",
-  "data": { ... },
-  "meta": { "pagination": { "next": "..." } }
-}
-```
+## Conventions
 
----
+| Topic | Rule |
+|-------|------|
+| Auth | `Authorization: Bearer <Firebase ID token>` (mobile) or Django session + `X-CSRFToken` (web) |
+| IDs | Public, non-guessable `public_id` strings - never database ids |
+| Retries | Send `Idempotency-Key: <uuid>` on POSTs; a retry replays the stored response (`Idempotent-Replay: true`). Same key on a different path → `422` |
+| Concurrency | Task actions accept optional `version`; if the task changed → `409` with the current `version` |
+| Errors | `{"detail": "<user-safe message>"}` - `400` invalid input, `403` not allowed, `404` not found / not visible, `409` illegal transition, `429` throttled, `503` realtime unavailable |
+| Throttles | `user` 240/min, `post_task` 30/hour, `messages` 60/min (env-configurable) |
+| Compatibility | Old app versions stay installed: never break `v1`; add `v2` instead |
+
+## Endpoints
+
+### Me & ledger
+| Method | Path | Returns |
+|--------|------|---------|
+| GET | `/me/` | id, username, email, `balance`, community, `phone_verified` |
+| GET | `/ledger/` | balance + last 100 entries (amount, reason, task, time) |
 
 ### Tasks
-*Use the 16-character `public_id` for `{id}`.*
+| Method | Path | Notes |
+|--------|------|-------|
+| GET | `/tasks/feed/?q=` | Wave-filtered feed (max 50) |
+| GET | `/tasks/mine/` | Posted + taken |
+| POST | `/tasks/` | `{title, description?, reward, deadline?, wave_policy?}` → 201. Reward is moved to escrow; `400` if balance too low or friends-only with no friends |
+| GET | `/tasks/{id}/` | Visible to poster, taker, viewers whose wave has started, jurors, staff |
+| GET | `/tasks/{id}/events/` | Audit trail (poster, taker, staff) |
+| POST | `/tasks/{id}/{action}/` | `action` ∈ `accept, submit, approve, cancel, abandon, request_cancel, accept_cancel`; body `{note?, version?}` |
 
-* **GET `/api/v1/tasks/`** — Fetch a list of tasks. Supports pagination and filters.
-* **POST `/api/v1/tasks/`** — Create a new task. Just send `{ title, description, reward, deadline }`.
-* **GET `/api/v1/tasks/{id}/`** — Get all the details for a single task.
-
-**State Changes (Actions):**
-* **POST `/api/v1/tasks/{id}/take/`** — Accept a task.
-* **POST `/api/v1/tasks/{id}/complete/`** — Mark it done.
-* **POST `/api/v1/tasks/{id}/abandon/`** — Drop a task you took.
-
-**Cancellations:**
-* **POST `/api/v1/tasks/{id}/cancellations/`** — Request to cancel a task.
-* **POST `/api/v1/tasks/{id}/cancellations/accept/`** — Accept a cancellation request.
-
----
-
-### Chats
-*Use the 16-character `public_id` for `{id}`.*
-
-* **GET `/api/v1/chats/`** — Get a list of your active conversations.
-* **GET `/api/v1/chats/{id}/`** — Fetch chat details.
-* **GET `/api/v1/chats/{id}/messages/`** — Load messages (cursor-based pagination for infinite scroll).
-* **POST `/api/v1/chats/{id}/messages/`** — Send a new message.
-
----
+Task objects include `status`, `version`, `allowed_actions` (for the caller), `conversation_id` (parties only), `active_dispute_id`.
 
 ### Disputes
-*Use the 16-character `public_id` for `{id}`.*
+| Method | Path | Notes |
+|--------|------|-------|
+| POST | `/tasks/{id}/disputes/` | `{reason, dispute_type?}`; takes a bond of max(20 % of reward, 50) |
+| GET | `/disputes/{id}/` | Parties, jurors, staff only. `tally` shows counts only while open; votes revealed after close |
+| POST | `/disputes/{id}/evidence/` | `{text}`; parties, before `evidence_deadline` |
+| POST | `/disputes/{id}/vote/` | `{vote: "taker"|"poster"}`; jurors, before `voting_deadline` |
+| POST | `/disputes/{id}/withdraw/` | Raiser only; bond refunded |
 
-* **POST `/api/v1/tasks/{id}/disputes/`** — Raise a dispute on a task.
-* **GET `/api/v1/disputes/{id}/`** — View the dispute details.
-* **POST `/api/v1/disputes/{id}/withdraw/`** — Withdraw a dispute you raised.
+### Chat & realtime
+| Method | Path | Notes |
+|--------|------|-------|
+| GET | `/conversations/{id}/messages/?after=` | History / polling cursor |
+| POST | `/conversations/{id}/messages/` | `{content}` → 201 |
+| GET | `/realtime/token/` | Firebase custom token (uid `django:<id>`) for read-only Firestore listeners; `503` if realtime is off |
 
----
-
-### Users & Social
-* **GET `/api/v1/users/me/`** — Get your own profile and reward points.
-* **GET `/api/v1/friends/`** — See your friends list.
-* **POST `/api/v1/users/{username}/friend-requests/`** — Add a friend.
-* **POST `/api/v1/friend-requests/{id}/accept/`** — Accept a request.
-* **POST `/api/v1/friend-requests/{id}/decline/`** — Decline a request.
+## Example: take a task and get paid
+```http
+GET  /api/v1/tasks/feed/
+POST /api/v1/tasks/Ab3.../accept/        {"version": 1}       Idempotency-Key: 6f1c...
+POST /api/v1/tasks/Ab3.../submit/        {"note": "Left it at your door"}
+# poster:
+POST /api/v1/tasks/Ab3.../approve/
+GET  /api/v1/me/                         → balance increased by the reward
+```
