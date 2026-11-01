@@ -203,6 +203,8 @@ def apply(task_id, action, actor, *, idempotency_key):
 
 ### 4.3 Wave distribution (G3): the core idea
 
+> **Implemented and extended** (adaptive schedule, optimized feed, measured costs): see [WAVE_DISTRIBUTION.md](WAVE_DISTRIBUTION.md). The text below is the original proposal.
+
 REQUIREMENTS says tasks should flow "from more close friend to the lesser closer friend in the form of wave". Design:
 
 ```
@@ -358,7 +360,7 @@ See [PR_REVIEW_2026-10-31.md](../Development/PR_REVIEW_2026-10-31.md) for the fu
 Where the build differs from the plan above, and why:
 
 - **Modules:** `ledger`, `outbox` and `api` are separate Django apps. Marketplace, disputes, feed, messaging and identity are service modules in `basic/services/` (moving existing models across apps would mean painful migrations for no runtime benefit).
-- **Waves:** the audience is computed in the feed query (closeness subquery + friend-of-friend `EXISTS`), not a precomputed `Audience` table. Add the table only if the feed query shows up in profiling.
+- **Waves:** no precomputed `Audience` table. Each task stores an adaptive wave schedule (empty waves skipped); each viewer's circle is cached for 60 s and applied in Python. Measured 3.5–4.5× faster than the first SQL-only version. Details: [WAVE_DISTRIBUTION.md](WAVE_DISTRIBUTION.md).
 - **Bond:** only the person raising the dispute posts a bond (PR #167 semantics). Jurors are paid only from forfeited bonds, so no points are minted.
 - **Voting:** jurors may vote any time before `voting_deadline`; the dispute settles early once every juror has voted.
 - **Firestore:** member lists use custom-token uids `django:<user id>` from `/realtime/token/`, so realtime works for every login method. Chat falls back to polling Django when realtime is off or unavailable.

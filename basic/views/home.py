@@ -8,7 +8,7 @@ def home(request):
     query = request.GET.get('q', '')
     if request.user.is_authenticated:
         # Wave-filtered feed: closest friends see a task first (ARCHITECTURE_V2 §4.3).
-        available_tasks = feed_for(request.user, query)[:20]
+        available_tasks = feed_for(request.user, query, limit=20)
         disputed_tasks = (Task.objects.filter(disputes__status=Dispute.Status.OPEN,
                                               disputes__jurors__juror=request.user)
                           .select_related('posted_by', 'taken_by', 'conversation').distinct())

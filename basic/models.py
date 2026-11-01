@@ -99,7 +99,12 @@ class Task(models.Model):
     cancellation_requested = models.BooleanField(default=False)
     community = models.ForeignKey(Community, null=True, blank=True, on_delete=models.PROTECT, related_name='tasks')
     wave_policy = models.CharField(max_length=20, choices=WavePolicy.choices, default=WavePolicy.DEFAULT)
-    opened_at = models.DateTimeField(default=timezone.now, db_index=True)
+    opened_at = models.DateTimeField(default=timezone.now, db_index=True)  # wave 0 starts here
+    # Adaptive wave schedule (docs/Ideation/WAVE_DISTRIBUTION.md), computed when the task opens.
+    # Empty waves are skipped; NULL wave3_at means the task never reaches the whole community.
+    wave1_at = models.DateTimeField(null=True, blank=True)
+    wave2_at = models.DateTimeField(null=True, blank=True)
+    wave3_at = models.DateTimeField(null=True, blank=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
     submission_note = models.TextField(blank=True)
     version = models.PositiveIntegerField(default=0)
@@ -108,7 +113,10 @@ class Task(models.Model):
         constraints = [
             models.CheckConstraint(condition=models.Q(reward__gte=0), name='reward_non_negative')
         ]
-        indexes = [models.Index(fields=['community', 'status', 'opened_at'])]
+        indexes = [
+            models.Index(fields=['community', 'status', 'opened_at']),
+            models.Index(fields=['community', 'status', 'wave3_at']),
+        ]
 
     def __str__(self):
         return self.title

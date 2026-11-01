@@ -79,6 +79,8 @@ class ApiTests(World, TestCase):
 
     def test_task_detail_hidden_until_visible(self):
         hidden = make_user('poster2')
+        from .base import befriend
+        befriend(hidden, self.user1, 90)
         from ..services import marketplace
         t = marketplace.post_task(hidden, title='secret', description='', reward=10, wave_policy='friends_only')
         self.assertEqual(self.a3.get(f'/api/v1/tasks/{t.public_id}/').status_code, 404)

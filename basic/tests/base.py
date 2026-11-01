@@ -1,6 +1,8 @@
 from datetime import timedelta
 
 from django.contrib.auth.models import User
+from django.core.cache import cache
+from django.db.models import F
 from django.db.models import Sum
 from django.test import Client
 from django.urls import reverse
@@ -29,6 +31,7 @@ class World:
     """poster (user1) has posted a 100-point task; taker (user2), outsider (user3)."""
 
     def make_world(self):
+        cache.clear()
         self.user1 = make_user('user1')
         self.user2 = make_user('user2')
         self.user3 = make_user('user3')
@@ -55,3 +58,14 @@ class World:
         minted = -Account.objects.get(key='system:mint').balance
         held = Account.objects.exclude(kind='system').aggregate(s=Sum('balance'))['s'] or 0
         self.assertEqual(held, minted)
+
+
+def age_task(task, minutes):
+    """Pretend the task opened `minutes` ago: shift opened_at and its whole wave schedule."""
+    from datetime import timedelta as _td
+    from ..models import Task
+    t = Task.objects.get(pk=task.pk)
+    shift = (timezone.now() - _td(minutes=minutes)) - t.opened_at
+    Task.objects.filter(pk=task.pk).update(
+        opened_at=F('opened_at') + shift,
+        wave1_at=F('wave1_at') + shift, wave2_at=F('wave2_at') + shift, wave3_at=F('wave3_at') + shift)

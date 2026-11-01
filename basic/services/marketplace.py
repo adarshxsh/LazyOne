@@ -50,7 +50,8 @@ def _unassign(task, actor, **kw):
     task.submitted_at = None
     task.submission_note = ''
     task.opened_at = timezone.now()  # re-opened tasks start their waves again
-    from .feed import schedule_wave_notifications
+    from .feed import apply_schedule, schedule_wave_notifications
+    apply_schedule(task)
     schedule_wave_notifications(task)
 
 
@@ -176,12 +177,17 @@ def post_task(user, *, title, description, reward, deadline=None, wave_policy=Ta
     if wave_policy not in Task.WavePolicy.values:
         raise TransitionError("Unknown visibility option.")
 
+    from .feed import has_audience, schedule_wave_notifications, wave_schedule
     profile = user.userprofile
+    opened_at = timezone.now()
+    if not has_audience(user, wave_policy):
+        raise TransitionError("You have no friends yet, so a friends-only task would reach nobody. "
+                              "Choose another visibility option.")
     with transaction.atomic():
         task = Task.objects.create(
             title=title[:200], description=description or '', reward=reward, posted_by=user,
             deadline=deadline, status=S.AVAILABLE, community=profile.get_community(),
-            wave_policy=wave_policy, opened_at=timezone.now(),
+            wave_policy=wave_policy, opened_at=opened_at, **wave_schedule(user, wave_policy, opened_at),
         )
         try:
             ledger.transfer(
@@ -192,6 +198,5 @@ def post_task(user, *, title, description, reward, deadline=None, wave_policy=Ta
         except ledger.InsufficientFunds:
             raise TransitionError(f"You only have {ledger.balance_of(user)} points, not enough to offer this reward.")
         TaskEvent.objects.create(task=task, action='post', actor=user, from_status='', to_status=task.status)
-        from .feed import schedule_wave_notifications
         schedule_wave_notifications(task)
     return task

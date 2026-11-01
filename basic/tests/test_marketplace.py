@@ -90,10 +90,13 @@ class TaskLifecycleTests(World, TestCase):
 
     def test_add_task_via_web(self):
         deadline = (timezone.now() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
-        self.c2.post(reverse('add_task'), {'title': 't', 'description': 'd', 'reward': 300,
+        self.c2.post(reverse('add_task'), {'title': 'nobody', 'description': 'd', 'reward': 300,
                                            'deadline': deadline, 'wave_policy': 'friends_only'})
+        self.assertFalse(Task.objects.filter(posted_by=self.user2).exists())  # no friends -> rejected
+        self.c2.post(reverse('add_task'), {'title': 't', 'description': 'd', 'reward': 300,
+                                           'deadline': deadline, 'wave_policy': 'community_now'})
         t = Task.objects.get(posted_by=self.user2)
-        self.assertEqual(t.wave_policy, 'friends_only')
+        self.assertEqual(t.wave_policy, 'community_now')
         self.assertEqual(self.balance(self.user2), 700)
         self.assertLedgerConsistent()
 

@@ -55,7 +55,7 @@ def me(request):
 
 @api_view(['GET'])
 def task_feed(request):
-    tasks = feed.feed_for(request.user, request.query_params.get('q'))[:50]
+    tasks = feed.feed_for(request.user, request.query_params.get('q'), limit=50)
     return Response(TaskSerializer(tasks, many=True, context={'request': request}).data)
 
 
