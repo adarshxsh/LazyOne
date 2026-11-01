@@ -186,20 +186,29 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Vercel: FIREBASE_SERVICE_ACCOUNT_JSON=<the key JSON, raw or base64> as a secret env var.
 FIREBASE_SERVICE_ACCOUNT_KEY_PATH = os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY_PATH')
 _firebase_json = os.getenv('FIREBASE_SERVICE_ACCOUNT_JSON', '').strip()
-_firebase_cred = None
-if _firebase_json:
-    import base64, json as _json
-    _raw = _firebase_json if _firebase_json.startswith('{') else base64.b64decode(_firebase_json).decode()
-    _firebase_cred = credentials.Certificate(_json.loads(_raw))
-elif FIREBASE_SERVICE_ACCOUNT_KEY_PATH:
-    _firebase_cred = credentials.Certificate(FIREBASE_SERVICE_ACCOUNT_KEY_PATH)
-if _firebase_cred:
-    FIREBASE_SERVICE_ACCOUNT_KEY_PATH = FIREBASE_SERVICE_ACCOUNT_KEY_PATH or 'env'
-    if not firebase_admin._apps:
-        firebase_admin.initialize_app(_firebase_cred)
-    db = firestore.client()
-else:
-    print("WARNING: Firebase Admin SDK credentials not found. Backend Firebase features will be disabled.")
+db = None
+# A Firebase problem must never take the whole site down: log it and run without realtime.
+try:
+    _firebase_cred = None
+    if _firebase_json:
+        import base64, json as _json
+        _raw = _firebase_json if _firebase_json.startswith('{') else base64.b64decode(_firebase_json).decode()
+        _firebase_cred = credentials.Certificate(_json.loads(_raw))
+    elif FIREBASE_SERVICE_ACCOUNT_KEY_PATH:
+        if not os.path.exists(FIREBASE_SERVICE_ACCOUNT_KEY_PATH):
+            raise FileNotFoundError(f"FIREBASE_SERVICE_ACCOUNT_KEY_PATH points to a missing file "
+                                    f"({FIREBASE_SERVICE_ACCOUNT_KEY_PATH}); on Vercel use FIREBASE_SERVICE_ACCOUNT_JSON")
+        _firebase_cred = credentials.Certificate(FIREBASE_SERVICE_ACCOUNT_KEY_PATH)
+    if _firebase_cred:
+        if not firebase_admin._apps:
+            firebase_admin.initialize_app(_firebase_cred)
+        db = firestore.client()
+        FIREBASE_SERVICE_ACCOUNT_KEY_PATH = FIREBASE_SERVICE_ACCOUNT_KEY_PATH or 'env'
+    else:
+        print("WARNING: Firebase Admin SDK credentials not found. Backend Firebase features will be disabled.")
+except Exception as _e:  # noqa: BLE001
+    print(f"ERROR: Firebase disabled, invalid credentials: {type(_e).__name__}: {_e}")
+    FIREBASE_SERVICE_ACCOUNT_KEY_PATH = None
     db = None
 
 # Firebase Client-Side Config (for frontend)
@@ -349,4 +358,4 @@ if TESTING:
     LAZYONE['SIGNUP_BONUS_REQUIRES_VERIFICATION'] = False
 # Realtime mirror on/off. Tests never talk to Firebase; set REALTIME_ENABLED=False to keep
 # local development away from your real Firestore project.
-REALTIME_ENABLED = (not TESTING) and os.getenv('REALTIME_ENABLED', 'True') == 'True'
+REALTIME_ENABLED = (not TESTING) and db is not None and os.getenv('REALTIME_ENABLED', 'True') == 'True'
