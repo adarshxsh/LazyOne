@@ -106,6 +106,32 @@ class WaveFeedTests(TestCase):
         self.assertFalse(Notification.objects.filter(message__contains='needs a hand').exists())
 
 
+    def set_prestige(self, user, value):
+        from ..models import UserProfile
+        UserProfile.objects.filter(user=user).update(prestige=value)
+
+    def test_prestige_head_start_on_community_wave_only(self):
+        t = self.post()  # community wave at +120 min
+        self.set_prestige(self.stranger, 60)    # Trusted -> 10 min early
+        elder = make_user('elder')
+        self.set_prestige(elder, 600)           # Elder -> 30 min early
+        self.age(t, 105)
+        self.assertFalse(self.visible(self.stranger, t))
+        self.assertTrue(self.visible(elder, t))
+        self.age(t, 111)
+        self.assertTrue(self.visible(self.stranger, t))
+
+    def test_prestige_never_bypasses_friends_only_or_friend_waves(self):
+        t = self.post('friends_only')
+        self.set_prestige(self.stranger, 10_000)
+        self.age(t, 600)
+        self.assertFalse(self.visible(self.stranger, t))
+        t2 = self.post()
+        self.set_prestige(self.far, 10_000)     # wave 2 friend: head start doesn't touch friend waves
+        self.age(t2, 5)
+        self.assertFalse(self.visible(self.far, t2))
+
+
 class AdaptiveScheduleTests(TestCase):
     """Empty waves are skipped so nobody waits for a circle that doesn't exist."""
 

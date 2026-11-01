@@ -1,6 +1,6 @@
 # LazyOne Docs - Start Here
 
-> Snapshot **2026-11-01** · branch `arch-v2/phase0` (local, not pushed, not deployed) · 115 tests green on SQLite + Postgres
+> Snapshot **2026-11-01** · branch `arch-v2/phase0` (local, not pushed, not deployed) · 117 tests green on SQLite + Postgres
 
 ## Status at a glance
 
@@ -9,8 +9,8 @@
 | Phase 0 hardening (money bugs, POST-only, secrets) | ✅ done |
 | Ledger, task state machine, outbox | ✅ done |
 | API v1 + communities | ✅ done |
-| **Wave distribution** | 🔒 **locked v1** - adaptive schedule, optimized feed, measured |
-| Dispute resolution v2 + prestige | ✅ built - settlement → jury → appeal; review then lock |
+| **Wave distribution** | 🔒 **locked v1.1** - adaptive schedule, optimized feed, prestige head start (D15) |
+| Dispute resolution v2 + prestige | ✅ built - settlement → jury → appeal; questions answered, ready to lock · AI assist planned (D16) |
 | Push (FCM), sync endpoint, chat safety poll | 📝 designed, not built |
 | Deployment | ⏳ after local work; hosting not chosen |
 | Security | ⚠️ core protected; open items before launch |

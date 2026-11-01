@@ -18,6 +18,8 @@
 | D12 | 2026-11-01 | **Caddy or Cloudflare Tunnel** as edge if self-hosting | Auto-HTTPS, slow-client buffering, static files | [DEPLOYMENT](../Ideation/DEPLOYMENT.md) |
 | D13 | 2026-11-01 | **Prestige matters more than points**: reputation log with tiers; most incentives/penalties are prestige; prestige gates jury duty | Trust is the product; blocks fresh/alt accounts from judging | [DISPUTE_RESOLUTION](../Ideation/DISPUTE_RESOLUTION.md) |
 | D14 | 2026-11-01 | **Disputes v2** (supersedes D6): settlement with split offers → jury sized by reward with required reasons and median result → one appeal (2n+1, double bond) → moderator | Most disputes settle without judges (Fiverr/Upwork); proportional juries + appeals (Kleros); juror quality bar (eBay) | [DISPUTE_RESOLUTION](../Ideation/DISPUTE_RESOLUTION.md) |
+| D15 | 2026-11-01 | **Waves v1.1: prestige head start** on the community wave only (Trusted 10 min, Respected 20, Elder 30) | Makes prestige worth earning; zero extra queries, so no latency or cost; friend waves stay the poster's choice | [WAVE_DISTRIBUTION §3a](../Ideation/WAVE_DISTRIBUTION.md#3a-prestige-head-start-v11-decision-d15) |
+| D16 | 2026-11-01 | **AI assists disputes, never decides** (planned for the next iteration): mediator suggestion in settlement, neutral brief for jurors, triage for moderators | Points and prestige change only by a person's choice (parties, jurors, staff); AI output is advice everyone can see | [DISPUTE_RESOLUTION](../Ideation/DISPUTE_RESOLUTION.md#next-iteration-ai-assistance-planned-not-built) |
 
 To change a locked area, add a new row here explaining what changes and why.
 

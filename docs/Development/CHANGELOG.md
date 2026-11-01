@@ -15,7 +15,8 @@ All notable changes to the LazyOne project are documented in this file.
 - Wave distribution 🔒 v1: adaptive schedule, cached circles, 3.5–4.5× faster feed.
 - Disputes v2: settlement offers with split outcomes, default judgment, jury sized by reward, required vote reasons, median verdict, one appeal, moderator.
 - Prestige: reputation log, tiers, juror eligibility, anti-farming pair cap.
-- `seed_demo`, `LOCAL_DEV.md`, CI on Postgres, 115 tests.
+- Waves v1.1 (D15): prestige head start on the community wave (zero extra queries).
+- `seed_demo`, `LOCAL_DEV.md`, CI on Postgres, 117 tests.
 
 ## [2.0.1] - 2026-10
 ### Changed

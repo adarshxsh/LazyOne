@@ -4,7 +4,9 @@
 
 ## Next
 - [x] Dispute resolution v2 + prestige ([design](../Ideation/DISPUTE_RESOLUTION.md))
-- [ ] Answer the open dispute questions, then lock disputes v2
+- [x] Answer the open dispute questions (prestige head start on waves: D15)
+- [ ] Lock disputes v2
+- [ ] AI dispute assistance behind a kill switch ([plan](../Ideation/DISPUTE_RESOLUTION.md#next-iteration-ai-assistance-planned-not-built), D16)
 - [ ] Show prestige/tier on profiles and the navbar
 - [ ] Fix home graph leaking non-friends' phone numbers ([SECURITY #3](SECURITY.md))
 - [ ] Sybil protection: verification before bonus / jury duty ([SECURITY #2](SECURITY.md))

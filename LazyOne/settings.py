@@ -265,6 +265,8 @@ LAZYONE = {
     'WAVE_DELAYS': [timedelta(0), timedelta(minutes=10), timedelta(minutes=30), timedelta(hours=2)],
     'CLOSENESS_WAVE0': 80,
     'CLOSENESS_WAVE1': 40,
+    # Prestige head start on the community wave only (D15); highest floor first.
+    'PRESTIGE_HEAD_START': [(500, timedelta(minutes=30)), (200, timedelta(minutes=20)), (50, timedelta(minutes=10))],
     'AUTO_APPROVE_AFTER': timedelta(hours=48),
     # Disputes / jury
     # Disputes v2 (docs/Ideation/DISPUTE_RESOLUTION.md)

@@ -1,6 +1,6 @@
 # Dispute Resolution & Prestige
 
-> Status (2026-11-01): **v2 implemented** (115 tests, SQLite + Postgres). Not locked yet - review in use, then lock like [WAVE_DISTRIBUTION.md](WAVE_DISTRIBUTION.md).
+> Status (2026-11-01): **v2 implemented** (117 tests, SQLite + Postgres). Open questions answered; ready to lock like [WAVE_DISTRIBUTION.md](WAVE_DISTRIBUTION.md).
 > Code: [`basic/services/disputes.py`](../../basic/services/disputes.py) · [`basic/services/prestige.py`](../../basic/services/prestige.py) · Tests: [`basic/tests/test_disputes.py`](../../basic/tests/test_disputes.py)
 
 ## Principle: prestige matters more than points
@@ -86,9 +86,40 @@ Disputes and disputed chats: the two parties, the drawn jurors (while active) an
 
 Sources: [Kluwer Arbitration Blog on Kleros](https://arbitrationblog.kluwerarbitration.com/?p=46151) · [Proof of Humanity HIP-17](https://gov.proofofhumanity.id/t/phase-3-hip-17-reduce-number-of-kleros-jurors-drawn-in-first-rounds-of-poh-cases-to-one/969) · [Oxford Business Law Blog](https://blogs.law.ox.ac.uk/oblb/blog-post/2026/09/guessing-really-not-judging-reply-eidenmuller-and-hochgurtel) · [ChannelX: eBay India Community Court](https://channelx.world/2008/10/ebay-india-launch-community-court-for-feedback/) · [Riot: Will Tribunal return](https://nexus.leagueoflegends.com/en-gb/2018/08/will-tribunal-return/) · [Upwork dispute process](https://www.upwork.com/resources/upwork-dispute-process) · [Fiverr Resolution Center](https://help.fiverr.com/hc/en-us/articles/37552897293329-Using-the-Resolution-Center)
 
-## Open questions before locking
+## Decisions on the open questions (2026-11-01)
 
-1. Are 24 h settlement / 48 h voting right for campus life (exams, weekends)?
-2. Should prestige also influence waves (e.g. high-prestige takers see tasks earlier)? Waves are locked v1 - would need a decision entry.
-3. Should prestige decay over time so old reputation doesn't last forever?
-4. Moderator selection: staff only, or "Elder" tier users as volunteer moderators?
+| Question | Decision |
+|----------|----------|
+| Time windows (24 h settle, 48 h vote) | Keep the defaults; all are settings, so tune them after real use |
+| Prestige influencing waves | **Yes, only because it costs nothing**: head start on the community wave ([D15](../Development/DECISIONS.md), [WAVE_DISTRIBUTION §3a](WAVE_DISTRIBUTION.md#3a-prestige-head-start-v11-decision-d15)) |
+| Prestige decay | Not now; revisit with real data |
+| Moderators | Staff only for now; Elder volunteer moderators later |
+
+## Next iteration: AI assistance (planned, not built)
+
+**Rule ([D16](../Development/DECISIONS.md)): AI assists, never decides.** Points and prestige move only because a person chose it: the parties accept an offer, jurors vote, or staff resolve. The AI's text is shown to everyone in the dispute, so nothing is hidden.
+
+| Where | What the AI does | Why it helps |
+|-------|------------------|--------------|
+| Settlement | **Mediator suggestion:** reads the task, timeline and chat, then suggests a split (e.g. "taker 70 %") with a two-line reason. Either side can make it their offer with one tap | Most disputes should end here, with no jury |
+| Jury | **Neutral brief:** timeline, what each side claims, and the evidence, citing message times. Parties appear as "Creator" and "Taker", with no names or prestige | Jurors decide faster and on the same facts |
+| Votes | **Reason check:** flags empty reasons ("ok", "asdf") so the juror rewrites them | Keeps the written-reason rule meaningful |
+| Moderator | **Triage:** marks abusive messages, possible alt accounts and disputes the jury couldn't decide, most urgent first | Staff time goes to the hard cases |
+
+### Guardrails
+- Runs as an **outbox job** after `dispute.opened` / `dispute.jury_drawn`, never inside a web request, so users wait for nothing and an AI outage can't block a dispute.
+- Evidence and chat are **untrusted text**: the prompt treats them as data, and the output is a fixed schema (structured outputs), not free text.
+- Kill switch `AI_ASSIST_ENABLED`; if it's off or the call fails, the dispute works exactly as today.
+- Every brief is stored (model, prompt version, output) for audit and appeals.
+- Jurors also see the raw evidence, not just the summary.
+
+### Cost estimate
+One call reads about 8,000 tokens (task, chat, evidence) and writes about 800. A dispute needs about 3 calls (mediator, jury brief, appeal brief). Prices per million tokens (input / output), Oct 2026:
+
+| Model | Per call | 100 disputes / month |
+|-------|----------|----------------------|
+| Claude Haiku 5.5 ($0.10 / $0.50) | ~$0.001 | ~$0.36 |
+| Claude Sonnet 5.5 ($2 / $10) | ~$0.024 | ~$7 |
+| Claude Opus 5.5 ($4 / $20) | ~$0.048 | ~$14 |
+
+With 1,000 users, 100 disputes a month is a generous guess. Jury briefs aren't urgent, so the Batch API (50 % off) can halve that part. Plan: build behind the kill switch, compare models on past disputes, then choose.

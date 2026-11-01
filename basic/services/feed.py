@@ -15,7 +15,13 @@ the task (opened_at, wave1_at, wave2_at, wave3_at; always non-decreasing).
 
 Feed query: the viewer's circle (who rated them how, and friends-of-friends) is loaded once
 and cached, then a single indexed query keeps tasks whose wave for this viewer has started.
+
+Prestige head start (v1.1, decision D15): Trusted/Respected/Elder viewers see the community
+wave a little earlier. Only the community wave moves (friend waves stay the poster's choice),
+and it only shifts one timestamp in the same query, so it adds no queries and no latency.
 """
+from datetime import timedelta
+
 from django.conf import settings
 from django.core.cache import cache
 from django.db.models import Q
@@ -146,14 +152,24 @@ def _invalidate_circles(sender, instance, **kwargs):
     cache.delete_many([_CIRCLE_KEY.format(uid) for uid in uids])
 
 
+# ---------------------------------------------------------------- prestige head start
+
+def community_head_start(prestige):
+    """How much earlier than wave3_at this viewer sees community-wide tasks (D15)."""
+    for floor, head in _cfg().get('PRESTIGE_HEAD_START', []):
+        if (prestige or 0) >= floor:
+            return head
+    return timedelta(0)
+
+
 # ---------------------------------------------------------------- feeds
 
 YOUNG_SCAN_LIMIT = 500  # newest not-yet-community-wide tasks inspected per request
 
 
-def _visible_for(task, circle, now):
-    """O(1) visibility check against a cached circle."""
-    if task.wave3_at is not None and task.wave3_at <= now:
+def _visible_for(task, circle, now, head=timedelta(0)):
+    """O(1) visibility check against a cached circle (`head` = prestige head start)."""
+    if task.wave3_at is not None and task.wave3_at <= now + head and task.opened_at <= now:
         return True
     wave = circle.get(task.posted_by_id)
     if wave is None:
@@ -177,17 +193,18 @@ def feed_for(user, query=None, limit=20):
         profile, _ = UserProfile.objects.get_or_create(user=user)
     community = profile.get_community()
     circle = viewer_circle(profile)
+    cutoff = now + community_head_start(profile.prestige)  # == now for Newcomers
 
     base = (Task.objects.filter(status=Task.Status.AVAILABLE, community=community)
             .exclude(posted_by=user).select_related('posted_by'))
     if query:
         base = base.filter(Q(title__icontains=query) | Q(description__icontains=query))
 
-    community_wide = list(base.filter(wave3_at__lte=now).order_by('-opened_at')[:limit])
+    community_wide = list(base.filter(wave3_at__lte=cutoff, opened_at__lte=now).order_by('-opened_at')[:limit])
     young_ids = []
     if circle:
         # Scan lightweight tuples; build full objects only for the few that are visible.
-        rows = (base.filter(Q(wave3_at__gt=now) | Q(wave3_at__isnull=True), opened_at__lte=now)
+        rows = (base.filter(Q(wave3_at__gt=cutoff) | Q(wave3_at__isnull=True), opened_at__lte=now)
                 .order_by('-opened_at')
                 .values_list('pk', 'posted_by_id', 'opened_at', 'wave1_at', 'wave2_at')[:YOUNG_SCAN_LIMIT])
         for pk, poster_id, *starts in rows:
@@ -218,7 +235,7 @@ def can_see(user, task):
     profile, _ = UserProfile.objects.get_or_create(user=user)
     if task.community_id != profile.get_community().pk:
         return False
-    return _visible_for(task, viewer_circle(profile), timezone.now())
+    return _visible_for(task, viewer_circle(profile), timezone.now(), community_head_start(profile.prestige))
 
 
 # ---------------------------------------------------------------- notifications

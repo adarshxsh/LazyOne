@@ -5,6 +5,7 @@
 > **🔒 LOCKED - v1 (2026-11-01).** Sections 1–5 and 10 describe the frozen behaviour: implemented, tested
 > (98 tests, SQLite + Postgres) and benchmarked. Changing them needs a new decision entry in
 > [DECISIONS.md](../Development/DECISIONS.md). Sections 6–9 are **future (v2) ideas, not part of the lock**.
+> **v1.1 amendment (D15, 2026-11-01):** prestige head start on the community wave - see §3a.
 
 ## 1. The model
 
@@ -49,6 +50,22 @@ feed = merge(A, B) newest first, LIMIT n
 
 `can_see(user, task)` uses the same O(1) check (used by the API's task detail).
 The cache is cleared for both people **and their friends** on any friendship change (friend-of-friend sets change too).
+
+## 3a. Prestige head start (v1.1, decision D15)
+
+High-prestige viewers see **community-wide** tasks a little before everyone else:
+
+| Viewer tier (prestige) | Sees the community wave |
+|------------------------|-------------------------|
+| Newcomer (< 50) | at `wave3_at` (unchanged) |
+| Trusted (≥ 50) | 10 min early |
+| Respected (≥ 200) | 20 min early |
+| Elder (≥ 500) | 30 min early |
+
+- Only the community wave moves. Friend waves 0–2 stay the poster's choice, and `friends_only` tasks never reach strangers whatever their prestige.
+- Never earlier than `opened_at`. Config: `settings.LAZYONE['PRESTIGE_HEAD_START']`; set it to `[]` to turn it off.
+- **Cost: zero.** The feed already loads the viewer's profile, so the head start only shifts one timestamp (`cutoff = now + head`) in the same indexed query. Measured on the local DB: 3 queries and ~2 ms for both a Newcomer and an Elder.
+- No extra notifications: the head start shows up in the feed, but wave notifications still go only to friend circles.
 
 ## 4. Measured cost and latency
 
