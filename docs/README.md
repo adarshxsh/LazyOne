@@ -13,7 +13,7 @@
 | Dispute resolution v2 + prestige | ✅ built - settlement → jury → appeal; questions answered, ready to lock · AI assist planned (D16) |
 | Push (FCM), sync endpoint, chat safety poll | 📝 designed, not built |
 | Deployment | ⏳ Vercel chosen; code production-ready ([steps](Ideation/DEPLOYMENT.md#deploy-to-vercel-step-by-step)) |
-| Security | ⚠️ code fixed; **owner steps left**: purge git history (real user data), deploy Firestore rules |
+| Security | ✅ code fixed, history purged, Firestore locked · owner: GitHub Support request, notify affected people |
 
 ## Read by purpose
 

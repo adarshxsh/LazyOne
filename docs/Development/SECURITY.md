@@ -21,10 +21,10 @@
 
 | # | Issue | Risk | Fix | Status |
 |---|-------|------|-----|--------|
-| 1 | **`db.sqlite3` with real user data in the public git history** (10 real emails, 2 phone numbers, 2 Instagram handles, password hashes, sessions); on `master`, ~327 branches and 1 fork | Anyone can download it | Purge history (`git filter-repo`), force-push, delete bot branches, GitHub Support for cached refs, ask fork owner, notify affected people | ⛔ needs owner approval |
-| 2 | `firestore.rules` written but **not deployed**; console rules likely permissive. The old app stored profile PII in Firestore `users/` | Anyone with the public config may read/write Firestore **now** | `firebase deploy --only firestore:rules`; delete the old `users/` collection | ⛔ needs owner |
-| 3 | `claim-jules-pr.yml` on `master` interpolates `head_ref` into shell under `pull_request_target` | Script injection with a write token | Delete the workflow on `master` | ⛔ needs owner |
-| 4 | Vercel preview deployments of ~300 bot PRs | Secrets exposed to bot code if shared with previews | Check env-var scopes; close PRs | ⛔ needs owner |
+| 1 | `db.sqlite3` with real user data was in the public git history. **Purged 2026-11-01**: history rewritten on all 6 branches, 321 bot branches deleted (315 PRs closed). **Still reachable:** old blobs by SHA via closed-PR refs/GitHub cache, and the fork `tanuj123744/LazyOne` | Remaining copies downloadable by anyone with the link/fork | GitHub Support "remove sensitive data" request; ask fork owner to delete; notify the affected people | ⏳ owner: GitHub Support + notify |
+| 2 | Firestore was readable/writable by any signed-in Firebase account | - | **Fixed 2026-11-01**: strict `firestore.rules` deployed (verified: signed-in stranger gets 403 on read and write); old data deleted (97 docs); Auth accounts kept | ✅ |
+| 3 | `claim-jules-pr.yml` script injection | - | **Deleted on `master` 2026-11-01** | ✅ |
+| 4 | Vercel preview deployments of bot PRs | Old previews may still be online | Delete old preview deployments in the Vercel dashboard; keep secrets in Production scope only | ⛔ owner |
 | 5 | Old hardcoded secret key in git history | Session forgery if production used it | New `DJANGO_SECRET_KEY` in Vercel (code refuses to start without one) | deploy-time |
 | 6 | Rate limits need a shared cache in production | Per-instance counting on serverless | Set `REDIS_URL` (Upstash free tier) | deploy-time |
 | 7 | Not reviewed yet: chat template realtime code, notification views | Possible authz bugs | Review | open |

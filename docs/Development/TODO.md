@@ -25,8 +25,9 @@
 - [ ] Locust load test at 1,000 users · Redis cache/throttles
 
 ## Needs owner action
-- [ ] **Purge `db.sqlite3` (real user data) from git history** + notify affected people
-- [ ] Deploy `firestore.rules` · delete `claim-jules-pr.yml` · close duplicate bot PRs · unify `master`/`deployment` · push branch
+- [x] Purge `db.sqlite3` from git history · deploy `firestore.rules` · delete `claim-jules-pr.yml` · delete bot branches/PRs · wipe old Firestore data
+- [ ] GitHub Support sensitive-data request · ask fork owner · notify affected people · delete old Vercel previews
+- [ ] Unify `master`/`deployment` · push `arch-v2/phase0`
 
 ## Deployment ([plan](../Ideation/DEPLOYMENT.md))
 - [x] Hosting: Vercel; code production-ready
