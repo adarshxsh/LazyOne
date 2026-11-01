@@ -98,3 +98,17 @@ class OutboxTests(TestCase):
         process_due()
         ev.refresh_from_db()
         self.assertEqual(ev.status, 'pending')
+
+
+class AuthPagesTests(TestCase):
+    def test_logout_redirects_to_login(self):
+        from .base import make_user
+        u = make_user('leaving')
+        self.client.force_login(u)
+        r = self.client.get(reverse('logout'))
+        self.assertRedirects(r, reverse('account_login'), fetch_redirect_response=False)
+        self.assertNotIn('_auth_user_id', self.client.session)
+
+    def test_login_alias_redirects_to_allauth(self):
+        r = self.client.get('/login/?next=/my_tasks/')
+        self.assertRedirects(r, reverse('account_login') + '?next=/my_tasks/', fetch_redirect_response=False)
