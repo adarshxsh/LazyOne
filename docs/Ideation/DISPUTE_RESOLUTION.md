@@ -114,12 +114,26 @@ Sources: [Kluwer Arbitration Blog on Kleros](https://arbitrationblog.kluwerarbit
 - Jurors also see the raw evidence, not just the summary.
 
 ### Cost estimate
-One call reads about 8,000 tokens (task, chat, evidence) and writes about 800. A dispute needs about 3 calls (mediator, jury brief, appeal brief). Prices per million tokens (input / output), Oct 2026:
+One call reads about 8,000 tokens (task, chat, evidence) and writes about 800. A dispute needs about 3 calls (mediator, jury brief, appeal brief), so 100 disputes a month is about 300 calls. Prices are per million tokens (input / output), from public price lists in late Oct 2026; sources disagree on some models, so check the providers' pricing pages before choosing.
 
-| Model | Per call | 100 disputes / month |
-|-------|----------|----------------------|
-| Claude Haiku 5.5 ($0.10 / $0.50) | ~$0.001 | ~$0.36 |
-| Claude Sonnet 5.5 ($2 / $10) | ~$0.024 | ~$7 |
-| Claude Opus 5.5 ($4 / $20) | ~$0.048 | ~$14 |
+| Provider | Model (tier) | Price in / out | Per call | 100 disputes / month |
+|----------|--------------|----------------|----------|----------------------|
+| Anthropic | Claude Haiku 5.5 (budget) | $0.10 / $0.50 | ~$0.001 | ~$0.36 |
+| Anthropic | Claude Sonnet 5.5 (mid) | $2 / $10 | ~$0.024 | ~$7 |
+| Anthropic | Claude Opus 5.5 (top) | $4 / $20 | ~$0.048 | ~$14 |
+| OpenAI | GPT-6 Luna (budget) | $0.10 / $0.50 | ~$0.001 | ~$0.36 |
+| OpenAI | GPT-6.1 Terra (mid) | $1 / $5 | ~$0.012 | ~$3.60 |
+| OpenAI | GPT-6.1 Sol (mid-high) | $2 / $10 | ~$0.024 | ~$7 |
+| OpenAI | GPT-6 Astra (top) | $10 / $50 | ~$0.12 | ~$36 |
+| Google | Gemini 2.5 Flash-Lite (budget) | $0.10 / $0.40 | ~$0.001 | ~$0.34 |
+| Google | Gemini 3.8 Flash (mid) | $0.75 / $3.75 (intro; $1.50 / $7.50 from Jan 2027) | ~$0.009 | ~$2.70 (then ~$5.40) |
+| Google | Gemini 3.1 Pro (top) | $2 / $12 | ~$0.026 | ~$7.70 |
 
-With 1,000 users, 100 disputes a month is a generous guess. Jury briefs aren't urgent, so the Batch API (50 % off) can halve that part. Plan: build behind the kill switch, compare models on past disputes, then choose.
+Notes:
+- **Thinking tokens are billed as output** on all three providers. A model that reasons at length can write 2–5× the 800 output tokens assumed here, so mid- and top-tier costs may be 2–3× higher in practice. Measure with real disputes.
+- All three offer **batch processing at about half price** and **cached input at about 90 % off**. That applies to jury briefs, which aren't urgent.
+- **Choose on quality, not price:** even the top tier costs less than a meal a month at this volume. `ai_assist` should hide the provider behind one interface, so switching is a setting.
+
+Sources: [Claude pricing (claude-api reference, Oct 2026)](https://platform.claude.com/docs/en/about-claude/pricing) · [CloudZero: OpenAI pricing](https://www.cloudzero.com/blog/openai-pricing/) · [OpenAI ChatGPT rate card](https://help.openai.com/en/articles/20001415-chatgpt-rate-card-enterprise-token-based-pricing) · [Puter: OpenAI API pricing](https://developer.puter.com/tutorials/openai-api-pricing/) · [MorphLLM: Gemini API pricing](https://www.morphllm.com/gemini-api-pricing) · [CloudZero: Gemini pricing](https://www.cloudzero.com/blog/gemini-pricing/) · [MaxiMem: Gemini rate changes](https://www.maximem.ai/blog/gemini-api-pricing-2026)
+
+With 1,000 users, 100 disputes a month is a generous guess. Plan: build behind the kill switch, compare models from each provider on past disputes, then choose.
